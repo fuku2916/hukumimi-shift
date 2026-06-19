@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>シフト管理 v68</title>
+<title>シフト管理 v69</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -46,7 +46,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v68';
+const APP_VERSION = 'v69';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── 診療枠カラーパレット ──
@@ -1480,7 +1480,7 @@ function App(){
   const [eid,setEid]=useState(null);
   const [ef,setEf]=useState({});
   const [showAdd,setShowAdd]=useState(false);
-  const [addF,setAddF]=useState({name:'',cond:defaultCond(),memo:'',color:COLORS[0],pin:'',workType:'normal'});
+  const [addF,setAddF]=useState({name:'',cond:defaultCond(),memo:'',color:COLORS[0],pin:'',workType:'normal',code:'',fullName:''});
   const [nid,setNid]=useState(()=>saved?.staff?Math.max(...saved.staff.map(s=>s.id),9)+1:10);
   const [aLoad,setALoad]=useState(false);
   const [aRes,setARes]=useState(null);
@@ -2378,10 +2378,11 @@ ${bodyHtml}
     const newId=nid;
     const cond=addF.cond||defaultCond();
     const notes=condToNotes(cond);
-    setStaff(p=>[...p,{id:newId,name:addF.name.trim(),color:addF.color,notes,cond,memo:addF.memo||'',pin:addF.pin||'',workType:addF.workType||'normal',code:'',fullName:''}]);
+    const _ac=(addF.code||'').replace(/\D/g,'');
+    setStaff(p=>[...p,{id:newId,name:addF.name.trim(),color:addF.color,notes,cond,memo:addF.memo||'',pin:addF.pin||'',workType:addF.workType||'normal',code:_ac?_ac.padStart(7,'0'):'',fullName:(addF.fullName||'').trim()}]);
     setPaidLeave(prev=>({...prev,[newId]:{granted:0,history:[]}}));
     setNid(n=>n+1);
-    setAddF({name:'',cond:defaultCond(),memo:'',color:COLORS[nid%COLORS.length],pin:'',workType:'normal'});
+    setAddF({name:'',cond:defaultCond(),memo:'',color:COLORS[nid%COLORS.length],pin:'',workType:'normal',code:'',fullName:''});
     setShowAdd(false);
   }
   function sEdit(s){
@@ -4743,6 +4744,13 @@ ${bodyHtml}
               <div style={{marginBottom:8}}><label style={{fontSize:11,color:K.textS,display:'block',marginBottom:4}}>カラー</label><div style={{display:'flex',gap:7}}>{COLORS.map(c=><button key={c} onClick={()=>setAddF({...addF,color:c})} style={{width:20,height:20,borderRadius:'50%',background:c,cursor:'pointer',border:addF.color===c?'2px solid #1E293B':'2px solid transparent'}}/>)}</div></div>
               <div style={{marginBottom:10}}><label style={{fontSize:11,color:K.textS,display:'block',marginBottom:3}}>勤務条件（入力式）</label><CondEditor cond={addF.cond} onCond={c=>setAddF({...addF,cond:c})} memo={addF.memo} onMemo={mm=>setAddF({...addF,memo:mm})}/></div>
               <div style={{marginBottom:10}}><label style={{fontSize:11,color:K.textS,display:'block',marginBottom:3}}>🔐 ポータル暗証番号（4桁）</label><input type="text" inputMode="numeric" maxLength={4} value={addF.pin||''} onChange={e=>setAddF({...addF,pin:e.target.value.replace(/[^0-9]/g,'').slice(0,4)})} placeholder="0000〜9999" style={{padding:'5px 9px',border:K.bd,borderRadius:K.rmd,fontSize:14,width:120,background:K.bg,color:K.text,letterSpacing:'0.15em',fontWeight:600}}/></div>
+              <div style={{marginBottom:10,padding:'8px 10px',background:'#F8FAFC',border:K.bd,borderRadius:K.rmd}}>
+                <div style={{fontSize:11,fontWeight:600,color:K.textS,marginBottom:6}}>💴 給与連携（タイムカード/給与名簿と一致させる）</div>
+                <label style={{fontSize:11,color:K.textS,display:'block',marginBottom:4}}>給与スタッフコード（7桁・保存時に自動ゼロ埋め）</label>
+                <input type="text" inputMode="numeric" maxLength={7} value={addF.code||''} onChange={e=>setAddF({...addF,code:e.target.value.replace(/[^0-9]/g,'').slice(0,7)})} placeholder="例: 0001234" style={{padding:'5px 9px',border:K.bd2,borderRadius:K.rmd,fontSize:14,width:140,background:K.bg,color:K.text,letterSpacing:'0.12em',fontWeight:600,marginBottom:8}}/>
+                <label style={{fontSize:11,color:K.textS,display:'block',marginBottom:4}}>氏名フルネーム（照合用・名簿と完全一致）</label>
+                <input type="text" value={addF.fullName||''} onChange={e=>setAddF({...addF,fullName:e.target.value})} placeholder="例: 小島 太郎" style={{padding:'5px 9px',border:K.bd2,borderRadius:K.rmd,fontSize:13,width:'100%',boxSizing:'border-box',background:K.bg,color:K.text}}/>
+              </div>
               <button onClick={doAdd} style={{padding:'6px 18px',background:K.bgI,color:K.textI,border:K.bdI,borderRadius:K.rmd,cursor:'pointer',fontSize:13,fontWeight:500}}>追加する</button>
             </div>
           )}
