@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>シフト管理 v67</title>
+<title>シフト管理 v68</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -46,7 +46,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v67';
+const APP_VERSION = 'v68';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── 診療枠カラーパレット ──
@@ -867,13 +867,16 @@ const SB={
     }catch(e){return {ok:false,error:'通信に失敗しました'};}
   },
   signOut(){ SB_ACCESS_TOKEN=''; try{localStorage.removeItem(PASS_KEY);}catch(e){} },
+  // 既存の「main」行をそのまま使い、その中を職種(clerk/nurse/doctor)ごとに小分けして保存。
+  // 新しい行を作らないので、クラウド側の権限設定（行作成の許可）が不要。
   async get(table){
     for(let a=0;a<2;a++){
       try{
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${ROW_ID}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.main&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
         if(r.status===401&&a===0&&await sbReauth())continue;
         if(!r.ok)return null;
-        const d=await r.json(); return d[0]?.data||null;
+        const d=await r.json(); const all=d[0]?.data; const u=APP_UNIT||'main';
+        return (all&&typeof all==='object'&&Object.prototype.hasOwnProperty.call(all,u))?all[u]:null;
       }catch(e){return null;}
     }
     return null;
@@ -882,21 +885,30 @@ const SB={
   async getSafe(table){
     for(let a=0;a<2;a++){
       try{
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${ROW_ID}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.main&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
         if(r.status===401&&a===0&&await sbReauth())continue;
         if(!r.ok)return {ok:false,data:null};
-        const d=await r.json(); return {ok:true,data:d[0]?.data||null};
+        const d=await r.json(); const all=d[0]?.data; const u=APP_UNIT||'main';
+        return {ok:true,data:(all&&typeof all==='object'&&Object.prototype.hasOwnProperty.call(all,u))?all[u]:null};
       }catch(e){return {ok:false,data:null};}
     }
     return {ok:false,data:null};
   },
   async set(table,data){
+    const u=APP_UNIT||'main';
     for(let a=0;a<2;a++){
       try{
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}`,{
-          method:'POST', // upsert: 行が無ければ作成・あれば更新（クラーク/ナースで別の行に保存）
-          headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer(),'Content-Type':'application/json','Prefer':'resolution=merge-duplicates,return=minimal'},
-          body:JSON.stringify({id:ROW_ID,data,updated_at:new Date().toISOString()})
+        // 既存のmain行を読み、他職種の小分け(clerk/nurse/doctor)を保ったまま、自分の職種ぶんだけ更新
+        let all={};
+        try{
+          const cur=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.main&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+          if(cur.ok){const j=await cur.json();const ex=j[0]?.data;if(ex&&typeof ex==='object'){['clerk','nurse','doctor'].forEach(k=>{if(ex[k]!==undefined)all[k]=ex[k];});}}
+        }catch(_){}
+        all[u]=data;
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.main`,{
+          method:'PATCH',
+          headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer(),'Content-Type':'application/json','Prefer':'return=minimal'},
+          body:JSON.stringify({data:all,updated_at:new Date().toISOString()})
         });
         if(r.status===401&&a===0&&await sbReauth())continue;
         return r.ok;
