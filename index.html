@@ -46,7 +46,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v75';
+const APP_VERSION = 'v76';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── 診療枠カラーパレット ──
@@ -1390,7 +1390,11 @@ function App(){
         setPaidLeave(sd.paidLeave||{});
       }
       const rd=await SB.get('requests_data');
-      if(rd){const _u=unwrapReq(rd);setRequests(_u.requests);setAvatars(_u.avatars);setCorrections(_u.corrections);}
+      if(rd){const _u=unwrapReq(rd);setRequests(_u.requests);
+        // 申告直後でクラウド反映前のものを消さないようマージ
+        setAvatars(prev=>mergeAvatars(prev,_u.avatars));
+        setCorrections(prev=>mergeCorrections(prev,_u.corrections));
+      }
     },10000);
     return()=>clearInterval(id);
   },[appMode]);
@@ -4182,10 +4186,11 @@ ${bodyHtml}
                     }} style={{padding:'9px 18px',border:'none',borderRadius:8,background:'#185FA5',color:'#fff',fontSize:14,fontWeight:700,cursor:'pointer'}}>申告する</button>
                   </div>
                 </div>
-                {myCorr.length>0&&(
-                  <div style={{marginTop:14}}>
-                    <div style={{fontSize:12,fontWeight:700,color:'#334155',marginBottom:6}}>申告した修正</div>
-                    <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                <div style={{marginTop:14}}>
+                  <div style={{fontSize:12,fontWeight:700,color:'#334155',marginBottom:6}}>申告した修正</div>
+                  {myCorr.length===0
+                    ?<div style={{fontSize:11,color:'#94A3B8',padding:'6px 2px'}}>まだ申告はありません。上のフォームから申告すると、ここに一覧で表示されます。</div>
+                    :<div style={{display:'flex',flexDirection:'column',gap:6}}>
                       {myCorr.map((c,i)=>(
                         <div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',background:'#F8FAFC',border:'1px solid #E2E8F0',borderRadius:8,fontSize:12}}>
                           <span style={{fontWeight:700,color:'#185FA5'}}>{c.date}</span>
@@ -4193,9 +4198,8 @@ ${bodyHtml}
                           <span style={{marginLeft:'auto',fontWeight:700,color:stColor[c.status]||'#64748B'}}>{stLabel[c.status]||c.status}</span>
                         </div>
                       ))}
-                    </div>
-                  </div>
-                )}
+                    </div>}
+                </div>
                 </>}
             </div>
           </div>
