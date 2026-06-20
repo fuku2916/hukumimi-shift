@@ -46,7 +46,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v71';
+const APP_VERSION = 'v72';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── 診療枠カラーパレット ──
@@ -4014,21 +4014,39 @@ ${bodyHtml}
                     <div style={{fontSize:11,marginTop:3}}>タイムカードで打刻し、管理者がクラウドに保存すると表示されます</div>
                   </div>
                 );
+                const hm2min=s=>{const m=/^(\d{1,2}):(\d{2})$/.exec(s||'');return m?(+m[1])*60+(+m[2]):null;};
+                const breakMin=w=>w>480?60:w>360?45:0; // 8時間超→60分, 6時間超→45分, 6時間以内→0
+                const fmtHM=mn=>Math.floor(mn/60)+'時間'+String(mn%60).padStart(2,'0')+'分';
+                let totalWork=0,workDays=0;
                 return(
+                  <>
                   <div style={{display:'flex',flexDirection:'column',gap:6}}>
                     {days.map(dk=>{
                       const p=punch[dk]||{};const d=new Date(dk);
+                      const im=hm2min(p.in),om=hm2min(p.out);
+                      let work=null,br=0;
+                      if(im!=null&&om!=null&&om>im){br=breakMin(om-im);work=(om-im)-br;totalWork+=work;workDays++;}
                       return(
-                        <div key={dk} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 12px',background:'#F8FAFC',border:'1px solid #E2E8F0',borderRadius:8}}>
+                        <div key={dk} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 12px',background:'#F8FAFC',border:'1px solid #E2E8F0',borderRadius:8,flexWrap:'wrap'}}>
                           <div style={{fontWeight:700,fontSize:13,color:'#185FA5',minWidth:84,whiteSpace:'nowrap'}}>{d.getMonth()+1}/{d.getDate()}({DAY_JP[d.getDay()]})</div>
-                          <div style={{flex:1,display:'flex',gap:16,fontSize:13}}>
+                          <div style={{display:'flex',gap:14,fontSize:13}}>
                             <span style={{color:'#64748B'}}>出 <strong style={{color:'#1E293B'}}>{p.in||'—'}</strong></span>
                             <span style={{color:'#64748B'}}>退 <strong style={{color:'#1E293B'}}>{p.out||'—'}</strong></span>
+                          </div>
+                          <div style={{marginLeft:'auto',display:'flex',alignItems:'baseline',gap:7}}>
+                            {work!=null
+                              ?<><span style={{fontSize:13,fontWeight:700,color:'#166534'}}>実働 {fmtHM(work)}</span><span style={{fontSize:10,color:'#94A3B8'}}>休憩{br}分</span></>
+                              :<span style={{fontSize:13,color:'#94A3B8'}}>実働 —</span>}
                           </div>
                         </div>
                       );
                     })}
                   </div>
+                  <div style={{marginTop:10,display:'flex',alignItems:'center',justifyContent:'flex-end',gap:10,padding:'9px 13px',background:'#F0FDF4',border:'1px solid #86EFAC',borderRadius:8}}>
+                    <span style={{fontSize:12,color:'#166534'}}>実働合計（{workDays}日）</span>
+                    <span style={{fontSize:16,fontWeight:700,color:'#166534'}}>{fmtHM(totalWork)}</span>
+                  </div>
+                  </>
                 );
               })()}
             </div>
