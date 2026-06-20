@@ -46,7 +46,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v69';
+const APP_VERSION = 'v71';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── 診療枠カラーパレット ──
@@ -894,6 +894,18 @@ const SB={
     }
     return {ok:false,data:null};
   },
+  // 行(main)の data 全体をそのまま返す（職種の小分けをしない）。timecard_data 用。
+  async getFull(table){
+    for(let a=0;a<2;a++){
+      try{
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.main&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        if(r.status===401&&a===0&&await sbReauth())continue;
+        if(!r.ok)return null;
+        const d=await r.json(); return d[0]?.data||null;
+      }catch(e){return null;}
+    }
+    return null;
+  },
   async set(table,data){
     const u=APP_UNIT||'main';
     for(let a=0;a<2;a++){
@@ -1227,6 +1239,8 @@ function CondEditor({cond,onCond,memo,onMemo}){
 // ================================================================
 function App(){
   const saved=useMemo(()=>loadLS(),[]);
+  // 「手元の最新の作成日時」を常に保持するref。クラウド読込の競合判定で、起動時固定の saved ではなくこれを使う（未公開の編集が消える不具合の対策）。
+  const shiftTsRef=React.useRef(saved?.shiftUpdatedAt||'');
   // ── アプリモード ──
   const [appMode,setAppMode]=useState('select'); // 'select'|'admin'|'staff'
   const [sbLoading,setSbLoading]=useState(false);
@@ -1269,7 +1283,8 @@ function App(){
         }
         const sd=sdR.data, rd=rdR.data;
         // 競合ガード：手元(localStorage)の方が新しい未公開の編集があれば、クラウドの古い版で上書きしない
-        const localTs=saved?.shiftUpdatedAt||'';
+        // ※ 起動時固定の saved ではなく、編集で更新される shiftTsRef を基準にする（未公開編集の消失対策）
+        const localTs=shiftTsRef.current||saved?.shiftUpdatedAt||'';
         const cloudTs=(sd&&sd.shiftUpdatedAt)||'';
         const cloudWins = !localTs || (cloudTs && cloudTs>=localTs);
         if(sd&&Object.keys(sd).length>0 && cloudWins){
@@ -1542,6 +1557,9 @@ function App(){
     setShiftUpdatedAt(new Date().toISOString());
   // eslint-disable-next-line
   },[asgn,tmps,manualExclusions,slots,weeklyReq,monthlyReq,baseShift,manualClosedDays,paidLeave,staff,newSlotCounter]);
+
+  // shiftUpdatedAt が変わるたび ref を更新（クラウド競合判定が常に最新の手元日時を見るように）
+  useEffect(()=>{shiftTsRef.current=shiftUpdatedAt;},[shiftUpdatedAt]);
 
   // ── 自動保存 ──
   // ローカル自動保存
@@ -3408,6 +3426,23 @@ ${bodyHtml}
 
   // ── スタッフモード用ヘルパー ──
   const staffMe=useMemo(()=>staff.find(s=>s.id===staffMyId),[staff,staffMyId]);
+  // ── 勤務状況（タイムカード打刻）の取得 ──
+  const [tcState,setTcState]=useState({loading:false,err:'',rec:null,at:''});
+  useEffect(()=>{
+    if(appMode!=='staff'||staffTab!=='timecard')return;
+    const code=staffMe?.code||'';
+    if(!code){setTcState({loading:false,err:'nocode',rec:null,at:''});return;}
+    let alive=true;
+    setTcState(s=>({...s,loading:true,err:''}));
+    (async()=>{
+      const all=await SB.getFull('timecard_data');
+      if(!alive)return;
+      if(all===null){setTcState({loading:false,err:'conn',rec:null,at:''});return;}
+      const rec=(all.staff&&all.staff[code])||null;
+      setTcState({loading:false,err:'',rec,at:all.updatedAt||''});
+    })();
+    return()=>{alive=false;};
+  },[appMode,staffTab,staffMyId]);
   const staffDates=useMemo(()=>getWorkDates(staffY,staffM),[staffY,staffM]);
   const staffHolidays=useMemo(()=>getJapaneseHolidays(staffY),[staffY]);
   const staffMyPL=useMemo(()=>paidLeave[staffMyId]||{granted:0,history:[]},[paidLeave,staffMyId]);
@@ -3736,7 +3771,7 @@ ${bodyHtml}
           <span style={{width:9,height:9,borderRadius:'50%',background:staffMe?.color||'#7C3AED',flexShrink:0,marginRight:6}}/>
           <span style={{fontWeight:700,fontSize:14,marginRight:16,whiteSpace:'nowrap'}}>{staffMe?.name}</span>
           {/* タブ */}
-          {[{id:'shift',label:'📅 シフト表'},{id:'requests',label:'📋 申請一覧'+(staffReqCount>0?' ('+staffReqCount+')':'')}].map(t=>(
+          {[{id:'shift',label:'📅 シフト表'},{id:'requests',label:'📋 申請一覧'+(staffReqCount>0?' ('+staffReqCount+')':'')},{id:'timecard',label:'⏱ 勤務状況'}].map(t=>(
             <button key={t.id} onClick={()=>setStaffTab(t.id)}
               style={{padding:'12px 14px',border:'none',background:'none',cursor:'pointer',fontSize:13,
                 fontWeight:staffTab===t.id?600:400,color:staffTab===t.id?'#185FA5':'#64748B',
@@ -3951,6 +3986,54 @@ ${bodyHtml}
             <div style={{background:'#EBF4FF',border:'1px solid #93C5FD',borderRadius:12,padding:12}}>
               <div style={{fontWeight:600,fontSize:12,color:'#185FA5',marginBottom:6}}>✅ 申請は自動で管理者に反映されます</div>
               <div style={{fontSize:11,color:'#1E3A5F',lineHeight:1.8}}>申請した内容は即座に保存され、管理者がシフト管理画面を開くと自動的に読み込まれます。紙への記入やファイルの受け渡しは不要です。</div>
+            </div>
+          </div>
+        )}
+        {/* 勤務状況タブ（タイムカード打刻の確認） */}
+        {staffTab==='timecard'&&(
+          <div style={{padding:14,maxWidth:540}}>
+            <div style={{background:'#fff',border:'1px solid #E2E8F0',borderRadius:12,padding:14,marginBottom:14}}>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12}}>
+                <div style={{fontWeight:700,fontSize:14}}>⏱ 勤務状況の確認</div>
+                {tcState.at&&<span style={{marginLeft:'auto',fontSize:10,color:'#64748B'}}>更新: {fmtStamp(tcState.at)}</span>}
+              </div>
+              {tcState.loading?(
+                <div style={{textAlign:'center',padding:'24px 0',color:'#64748B',fontSize:13}}>🔄 読み込み中…</div>
+              ):tcState.err==='nocode'?(
+                <div style={{fontSize:12,color:'#9A3412',background:'#FFF7ED',border:'1px solid #FDBA74',borderRadius:8,padding:'12px 14px',lineHeight:1.7}}>給与スタッフコードが未設定のため、タイムカードと連携できません。管理者にコードの登録をご依頼ください。</div>
+              ):tcState.err==='conn'?(
+                <div style={{fontSize:12,color:'#991B1B',background:'#FEF2F2',border:'1px solid #FCA5A5',borderRadius:8,padding:'12px 14px',lineHeight:1.7}}>⚠ クラウドに接続できませんでした。通信状況をご確認のうえ、もう一度開いてください。</div>
+              ):(()=>{
+                const rec=tcState.rec;
+                const punch=(rec&&rec.punch)?rec.punch:{};
+                const days=Object.keys(punch).sort((a,b)=>a<b?1:-1);
+                if(!rec||days.length===0)return(
+                  <div style={{textAlign:'center',padding:'24px 0',color:'#64748B',fontSize:13}}>
+                    <div style={{fontSize:24,marginBottom:6}}>⏱</div>
+                    <div>打刻データはまだありません</div>
+                    <div style={{fontSize:11,marginTop:3}}>タイムカードで打刻し、管理者がクラウドに保存すると表示されます</div>
+                  </div>
+                );
+                return(
+                  <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                    {days.map(dk=>{
+                      const p=punch[dk]||{};const d=new Date(dk);
+                      return(
+                        <div key={dk} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 12px',background:'#F8FAFC',border:'1px solid #E2E8F0',borderRadius:8}}>
+                          <div style={{fontWeight:700,fontSize:13,color:'#185FA5',minWidth:84,whiteSpace:'nowrap'}}>{d.getMonth()+1}/{d.getDate()}({DAY_JP[d.getDay()]})</div>
+                          <div style={{flex:1,display:'flex',gap:16,fontSize:13}}>
+                            <span style={{color:'#64748B'}}>出 <strong style={{color:'#1E293B'}}>{p.in||'—'}</strong></span>
+                            <span style={{color:'#64748B'}}>退 <strong style={{color:'#1E293B'}}>{p.out||'—'}</strong></span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+            <div style={{background:'#EBF4FF',border:'1px solid #93C5FD',borderRadius:12,padding:12}}>
+              <div style={{fontSize:11,color:'#1E3A5F',lineHeight:1.8}}>ここには、タイムカードで打刻したあなた自身の記録が表示されます。表示されない場合は、管理者がタイムカードのデータをクラウドに保存したあと、もう一度このタブを開いてください。</div>
             </div>
           </div>
         )}
