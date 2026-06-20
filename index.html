@@ -46,7 +46,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v74';
+const APP_VERSION = 'v75';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── 診療枠カラーパレット ──
@@ -959,6 +959,33 @@ function mergeRequests(local,cloud,tomb){
   return out;
 }
 
+// ── requests_data の「包み(wrapper)」ユーティリティ ──
+// requests_data の各職種の値を {requests(日付マップ), avatars(codeごと), timecardCorrections(配列)} にまとめる。
+// 旧形式（値が日付マップそのもの）も読めるよう後方互換。
+function unwrapReq(d){
+  if(!d||typeof d!=='object')return {requests:{},avatars:{},corrections:[]};
+  const wrapped=('requests'in d)||('avatars'in d)||('timecardCorrections'in d);
+  if(wrapped)return {
+    requests:(d.requests&&typeof d.requests==='object')?d.requests:{},
+    avatars:(d.avatars&&typeof d.avatars==='object')?d.avatars:{},
+    corrections:Array.isArray(d.timecardCorrections)?d.timecardCorrections:[]
+  };
+  return {requests:d,avatars:{},corrections:[]}; // 旧：全体が日付マップ
+}
+function wrapReq(requests,avatars,corrections){
+  return {requests:requests||{},avatars:avatars||{},timecardCorrections:corrections||[]};
+}
+// avatars: 自分のkeyはlocal優先、それ以外はcloudを残す
+function mergeAvatars(local,cloud){ return {...(cloud||{}),...(local||{})}; }
+// corrections: cloudを基準（タイムカードが更新したstatusを保つ）に、localの新規だけ追加
+function corrKey(c){ return String(c.code)+'|'+String(c.date)+'|'+String(c.appliedAt||''); }
+function mergeCorrections(local,cloud){
+  const out=[...(Array.isArray(cloud)?cloud:[])]; const seen={};
+  out.forEach(c=>{seen[corrKey(c)]=1;});
+  (Array.isArray(local)?local:[]).forEach(c=>{const k=corrKey(c);if(!seen[k]){seen[k]=1;out.push(c);}});
+  return out;
+}
+
 // ── 有給ユーティリティ ──
 // paidLeave構造: { staffId: { granted: number, history: [{dk, unit:'full'|'am'|'pm', note, appliedAt}] } }
 function calcUsedDays(history){
@@ -1306,7 +1333,7 @@ function App(){
         }
         // 手元が新しい場合は、その手元の版を「未公開」として扱う（クラウドより新しい）
         if(sd&&!cloudWins){setPublishedAt(cloudTs);}
-        if(rd)setRequests(rd);
+        if(rd){const _u=unwrapReq(rd);setRequests(_u.requests);setAvatars(_u.avatars);setCorrections(_u.corrections);}
         sbReadyRef.current=true; // クラウド読み込み成功 → これ以降のみ自動保存を許可
         setSbStatus('ok');
       }catch(e){setSbStatus('error');}
@@ -1338,7 +1365,7 @@ function App(){
           if(sd.manualExclusions)setManualExclusions(sd.manualExclusions);
           if(sd.y)setY(sd.y);if(sd.m)setM(sd.m);
         }
-        if(rd)setRequests(rd);
+        if(rd){const _u=unwrapReq(rd);setRequests(_u.requests);setAvatars(_u.avatars);setCorrections(_u.corrections);}
         sbReadyRef.current=true; // クラウド読み込み成功 → これ以降のみ自動保存を許可
         setSbStatus('ok');
       }catch(e){setSbStatus('error');}
@@ -1349,7 +1376,7 @@ function App(){
   // スタッフモード：requestsが変わったらSupabaseに即保存
   React.useEffect(()=>{
     if(appMode!=='staff'||!SB_ENABLED||!sbReadyRef.current)return;
-    (async()=>{const cloud=await SB.get('requests_data');SB.set('requests_data',mergeRequests(requests,cloud,reqTomb.current));})();
+    (async()=>{const cloud=await SB.get('requests_data');const _c=unwrapReq(cloud);SB.set('requests_data',wrapReq(mergeRequests(requests,_c.requests,reqTomb.current),mergeAvatars(avatarsRef.current,_c.avatars),mergeCorrections(correctionsRef.current,_c.corrections)));})();
   },[requests,appMode]);
 
   // ポーリング（スタッフモード：10秒ごとにシフト更新を確認）
@@ -1363,7 +1390,7 @@ function App(){
         setPaidLeave(sd.paidLeave||{});
       }
       const rd=await SB.get('requests_data');
-      if(rd)setRequests(rd);
+      if(rd){const _u=unwrapReq(rd);setRequests(_u.requests);setAvatars(_u.avatars);setCorrections(_u.corrections);}
     },10000);
     return()=>clearInterval(id);
   },[appMode]);
@@ -1387,12 +1414,20 @@ function App(){
   const [staffMyId,setStaffMyId]=useState(null);
   const [helpTarget,setHelpTarget]=useState(null); // ⚠不足コマからの「挙手」対象 {dk,slotId,slotLabel,mo,day,dow}
   const [staffTab,setStaffTab]=useState('shift');
+  const [avDraft,setAvDraft]=useState(null);   // アイコン設定の下書き {color,icon}
+  const [corrDraft,setCorrDraft]=useState({date:'',newIn:'',newOut:'',reason:''}); // 打刻修正の下書き
   const [staffReqDk,setStaffReqDk]=useState(null);
   const [pinTarget,setPinTarget]=useState(null); // {mode:'login'|'request'|'cancel', dk?, type?}
   const [staffY,setStaffY]=useState(new Date().getFullYear());
   const [staffM,setStaffM]=useState(new Date().getMonth()+1);
   // 申請データはlocalStorageから読み書き（管理者モードと共有）
   const [requests,setRequests]=useState(()=>loadRequests());
+  // スタッフのアイコン設定（codeごと）と打刻修正の申告（配列）。requests_data の包みに同居。
+  const [avatars,setAvatars]=useState({});
+  const [corrections,setCorrections]=useState([]);
+  const avatarsRef=React.useRef({}); const correctionsRef=React.useRef([]);
+  useEffect(()=>{avatarsRef.current=avatars;},[avatars]);
+  useEffect(()=>{correctionsRef.current=corrections;},[corrections]);
   // 削除した申請の墓標（クラウドのマージ保存で復活させないため。2分間有効）
   const reqTomb=React.useRef({});
   const markReqDeleted=(dk,key)=>{reqTomb.current[dk+'|'+String(key)]=Date.now()+120000;};
@@ -1408,18 +1443,24 @@ function App(){
     if(appMode!=='admin')return;
     const id=setInterval(async()=>{
       if(Date.now()-lastReqEditRef.current<6000)return; // 直近の編集(承認/却下等)が保存され切るまで上書きしない
-      let latest;
+      let raw;
       if(SB_ENABLED){
-        latest=await SB.get('requests_data');
-        if(latest==null)return; // 取得失敗時は既存データを維持
+        raw=await SB.get('requests_data');
+        if(raw==null)return; // 取得失敗時は既存データを維持
       }else{
-        latest=loadRequests();
+        raw=loadRequests();
       }
       if(Date.now()-lastReqEditRef.current<6000)return; // 取得中に編集が入った場合も上書きしない
+      const _u=unwrapReq(raw);
+      const latest=_u.requests;
       setRequests(prev=>{
         if(JSON.stringify(prev)===JSON.stringify(latest))return prev;
         return latest;
       });
+      if(SB_ENABLED){
+        setAvatars(prev=>JSON.stringify(prev)===JSON.stringify(_u.avatars)?prev:_u.avatars);
+        setCorrections(prev=>JSON.stringify(prev)===JSON.stringify(_u.corrections)?prev:_u.corrections);
+      }
     },3000);
     return()=>clearInterval(id);
   },[appMode]);
@@ -1628,8 +1669,8 @@ function App(){
     if(!SB_ENABLED||!sbReadyRef.current)return; // クラウド読込成功後のみ保存
     if(sbReqSaveTimer.current)clearTimeout(sbReqSaveTimer.current);
     sbReqSaveTimer.current=setTimeout(async()=>{
-      const cloud=await SB.get('requests_data');
-      await SB.set('requests_data',mergeRequests(requests,cloud,reqTomb.current));
+      const cloud=await SB.get('requests_data');const _c=unwrapReq(cloud);
+      await SB.set('requests_data',wrapReq(mergeRequests(requests,_c.requests,reqTomb.current),mergeAvatars(avatarsRef.current,_c.avatars),mergeCorrections(correctionsRef.current,_c.corrections)));
     },1000);
   },[requests]);
 
@@ -3443,6 +3484,28 @@ ${bodyHtml}
     })();
     return()=>{alive=false;};
   },[appMode,staffTab,staffMyId]);
+  // ── アイコン設定／打刻修正の申告（クラウドの requests_data 包みに保存）──
+  async function saveMyAvatar(av){
+    const code=staffMe?.code||''; if(!code){alert('給与スタッフコードが未設定です。管理者に登録をご依頼ください。');return;}
+    setAvatars(prev=>({...prev,[code]:av}));
+    if(SB_ENABLED){
+      const raw=await SB.get('requests_data'); const u=unwrapReq(raw);
+      u.avatars[code]=av;
+      await SB.set('requests_data',wrapReq(u.requests,u.avatars,u.corrections));
+    }
+    alert('アイコンを保存しました。');
+  }
+  async function submitCorrection(c){
+    const code=staffMe?.code||''; if(!code){alert('給与スタッフコードが未設定です。管理者に登録をご依頼ください。');return false;}
+    const rec={code,date:c.date,newIn:c.newIn||'',newOut:c.newOut||'',reason:c.reason||'',note:'',status:'pending',appliedAt:new Date().toISOString(),staffName:staffMe?.name||''};
+    setCorrections(prev=>[rec,...prev]);
+    if(SB_ENABLED){
+      const raw=await SB.get('requests_data'); const u=unwrapReq(raw);
+      u.corrections=[rec,...(u.corrections||[])];
+      await SB.set('requests_data',wrapReq(u.requests,u.avatars,u.corrections));
+    }
+    return true;
+  }
   const staffDates=useMemo(()=>getWorkDates(staffY,staffM),[staffY,staffM]);
   const staffHolidays=useMemo(()=>getJapaneseHolidays(staffY),[staffY]);
   const staffMyPL=useMemo(()=>paidLeave[staffMyId]||{granted:0,history:[]},[paidLeave,staffMyId]);
@@ -3777,7 +3840,7 @@ ${bodyHtml}
           <span style={{width:9,height:9,borderRadius:'50%',background:staffMe?.color||'#7C3AED',flexShrink:0,marginRight:6}}/>
           <span style={{fontWeight:700,fontSize:14,marginRight:16,whiteSpace:'nowrap'}}>{staffMe?.name}</span>
           {/* タブ */}
-          {[{id:'shift',label:'📅 シフト表'},{id:'requests',label:'📋 申請一覧'+(staffReqCount>0?' ('+staffReqCount+')':'')},{id:'timecard',label:'⏱ 勤務状況'}].map(t=>(
+          {[{id:'shift',label:'📅 シフト表'},{id:'requests',label:'📋 申請一覧'+(staffReqCount>0?' ('+staffReqCount+')':'')},{id:'timecard',label:'⏱ 勤務状況'},{id:'settings',label:'⚙ 設定'}].map(t=>(
             <button key={t.id} onClick={()=>setStaffTab(t.id)}
               style={{padding:'12px 14px',border:'none',background:'none',cursor:'pointer',fontSize:13,
                 fontWeight:staffTab===t.id?600:400,color:staffTab===t.id?'#185FA5':'#64748B',
@@ -4057,6 +4120,87 @@ ${bodyHtml}
             </div>
           </div>
         )}
+        {/* 設定タブ（アイコン設定／打刻修正の申告） */}
+        {staffTab==='settings'&&(()=>{
+          const code=staffMe?.code||'';
+          const cur=avDraft||(code&&avatars[code])||{color:staffMe?.color||'#7C3AED',icon:''};
+          const palette=['#7C3AED','#2563EB','#0891B2','#059669','#65A30D','#CA8A04','#EA580C','#DC2626','#DB2777','#475569'];
+          const myCorr=(corrections||[]).filter(c=>c.code===code).slice(0,20);
+          const stLabel={pending:'⏳ 確認待ち',approved:'✓ 反映済み',rejected:'✕ 却下'};
+          const stColor={pending:'#92400E',approved:'#166534',rejected:'#991B1B'};
+          return(
+          <div style={{padding:14,maxWidth:540}}>
+            <div style={{background:'#fff',border:'1px solid #E2E8F0',borderRadius:12,padding:14,marginBottom:14}}>
+              <div style={{fontWeight:700,fontSize:14,marginBottom:10}}>🎨 アイコン設定</div>
+              {!code
+                ?<div style={{fontSize:12,color:'#9A3412',background:'#FFF7ED',border:'1px solid #FDBA74',borderRadius:8,padding:'10px 12px',lineHeight:1.7}}>給与スタッフコードが未設定のため設定できません。管理者にご依頼ください。</div>
+                :<>
+                <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:12}}>
+                  <div style={{width:46,height:46,borderRadius:'50%',background:cur.color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:22,color:'#fff',flexShrink:0}}>{cur.icon||(staffMe?.name||'').slice(0,1)}</div>
+                  <div style={{fontSize:12,color:'#64748B'}}>打刻画面に表示されるあなたのアイコンです。</div>
+                </div>
+                <div style={{fontSize:12,color:'#64748B',marginBottom:5}}>色</div>
+                <div style={{display:'flex',flexWrap:'wrap',gap:7,marginBottom:12}}>
+                  {palette.map(c=>(
+                    <button key={c} onClick={()=>setAvDraft({...cur,color:c})} style={{width:30,height:30,borderRadius:'50%',background:c,border:cur.color===c?'3px solid #1E293B':'2px solid #fff',boxShadow:'0 0 0 1px #E2E8F0',cursor:'pointer'}}/>
+                  ))}
+                </div>
+                <div style={{fontSize:12,color:'#64748B',marginBottom:5}}>絵文字（任意・1〜2文字）</div>
+                <input type="text" value={cur.icon||''} maxLength={4} onChange={e=>setAvDraft({...cur,icon:e.target.value})} placeholder="例: 🐱" style={{padding:'7px 10px',border:'1px solid #CBD5E1',borderRadius:8,fontSize:18,width:90,marginBottom:12}}/>
+                <div>
+                  <button onClick={()=>{saveMyAvatar({color:cur.color,shape:'circle',icon:cur.icon||''});setAvDraft(null);}} style={{padding:'9px 18px',border:'none',borderRadius:8,background:'#185FA5',color:'#fff',fontSize:14,fontWeight:700,cursor:'pointer'}}>保存</button>
+                </div>
+                </>}
+            </div>
+            <div style={{background:'#fff',border:'1px solid #E2E8F0',borderRadius:12,padding:14,marginBottom:14}}>
+              <div style={{fontWeight:700,fontSize:14,marginBottom:4}}>🛠 打刻の修正を申告</div>
+              <div style={{fontSize:11,color:'#64748B',lineHeight:1.7,marginBottom:10}}>打刻し忘れ・押し間違いがあったら、正しい時刻を申告してください。管理者が確認して打刻に反映します（あなたが直接書き換えることはできません）。</div>
+              {!code
+                ?<div style={{fontSize:12,color:'#9A3412',background:'#FFF7ED',border:'1px solid #FDBA74',borderRadius:8,padding:'10px 12px',lineHeight:1.7}}>給与スタッフコードが未設定のため申告できません。管理者にご依頼ください。</div>
+                :<>
+                <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                  <label style={{fontSize:12,color:'#64748B'}}>日付
+                    <input type="date" value={corrDraft.date} onChange={e=>setCorrDraft({...corrDraft,date:e.target.value})} style={{display:'block',marginTop:3,padding:'7px 10px',border:'1px solid #CBD5E1',borderRadius:8,fontSize:14}}/>
+                  </label>
+                  <div style={{display:'flex',gap:10}}>
+                    <label style={{fontSize:12,color:'#64748B',flex:1}}>正しい出勤
+                      <input type="time" value={corrDraft.newIn} onChange={e=>setCorrDraft({...corrDraft,newIn:e.target.value})} style={{display:'block',marginTop:3,padding:'7px 10px',border:'1px solid #CBD5E1',borderRadius:8,fontSize:14,width:'100%',boxSizing:'border-box'}}/>
+                    </label>
+                    <label style={{fontSize:12,color:'#64748B',flex:1}}>正しい退勤
+                      <input type="time" value={corrDraft.newOut} onChange={e=>setCorrDraft({...corrDraft,newOut:e.target.value})} style={{display:'block',marginTop:3,padding:'7px 10px',border:'1px solid #CBD5E1',borderRadius:8,fontSize:14,width:'100%',boxSizing:'border-box'}}/>
+                    </label>
+                  </div>
+                  <label style={{fontSize:12,color:'#64748B'}}>理由
+                    <input type="text" value={corrDraft.reason} onChange={e=>setCorrDraft({...corrDraft,reason:e.target.value})} placeholder="例: 退勤の打刻を忘れました" style={{display:'block',marginTop:3,padding:'7px 10px',border:'1px solid #CBD5E1',borderRadius:8,fontSize:14,width:'100%',boxSizing:'border-box'}}/>
+                  </label>
+                  <div>
+                    <button onClick={async()=>{
+                      if(!corrDraft.date){alert('日付を選んでください。');return;}
+                      if(!corrDraft.newIn&&!corrDraft.newOut){alert('正しい出勤または退勤の時刻を入力してください。');return;}
+                      const ok=await submitCorrection(corrDraft);
+                      if(ok){setCorrDraft({date:'',newIn:'',newOut:'',reason:''});alert('打刻修正を申告しました。管理者の確認をお待ちください。');}
+                    }} style={{padding:'9px 18px',border:'none',borderRadius:8,background:'#185FA5',color:'#fff',fontSize:14,fontWeight:700,cursor:'pointer'}}>申告する</button>
+                  </div>
+                </div>
+                {myCorr.length>0&&(
+                  <div style={{marginTop:14}}>
+                    <div style={{fontSize:12,fontWeight:700,color:'#334155',marginBottom:6}}>申告した修正</div>
+                    <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                      {myCorr.map((c,i)=>(
+                        <div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',background:'#F8FAFC',border:'1px solid #E2E8F0',borderRadius:8,fontSize:12}}>
+                          <span style={{fontWeight:700,color:'#185FA5'}}>{c.date}</span>
+                          <span style={{color:'#475569'}}>出 {c.newIn||'—'} / 退 {c.newOut||'—'}</span>
+                          <span style={{marginLeft:'auto',fontWeight:700,color:stColor[c.status]||'#64748B'}}>{stLabel[c.status]||c.status}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                </>}
+            </div>
+          </div>
+          );
+        })()}
       </div>
     );
   }
