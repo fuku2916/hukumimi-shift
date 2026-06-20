@@ -46,7 +46,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v73';
+const APP_VERSION = 'v74';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── 診療枠カラーパレット ──
@@ -3792,10 +3792,6 @@ ${bodyHtml}
               <span style={{fontSize:15,fontWeight:700,color:staffRemain<=3?'#DC2626':'#86198F'}}>{staffRemain}</span>
               <span style={{fontSize:12,color:'#86198F'}}>日</span>
             </div>
-            <button onClick={()=>{setAppMode('select');setStaffMyId(null);setStaffReqDk(null);setStaffTab('shift');}}
-              style={{padding:'6px 14px',border:'1px solid #CBD5E1',borderRadius:8,background:'#F8FAFC',color:'#64748B',cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
-              🏠 ホーム
-            </button>
           </div>
         </div>
         {/* シフト表タブ */}
