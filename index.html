@@ -46,7 +46,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v72';
+const APP_VERSION = 'v73';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── 診療枠カラーパレット ──
@@ -3766,7 +3766,13 @@ ${bodyHtml}
           </div>
         )}
         {/* ヘッダー＋タブ統合 */}
-        <div style={{background:'#fff',borderBottom:'1px solid #E2E8F0',display:'flex',alignItems:'center',paddingLeft:14}}>
+        <div style={{background:'#fff',borderBottom:'1px solid #E2E8F0',display:'flex',alignItems:'center',paddingLeft:10}}>
+          {/* クリニックロゴ（押すとホームへ。他アプリと操作統一） */}
+          <button onClick={()=>{setAppMode('select');setStaffMyId(null);setStaffReqDk(null);setStaffTab('shift');}}
+            style={{display:'flex',alignItems:'center',gap:4,padding:'4px 8px',border:'none',background:'none',cursor:'pointer',marginRight:8,flexShrink:0}}>
+            <span style={{fontSize:18}}>🏥</span>
+            <span style={{fontWeight:700,fontSize:14,color:'#1E293B',whiteSpace:'nowrap'}}>福耳会{APP_UNIT_LABEL?'｜'+APP_UNIT_LABEL:''}</span>
+          </button>
           {/* 名前 */}
           <span style={{width:9,height:9,borderRadius:'50%',background:staffMe?.color||'#7C3AED',flexShrink:0,marginRight:6}}/>
           <span style={{fontWeight:700,fontSize:14,marginRight:16,whiteSpace:'nowrap'}}>{staffMe?.name}</span>
