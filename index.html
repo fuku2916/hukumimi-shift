@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>シフト管理 v82</title>
+<title>シフト管理 v83</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -46,7 +46,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v82';
+const APP_VERSION = 'v83';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── 診療枠カラーパレット ──
@@ -4444,6 +4444,7 @@ ${bodyHtml}
                       else if(choice==='2'){if(window.confirm('全月シフトをリセットします。')){setAsgn({});setTmps({});setManualExclusions({});setARes(null);setApid(null);}}
                       else if(choice==='3'){if(window.confirm('【警告】全データを消去します。元に戻せません。')){localStorage.removeItem(LS_KEY);window.location.reload();}}
                     }}/>
+                    {CLINIC_MODE&&APP_CLINIC==='ekimae'&&<><MenuDivider/><MenuLabel text="クリニック移行"/><MenuItem icon="🔁" label="駅前データを移行(初回のみ)" onClick={()=>{setOpenMenu(null);migrateEkimaeFromMain();}}/></>}
                   </>}
 
                   {/* 設定メニュー */}
