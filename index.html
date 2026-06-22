@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>シフト管理 v78</title>
+<title>シフト管理 v81</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -46,7 +46,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v78';
+const APP_VERSION = 'v81';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── 診療枠カラーパレット ──
@@ -1326,6 +1326,9 @@ function App(){
           if(sd.baseShift)setBaseShift(sd.baseShift);
           if(sd.paidLeave)setPaidLeave(sd.paidLeave);
           if(sd.newSlotCounter)setNewSlotCounter(sd.newSlotCounter);
+          if(Array.isArray(sd.editLog))setEditLog(sd.editLog); // 追加・修正ログ
+          if(sd.lockedAsgn&&typeof sd.lockedAsgn==='object')setLockedAsgn(sd.lockedAsgn); // 確定基準
+          if(sd.lockedMonths&&typeof sd.lockedMonths==='object')setLockedMonths(sd.lockedMonths);
           shiftStampLoadRef.current=true; // 読込では作成日時を更新しない
           if(sd.shiftUpdatedAt!==undefined){setShiftUpdatedAt(sd.shiftUpdatedAt||'');setPublishedAt(sd.shiftUpdatedAt||'');}
           if(Array.isArray(sd.history))setShiftHistory(sd.history); // バックアップ履歴
@@ -1547,6 +1550,12 @@ function App(){
   const [aErr,setAErr]=useState(null);
   const [apid,setApid]=useState(null);
   const [hasManualEdits,setHasManualEdits]=useState(false);
+  // ── 追加・修正ログ（管理者の手動コマ編集の履歴） ──
+  const [editLog,setEditLog]=useState(()=>Array.isArray(saved?.editLog)?saved.editLog:[]);
+  const [showEditLog,setShowEditLog]=useState(false);
+  // ── シフト確定（ロック）：確定時点の配置を基準保存し、以降の差分を赤二重線＋追記で表示 ──
+  const [lockedAsgn,setLockedAsgn]=useState(()=>saved?.lockedAsgn||{}); // {dk:{slotId:[確定時の出勤sid]}}
+  const [lockedMonths,setLockedMonths]=useState(()=>saved?.lockedMonths||{}); // {"2026-7":確定日時ISO}
   // 超過勤務 自動調整：元に戻す用スナップショットと変更点
   const [preReliefAsgn,setPreReliefAsgn]=useState(null);
   const [reliefChanges,setReliefChanges]=useState([]); // [{dk,slotId,slotLabel,removed:[{id,name}],added:[{id,name}]}]
@@ -1609,8 +1618,8 @@ function App(){
   // ── 自動保存 ──
   // ローカル自動保存
   useEffect(()=>{
-    saveLS({y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt});
-  },[y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt]);
+    saveLS({y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths});
+  },[y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths]);
 
   // ★ シフト本体(shift_data)は自動保存しない（複数端末の競合上書き事故を防ぐため）。
   // 　管理者が「☁ 保存／公開」ボタンを押したときだけクラウドへ保存する（publishToCloud）。
@@ -1638,7 +1647,7 @@ function App(){
         const prevNoHist=Object.assign({},prev); delete prevNoHist.history;
         hist=[{at:new Date().toISOString(),made:prev.shiftUpdatedAt||'',data:prevNoHist},...hist].slice(0,HISTORY_MAX);
       }
-      const data={y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,history:hist};
+      const data={y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,history:hist};
       const ok=await SB.set('shift_data',data);
       if(ok){setPublishedAt(shiftUpdatedAt);setShiftHistory(hist);alert('クラウドに保存し、スタッフへ公開しました。\n（作成: '+fmtStamp(shiftUpdatedAt)+'）\n直前の版はバックアップ履歴に自動保存されました。');}
       else alert('保存に失敗しました。もう一度お試しください。');
@@ -2351,13 +2360,85 @@ ${bodyHtml}
       // ① このコマの除外を解除（コマに戻す）
       setManualExclusions(p=>{const d2=p[dk]||{},sl=(d2[s2]||[]).filter(x=>x!==sid);return{...p,[dk]:{...d2,[s2]:sl}};});
       setAsgn(p=>{const d2={...(p[dk]||{})};const sl=d2[s2]||[];if(!sl.includes(sid))d2[s2]=[...sl,sid];return{...p,[dk]:d2};});
+      pushEditLog(dk,s2,'add',sid);
     } else if(inAsgn){
       // ② このコマのみ除外（終日休にはしない）
       setManualExclusions(p=>{const d2={...(p[dk]||{})};const sl=d2[s2]||[];if(!sl.includes(sid))d2[s2]=[...sl,sid];return{...p,[dk]:d2};});
+      pushEditLog(dk,s2,'remove',sid);
     } else {
       // ③ 未配置 → このコマに追加
       setAsgn(p=>{const d2={...(p[dk]||{})};const sl=d2[s2]||[];if(!sl.includes(sid))d2[s2]=[...sl,sid];return{...p,[dk]:d2};});
+      pushEditLog(dk,s2,'add',sid);
     }
+  }
+
+  // ── 追加・修正ログ：管理者の手動コマ編集を1件記録（最新が先頭・最大500件） ──
+  function pushEditLog(dk,slotId,action,sid){
+    try{
+      const dow=new Date(dk).getDay();
+      const slot=(slots[dow]||[]).find(x=>x.id===slotId);
+      const s=staff.find(x=>x.id===sid);
+      const entry={ts:new Date().toISOString(),dk,slotId,
+        slotLabel:slot?slot.label:String(slotId),
+        slotType:slot?slot.type:'',
+        action,staffId:sid,staffName:s?s.name:('ID:'+sid)};
+      setEditLog(prev=>[entry,...(Array.isArray(prev)?prev:[])].slice(0,500));
+    }catch(e){}
+  }
+  // 自動処理の「実行した事実」だけを1行記録（個々の変更内容は残さない）
+  function pushEventLog(name){
+    try{
+      setEditLog(prev=>[{ts:new Date().toISOString(),type:'event',event:name},...(Array.isArray(prev)?prev:[])].slice(0,500));
+    }catch(e){}
+  }
+  // ログを1行テキストに整形
+  function fmtEditLogLine(e){
+    const t=new Date(e.ts);
+    const tStr=(t.getMonth()+1)+'/'+t.getDate()+' '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0');
+    if(e.type==='event'){return tStr+'  ★ '+(e.event||'自動処理')+' を実行';}
+    const d=new Date(e.dk);
+    const dStr=(d.getMonth()+1)+'/'+d.getDate()+'('+DAY_JP[d.getDay()]+')';
+    const kind=e.slotType==='surg'?'手術':e.slotType==='out'?'外来':'';
+    const act=e.action==='add'?'追加':'削除';
+    return tStr+'  '+dStr+' '+kind+'「'+e.slotLabel+'」 '+e.staffName+' を '+act;
+  }
+  function editLogToText(){return (editLog||[]).map(fmtEditLogLine).join('\n');}
+  function copyEditLog(){
+    const txt=editLogToText();
+    try{navigator.clipboard.writeText(txt).then(()=>alert('ログをコピーしました。'),()=>{window.prompt('コピーしてください:',txt);});}
+    catch(e){window.prompt('コピーしてください:',txt);}
+  }
+  function clearEditLog(){
+    if(window.confirm('追加・修正ログをすべて消去しますか？\n（この操作は元に戻せません）'))setEditLog([]);
+  }
+  // ── シフト確定（ロック）：表示中の月の出勤配置を基準として保存 ──
+  const curMonthKey=y+'-'+m;
+  const curMonthLockedAt=lockedMonths[curMonthKey]||'';
+  function lockCurrentMonth(){
+    if(curMonthLockedAt && !window.confirm(y+'年'+m+'月は既に確定済みです（'+fmtStamp(curMonthLockedAt)+'）。\n現在の内容で確定し直しますか？\n（赤二重線・追記の基準が今の配置に更新されます）'))return;
+    if(!curMonthLockedAt && !window.confirm(y+'年'+m+'月のシフトをこの内容で確定（ロック）します。\nこれ以降に変わった所は、外れた人を赤い二重線、追加された人を赤字で表示します。\nよろしいですか？'))return;
+    const snap={};
+    dates.forEach(d=>{
+      const dk=tdk(d);
+      const dow=d.getDay();
+      const dExcl=manualExclusions[dk]||{};
+      const dt=tmps[dk]||{};
+      const slotOff=Object.entries(dt).filter(([,v])=>['off','paid'].includes(v.type)).map(([sid])=>parseInt(sid));
+      const m2={};
+      (slots[dow]||[]).forEach(slot=>{
+        const allIds=(asgn[dk]?.[slot.id]||[]);
+        m2[slot.id]=allIds.filter(sid=>!(dExcl[slot.id]||[]).includes(sid)&&!slotOff.includes(sid));
+      });
+      snap[dk]=m2;
+    });
+    setLockedAsgn(prev=>({...prev,...snap}));
+    setLockedMonths(prev=>({...prev,[curMonthKey]:new Date().toISOString()}));
+    alert(y+'年'+m+'月のシフトを確定（ロック）しました。');
+  }
+  function unlockCurrentMonth(){
+    if(!window.confirm(y+'年'+m+'月の確定（ロック）を解除しますか？\n赤二重線・追記の表示が消えます。'))return;
+    setLockedMonths(prev=>{const n={...prev};delete n[curMonthKey];return n;});
+    setLockedAsgn(prev=>{const n={...prev};dates.forEach(d=>{delete n[tdk(d)];});return n;});
   }
 
   function togExclusion(dk,slotId,sid){
@@ -2368,12 +2449,15 @@ ${bodyHtml}
       // ① このコマの除外を解除（コマに戻す）
       setManualExclusions(p=>{const d2=p[dk]||{},sl=(d2[slotId]||[]).filter(x=>x!==sid);return{...p,[dk]:{...d2,[slotId]:sl}};});
       setAsgn(p=>{const d2={...(p[dk]||{})};const sl=d2[slotId]||[];if(!sl.includes(sid))d2[slotId]=[...sl,sid];return{...p,[dk]:d2};});
+      pushEditLog(dk,slotId,'add',sid);
     } else if(inAsgn){
       // ② このコマのみ除外（同じ日の他コマ・終日扱いには影響しない）
       setManualExclusions(p=>{const d2={...(p[dk]||{})};const sl=d2[slotId]||[];if(!sl.includes(sid))d2[slotId]=[...sl,sid];return{...p,[dk]:d2};});
+      pushEditLog(dk,slotId,'remove',sid);
     } else {
       // ③ 未配置 → このコマに追加
       setAsgn(p=>{const d2={...(p[dk]||{})};const sl=d2[slotId]||[];if(!sl.includes(sid))d2[slotId]=[...sl,sid];return{...p,[dk]:d2};});
+      pushEditLog(dk,slotId,'add',sid);
     }
   }
 
@@ -3339,6 +3423,7 @@ ${bodyHtml}
     setPreReliefAsgn(beforeAsgn);
     setReliefChanges(changes);
     setAsgn(fixed);
+    pushEventLog('拘束時間を最適化');
     alert('拘束時間を最適化しました（入れ替え '+changes.length+'件）。\n各人の勤務が時間的に連続するようコマを入れ替えています。\n変更点は表の上に一覧表示され、移動先には ✦ が付きます。\n「元に戻す」で取り消せます。');
   }
   function applyOvertimeRelief(){
@@ -3366,6 +3451,7 @@ ${bodyHtml}
     setPreReliefAsgn(beforeAsgn);
     setReliefChanges(changes);
     setAsgn(fixed);
+    pushEventLog('配置を自動調整');
     let over=0;
     dates.forEach(d=>{const dk=tdk(d);if(isClosedDay(dk))return;staff.forEach(s=>{if(dayHours(dk,s.id,fixed,manualExclusions,slots,staff)>DAILY_LIMIT)over++;});});
     alert('配置の自動調整を行いました（無人時間帯の解消・偏り・超過勤務／変更 '+changes.length+'件）。\n変更点は表の上に一覧表示され、追加された人には ✦ が付きます。\n「元に戻す」で取り消せます。'+(over>0?'\n\n※まだ解消できない超過が'+over+'件あります（延長できる人がいない枠）。':''));
@@ -3419,6 +3505,7 @@ ${bodyHtml}
 
   function applyPat(pat){
     setPreReliefAsgn(null);setReliefChanges([]); // 新しいパターン適用時は前回の調整履歴をクリア
+    pushEventLog('AI自動生成を反映');
     const hasExcl=Object.values(manualExclusions).some(sm=>Object.values(sm).some(ids=>(ids||[]).length>0));
 
     if(hasExcl){
@@ -4402,6 +4489,11 @@ ${bodyHtml}
                   🕘 履歴{shiftHistory.length>0?'('+shiftHistory.length+')':''}
                 </button>
               )}
+              {curMonthLockedAt
+                ?<button onClick={unlockCurrentMonth} title={'このシフトは '+fmtStamp(curMonthLockedAt)+' に確定されています。クリックで確定を解除します。'}
+                  style={{padding:'5px 12px',borderRadius:K.rmd,fontSize:12,fontWeight:700,cursor:'pointer',border:'1px solid #B91C1C',background:'#FEF2F2',color:'#991B1B',whiteSpace:'nowrap'}}>🔒 確定済み（{fmtStamp(curMonthLockedAt)}）</button>
+                :<button onClick={lockCurrentMonth} title="今の配置を「確定（基準）」として保存します。以降に変わった所を赤二重線＋追記で表示します。"
+                  style={{padding:'5px 12px',borderRadius:K.rmd,fontSize:12,fontWeight:700,cursor:'pointer',border:'1px solid #475569',background:'#F1F5F9',color:'#334155',whiteSpace:'nowrap'}}>🔓 シフトを確定（ロック）</button>}
               <button onClick={applyOvertimeRelief} title="①余剰枠→不足枠へ配置を均す ②8時間超の人を末尾コマから外し空いた枠を延長で補う"
                 style={{padding:'5px 12px',borderRadius:K.rmd,fontSize:12,fontWeight:600,cursor:'pointer',border:'1px solid #D85A30',background:'#FFF7ED',color:'#9A3412',whiteSpace:'nowrap'}}>⚖ 配置を自動調整（無人帯・偏り・超過）</button>
               <button onClick={applySpanCompaction} title="同じ人に時間が離れたコマ（午前＋夜など）が割り当たって拘束時間が伸びている所を、同種コマ間で2人を入れ替えて勤務が連続するよう短縮します。出勤者と各人の勤務時間は変わりません（座る外来コマが入れ替わるだけ）。有給・希望休・除外した駒は動かしません。変更点はプレビュー表示され、元に戻せます。"
@@ -4422,6 +4514,14 @@ ${bodyHtml}
               )}
             </div>
           </div>
+
+          {curMonthLockedAt&&(
+            <div style={{fontSize:11,color:'#991B1B',marginBottom:10,padding:'6px 12px',background:'#FEF2F2',borderRadius:K.rmd,border:'1px solid #FCA5A5',display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
+              <span style={{fontWeight:700}}>🔒 {y}年{m}月は確定済み（{fmtStamp(curMonthLockedAt)}）</span>
+              <span style={{display:'inline-flex',alignItems:'center',gap:4}}><span style={{background:'#FEE2E2',color:'#991B1B',border:'1px dashed #FCA5A5',borderRadius:3,padding:'0 4px',textDecoration:'line-through',textDecorationStyle:'double',textDecorationColor:'#DC2626'}}>名前</span>＝確定後に外れた人</span>
+              <span style={{display:'inline-flex',alignItems:'center',gap:4}}><span style={{background:'#475569',color:'#fff',borderRadius:3,padding:'0 4px',boxShadow:'0 0 0 2px #DC2626'}}>＋名前</span>＝確定後に追加した人</span>
+            </div>
+          )}
 
           {hasAnyAssignment&&(
             <div style={{fontSize:11,color:K.textS,marginBottom:10,padding:'5px 10px',background:K.bgS,borderRadius:K.rmd,border:K.bd,display:'inline-flex',alignItems:'center',gap:6}}>
@@ -4616,6 +4716,11 @@ ${bodyHtml}
                                     const req=getReq(dk,slot.id);
                                     const met=activeIds.length>=req;
                                     const coverColor=activeIds.length===0?K.textS:met?'#1D9E75':'#D85A30';
+                                    // 確定（ロック）後の差分：確定時にいたが今いない人＝removed、確定時いなかった今いる人＝added
+                                    const isLocked=!!curMonthLockedAt;
+                                    const baseActive=isLocked?(lockedAsgn[dk]?.[slot.id]||[]):[];
+                                    // 完全に消えた人（asgnからも除去）はゴーストで表示。除外で残っている人は下のチップ側で赤二重線にする。
+                                    const removedSinceLock=isLocked?baseActive.filter(id=>!activeIds.includes(id)&&!allIds.includes(id)):[];
                                     return(
                                       <div key={slot.id} style={{marginBottom:2,padding:'1px 3px',borderRadius:3,borderLeft:'2px solid '+sc.border,background:sc.bgLight}}>
                                         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
@@ -4632,15 +4737,34 @@ ${bodyHtml}
                                             const isOffTmp=['off','paid','paid_am','paid_pm'].includes(tmps[dk]?.[String(sid)]?.type);
                                             const leaveNote=(!isOffTmp&&!isExcl)?leaveNoteForSlot(s,slot,d.getDay(),da):'';
                                             const isReliefAdded=reliefAddedSet.has(dk+'|'+slot.id+'|'+sid);
+                                            // 確定後に追加された人（出勤中・確定時には不在）＝赤枠＋＋印で「追記」表示
+                                            const isAddedSinceLock=isLocked&&!isExcl&&!isOff&&activeIds.includes(sid)&&!baseActive.includes(sid);
+                                            // 確定後に外れた人（除外/終日休だが確定時は出勤）＝赤い二重線で表示
+                                            const isRemovedSinceLock=isLocked&&baseActive.includes(sid)&&!activeIds.includes(sid);
                                             // isOff（tmps由来）のスタッフはバッジを薄く表示して「クリックで復活」を可能にする
                                             return(
                                               <span key={sid}
                                                 onClick={e=>{e.stopPropagation();if(!isOffTmp)togExclusion(dk,slot.id,sid);}}
-                                                title={isOffTmp?'終日休（臨時条件タブで設定）':isExcl?'クリックでこのコマに戻す':'クリックでこのコマから外す（この日の他コマ・終日休には影響しません）'}
-                                                style={{fontSize:'var(--fs-badge)',background:isOffTmp?'#94A3B8':s.color,color:'#fff',borderRadius:3,padding:'1px 3px',cursor:'pointer',userSelect:'none',whiteSpace:'nowrap',
-                                                  opacity:(isExcl||isOffTmp)?0.35:1,textDecoration:(isExcl||isOffTmp)?'line-through':'none',
-                                                  boxShadow:isReliefAdded?'0 0 0 2px #16A34A':'none'}}>
-                                                {isReliefAdded?'✦':''}{s.name}{isOffTmp?'(休)':(leaveNote?<span style={{fontWeight:700,opacity:0.95}}>{leaveNote}</span>:'')}
+                                                title={isRemovedSinceLock?'確定後にこのコマから外れました':isAddedSinceLock?'確定後に追加されました':isOffTmp?'終日休（臨時条件タブで設定）':isExcl?'クリックでこのコマに戻す':'クリックでこのコマから外す（この日の他コマ・終日休には影響しません）'}
+                                                style={{fontSize:'var(--fs-badge)',background:isRemovedSinceLock?'#FEE2E2':(isOffTmp?'#94A3B8':s.color),color:isRemovedSinceLock?'#991B1B':'#fff',borderRadius:3,padding:'1px 3px',cursor:'pointer',userSelect:'none',whiteSpace:'nowrap',
+                                                  border:isRemovedSinceLock?'1px dashed #FCA5A5':'none',
+                                                  opacity:isRemovedSinceLock?1:((isExcl||isOffTmp)?0.35:1),
+                                                  textDecoration:(isRemovedSinceLock||isExcl||isOffTmp)?'line-through':'none',
+                                                  textDecorationStyle:isRemovedSinceLock?'double':'solid',
+                                                  textDecorationColor:isRemovedSinceLock?'#DC2626':'currentColor',
+                                                  boxShadow:isAddedSinceLock?'0 0 0 2px #DC2626':isReliefAdded?'0 0 0 2px #16A34A':'none'}}>
+                                                {isAddedSinceLock?'＋':(isReliefAdded?'✦':'')}{s.name}{isOffTmp?'(休)':(leaveNote?<span style={{fontWeight:700,opacity:0.95}}>{leaveNote}</span>:'')}
+                                              </span>
+                                            );
+                                          })}
+                                          {removedSinceLock.map(sid=>{
+                                            const s=staff.find(x=>x.id===sid);
+                                            if(!s)return null;
+                                            return(
+                                              <span key={'rm'+sid} title="確定後にこのコマから外れました"
+                                                style={{fontSize:'var(--fs-badge)',background:'#FEE2E2',color:'#991B1B',borderRadius:3,padding:'1px 3px',whiteSpace:'nowrap',border:'1px dashed #FCA5A5',
+                                                  textDecoration:'line-through',textDecorationStyle:'double',textDecorationColor:'#DC2626'}}>
+                                                {s.name}
                                               </span>
                                             );
                                           })}
@@ -4826,6 +4950,69 @@ ${bodyHtml}
                 </div>
               </div>
             )}
+          </div>
+
+          {/* ── 追加・修正のログ（シフト設計の最下部） ── */}
+          <div style={{marginTop:24,paddingTop:16,borderTop:K.bd,display:'flex',justifyContent:'center'}}>
+            <button onClick={()=>setShowEditLog(true)}
+              title="このシフトでスタッフを追加・削除した操作の履歴を一覧表示します"
+              style={{padding:'8px 16px',borderRadius:K.rmd,fontSize:13,fontWeight:600,cursor:'pointer',
+                border:'1px solid #94A3B8',background:K.bgS,color:K.text,whiteSpace:'nowrap'}}>
+              📝 追加修正のログ{editLog.length>0?'（'+editLog.length+'）':''}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── 追加・修正ログ モーダル ── */}
+      {showEditLog&&(
+        <div onClick={()=>setShowEditLog(false)}
+          style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+          <div onClick={e=>e.stopPropagation()}
+            style={{background:K.bg,borderRadius:K.rlg,maxWidth:680,width:'100%',maxHeight:'82vh',display:'flex',flexDirection:'column',boxShadow:'0 12px 48px rgba(0,0,0,0.35)',overflow:'hidden'}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 16px',borderBottom:K.bd}}>
+              <div style={{fontWeight:700,fontSize:15}}>📝 追加・修正のログ <span style={{fontSize:12,color:K.textS,fontWeight:400,marginLeft:4}}>（{editLog.length}件）</span></div>
+              <button onClick={()=>setShowEditLog(false)} style={{border:'none',background:'none',cursor:'pointer',fontSize:18,color:K.textS,lineHeight:1}}>✕</button>
+            </div>
+            <div style={{padding:'8px 14px',borderBottom:K.bd,display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+              <button onClick={copyEditLog} disabled={editLog.length===0}
+                style={{padding:'4px 11px',borderRadius:K.rmd,fontSize:12,fontWeight:600,cursor:editLog.length===0?'default':'pointer',border:'1px solid #93C5FD',background:editLog.length===0?K.bgS:'#EBF4FF',color:'#185FA5',opacity:editLog.length===0?0.5:1}}>📋 コピー</button>
+              <button onClick={clearEditLog} disabled={editLog.length===0}
+                style={{padding:'4px 11px',borderRadius:K.rmd,fontSize:12,fontWeight:600,cursor:editLog.length===0?'default':'pointer',border:'1px solid #FCA5A5',background:editLog.length===0?K.bgS:'#FEF2F2',color:'#991B1B',opacity:editLog.length===0?0.5:1}}>🗑 ログを消去</button>
+              <span style={{fontSize:11,color:K.textS,marginLeft:'auto'}}>最新500件まで記録／新しい順</span>
+            </div>
+            <div style={{overflowY:'auto',padding:'4px 0'}}>
+              {editLog.length===0
+                ?<div style={{padding:'28px 16px',textAlign:'center',color:K.textS,fontSize:13}}>まだ追加・修正のログはありません。<br/>シフト表でスタッフを追加・削除すると、ここに記録されます。</div>
+                :editLog.map((e,i)=>{
+                  const t=new Date(e.ts);
+                  const tStr=(t.getMonth()+1)+'/'+t.getDate()+' '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0');
+                  if(e.type==='event'){
+                    return(
+                      <div key={i} style={{padding:'8px 16px',borderBottom:'1px solid '+K.bgS,fontSize:13,lineHeight:1.6,display:'flex',gap:8,alignItems:'baseline',flexWrap:'wrap',background:'#FFFBEB'}}>
+                        <span style={{color:K.textS,fontSize:11,whiteSpace:'nowrap',minWidth:78}}>{tStr}</span>
+                        <span style={{fontSize:11,color:'#fff',background:'#D97706',borderRadius:6,padding:'1px 6px',whiteSpace:'nowrap'}}>自動処理</span>
+                        <span style={{fontWeight:600}}>{e.event}</span>
+                        <span style={{color:K.textS}}>を実行</span>
+                      </div>
+                    );
+                  }
+                  const d=new Date(e.dk);
+                  const dStr=(d.getMonth()+1)+'/'+d.getDate()+'('+DAY_JP[d.getDay()]+')';
+                  const kind=e.slotType==='surg'?'手術':e.slotType==='out'?'外来':'';
+                  const isAdd=e.action==='add';
+                  return(
+                    <div key={i} style={{padding:'8px 16px',borderBottom:'1px solid '+K.bgS,fontSize:13,lineHeight:1.6,display:'flex',gap:8,alignItems:'baseline',flexWrap:'wrap'}}>
+                      <span style={{color:K.textS,fontSize:11,whiteSpace:'nowrap',minWidth:78}}>{tStr}</span>
+                      <span style={{fontWeight:600,whiteSpace:'nowrap'}}>{dStr}</span>
+                      {kind&&<span style={{fontSize:11,color:'#fff',background:e.slotType==='surg'?'#DB2777':'#2563EB',borderRadius:6,padding:'1px 6px',whiteSpace:'nowrap'}}>{kind}</span>}
+                      <span style={{color:K.text}}>「{e.slotLabel}」</span>
+                      <span style={{fontWeight:600}}>{e.staffName}</span>
+                      <span style={{fontWeight:700,color:isAdd?'#065F46':'#991B1B',whiteSpace:'nowrap'}}>{isAdd?'＋追加':'－削除'}</span>
+                    </div>
+                  );
+                })}
+            </div>
           </div>
         </div>
       )}
