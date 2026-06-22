@@ -46,7 +46,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v76';
+const APP_VERSION = 'v77';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── 診療枠カラーパレット ──
@@ -3510,6 +3510,15 @@ ${bodyHtml}
     }
     return true;
   }
+  // スタッフの変更（申請・アイコン・打刻修正）を今すぐクラウドへ保存（押し忘れ対策・ログアウト時にも実行）
+  async function flushStaffToCloud(){
+    if(!SB_ENABLED)return true;
+    try{
+      const cloud=await SB.get('requests_data'); const _c=unwrapReq(cloud);
+      await SB.set('requests_data',wrapReq(mergeRequests(requests,_c.requests,reqTomb.current),mergeAvatars(avatarsRef.current,_c.avatars),mergeCorrections(correctionsRef.current,_c.corrections)));
+      return true;
+    }catch(e){return false;}
+  }
   const staffDates=useMemo(()=>getWorkDates(staffY,staffM),[staffY,staffM]);
   const staffHolidays=useMemo(()=>getJapaneseHolidays(staffY),[staffY]);
   const staffMyPL=useMemo(()=>paidLeave[staffMyId]||{granted:0,history:[]},[paidLeave,staffMyId]);
@@ -3834,8 +3843,8 @@ ${bodyHtml}
         )}
         {/* ヘッダー＋タブ統合 */}
         <div style={{background:'#fff',borderBottom:'1px solid #E2E8F0',display:'flex',alignItems:'center',paddingLeft:10}}>
-          {/* クリニックロゴ（押すとホームへ。他アプリと操作統一） */}
-          <button onClick={()=>{setAppMode('select');setStaffMyId(null);setStaffReqDk(null);setStaffTab('shift');}}
+          {/* クリニックロゴ（押すとホームへ。戻る前に変更をクラウド保存。他アプリと操作統一） */}
+          <button onClick={async()=>{await flushStaffToCloud();setAppMode('select');setStaffMyId(null);setStaffReqDk(null);setStaffTab('shift');}}
             style={{display:'flex',alignItems:'center',gap:4,padding:'4px 8px',border:'none',background:'none',cursor:'pointer',marginRight:8,flexShrink:0}}>
             <span style={{fontSize:18}}>🏥</span>
             <span style={{fontWeight:700,fontSize:14,color:'#1E293B',whiteSpace:'nowrap'}}>福耳会{APP_UNIT_LABEL?'｜'+APP_UNIT_LABEL:''}</span>
