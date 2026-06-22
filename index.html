@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>シフト管理 v83</title>
+<title>シフト管理 v85</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -46,7 +46,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v83';
+const APP_VERSION = 'v85';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── 診療枠カラーパレット ──
@@ -2518,12 +2518,23 @@ ${bodyHtml}
       };
       const all={shared};
       ['doctor','nurse','clerk'].forEach(k=>{ const b={...(main[k]||{})}; SHARED_KEYS.forEach(s=>delete b[s]); all[k]=b; });
-      const r=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.ekimae`,{
+      // ログイン（authenticated）を確実に使う。未ログインだと書き込みが拒否されるため。
+      if(!SB_ACCESS_TOKEN){try{await sbReauth();}catch(_){}}
+      const doPatch=()=>fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.ekimae`,{
         method:'PATCH',
-        headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer(),'Content-Type':'application/json','Prefer':'return=minimal'},
+        headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer(),'Content-Type':'application/json','Prefer':'return=representation'},
         body:JSON.stringify({data:all,updated_at:new Date().toISOString()})
       });
-      if(r.ok){alert('✅ 移行が完了しました。\nページを再読み込みすると、駅前(ekimae)の共通構造で表示されます。\n（旧 id=main はそのまま残っています）');}
+      let r=await doPatch();
+      if(r.status===401&&await sbReauth())r=await doPatch();
+      if(r.ok){
+        let rows=[]; try{rows=await r.json();}catch(_){}
+        if(Array.isArray(rows)&&rows.length>0){
+          alert('✅ 移行が完了しました（'+rows.length+'行を更新）。\nページを再読み込みすると、駅前(ekimae)の共通構造で表示されます。\n（旧 id=main はそのまま残っています）');
+        } else {
+          alert('⚠ ekimae の行が見つからず、何も書き込めませんでした。\n\nSupabaseのSQL Editorで次を実行して3行を作成してから、もう一度この移行を実行してください：\n\ninsert into public.shift_data (id, data) values\n  (\'ekimae\',\'{}\'::jsonb), (\'iguchi\',\'{}\'::jsonb), (\'karasuma\',\'{}\'::jsonb)\non conflict (id) do nothing;');
+        }
+      }
       else{alert('移行の書き込みに失敗しました（status '+r.status+'）。\nSupabaseで id=ekimae の行が作成済みか、権限をご確認ください。');}
     }catch(e){alert('移行に失敗しました：'+(e&&e.message||e));}
   }
