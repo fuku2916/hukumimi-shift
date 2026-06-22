@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>シフト管理 v85</title>
+<title>シフト管理 v86</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -46,7 +46,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v85';
+const APP_VERSION = 'v86';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── 診療枠カラーパレット ──
@@ -1366,7 +1366,10 @@ function App(){
         // ※ 起動時固定の saved ではなく、編集で更新される shiftTsRef を基準にする（未公開編集の消失対策）
         const localTs=shiftTsRef.current||saved?.shiftUpdatedAt||'';
         const cloudTs=(sd&&sd.shiftUpdatedAt)||'';
-        const cloudWins = !localTs || (cloudTs && cloudTs>=localTs);
+        // 端末側に実シフト（配置asgn）が無い＝守るべき未公開編集が無い場合は、必ずクラウドを採用する。
+        // 新クリニックを移行前に一度開いた端末で、空データがクラウドより新しく見えて読み込まれない問題への対策。
+        const localHasShift=!!(saved&&saved.asgn&&Object.keys(saved.asgn).length>0);
+        const cloudWins = !localHasShift || !localTs || (cloudTs && cloudTs>=localTs);
         if(sd&&Object.keys(sd).length>0 && cloudWins){
           if(sd.staff)setStaff(sd.staff);
           if(sd.slots)setSlots(sd.slots);
