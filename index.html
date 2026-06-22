@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>シフト管理 v69</title>
+<title>シフト管理 v78</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -46,7 +46,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v77';
+const APP_VERSION = 'v78';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── 診療枠カラーパレット ──
@@ -5153,62 +5153,6 @@ ${bodyHtml}
               </div>
             );
           })()}
-          <div style={{fontWeight:500,fontSize:16,marginBottom:4}}>有給休暇管理（参照用）</div>
-          <p style={{fontSize:12,color:K.textS,marginBottom:16,lineHeight:1.6}}>
-            スタッフごとの有給付与日数を設定し、申請履歴を確認できます。
-            有給の申請はシフト表画面で日付を選択→「臨時条件」タブから行えます。
-          </p>
-
-          {/* ── 付与日数設定 ＆ 残日数サマリー ── */}
-          <div style={{background:K.bg,border:K.bd,borderRadius:K.rlg,padding:16,marginBottom:20}}>
-            <div style={{fontWeight:500,fontSize:14,marginBottom:12,paddingBottom:8,borderBottom:K.bd}}>付与日数・残日数</div>
-            <div style={{overflowX:'auto'}}>
-              <table style={{borderCollapse:'collapse',width:'100%',minWidth:500}}>
-                <thead>
-                  <tr style={{background:K.bgS}}>
-                    <th style={{padding:'7px 10px',border:K.bd,textAlign:'left',fontSize:12,fontWeight:500}}>スタッフ</th>
-                    <th style={{padding:'7px 10px',border:K.bd,textAlign:'center',fontSize:12,fontWeight:500}}>付与日数</th>
-                    <th style={{padding:'7px 10px',border:K.bd,textAlign:'center',fontSize:12,fontWeight:500}}>消化日数</th>
-                    <th style={{padding:'7px 10px',border:K.bd,textAlign:'center',fontSize:12,fontWeight:500}}>残日数</th>
-                    <th style={{padding:'7px 10px',border:K.bd,textAlign:'center',fontSize:12,fontWeight:500}}>申請件数</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {staff.map(s=>{
-                    const pl=paidLeave[s.id]||{granted:0,history:[]};
-                    const used=calcUsedDays(pl.history);
-                    const rem=calcRemaining(pl.granted,pl.history);
-                    const cnt=(pl.history||[]).length;
-                    return(
-                      <tr key={s.id}>
-                        <td style={{padding:'6px 10px',border:K.bd}}>
-                          <div style={{display:'flex',alignItems:'center',gap:6}}>
-                            <span style={{width:8,height:8,borderRadius:'50%',background:s.color,flexShrink:0}}/>
-                            <span style={{fontWeight:500,fontSize:13}}>{s.name}</span>
-                          </div>
-                        </td>
-                        <td style={{padding:'6px 10px',border:K.bd,textAlign:'center'}}>
-                          <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:4}}>
-                            <button onClick={()=>setPaidGranted(s.id,(pl.granted||0)-1)} style={{...cntBtn}}>-</button>
-                            <span style={{fontSize:14,fontWeight:500,minWidth:30,textAlign:'center'}}>{pl.granted||0}</span>
-                            <button onClick={()=>setPaidGranted(s.id,(pl.granted||0)+1)} style={{...cntBtn}}>+</button>
-                            <span style={{fontSize:11,color:K.textS}}>日</span>
-                          </div>
-                        </td>
-                        <td style={{padding:'6px 10px',border:K.bd,textAlign:'center',fontSize:13}}>{used}</td>
-                        <td style={{padding:'6px 10px',border:K.bd,textAlign:'center'}}>
-                          <span style={{fontSize:14,fontWeight:600,color:rem<=0?'#D85A30':rem<=3?'#D97706':'#1D9E75'}}>{rem}</span>
-                          <span style={{fontSize:11,color:K.textS,marginLeft:2}}>日</span>
-                          {rem<=0&&used>0&&<span style={{display:'block',fontSize:10,color:'#D85A30'}}>残日数なし</span>}
-                        </td>
-                        <td style={{padding:'6px 10px',border:K.bd,textAlign:'center',fontSize:13,color:K.textS}}>{cnt}件</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
 
           {/* ── スタッフからの申請（未反映） ── */}
           {(()=>{
@@ -5409,6 +5353,63 @@ ${bodyHtml}
                 </div>
               );
             })()}
+          </div>
+
+          <div style={{fontWeight:500,fontSize:16,marginBottom:4}}>有給休暇管理（参照用）</div>
+          <p style={{fontSize:12,color:K.textS,marginBottom:16,lineHeight:1.6}}>
+            スタッフごとの有給付与日数を設定し、申請履歴を確認できます。
+            有給の申請はシフト表画面で日付を選択→「臨時条件」タブから行えます。
+          </p>
+
+          {/* ── 付与日数設定 ＆ 残日数サマリー ── */}
+          <div style={{background:K.bg,border:K.bd,borderRadius:K.rlg,padding:16,marginBottom:20}}>
+            <div style={{fontWeight:500,fontSize:14,marginBottom:12,paddingBottom:8,borderBottom:K.bd}}>付与日数・残日数</div>
+            <div style={{overflowX:'auto'}}>
+              <table style={{borderCollapse:'collapse',width:'100%',minWidth:500}}>
+                <thead>
+                  <tr style={{background:K.bgS}}>
+                    <th style={{padding:'7px 10px',border:K.bd,textAlign:'left',fontSize:12,fontWeight:500}}>スタッフ</th>
+                    <th style={{padding:'7px 10px',border:K.bd,textAlign:'center',fontSize:12,fontWeight:500}}>付与日数</th>
+                    <th style={{padding:'7px 10px',border:K.bd,textAlign:'center',fontSize:12,fontWeight:500}}>消化日数</th>
+                    <th style={{padding:'7px 10px',border:K.bd,textAlign:'center',fontSize:12,fontWeight:500}}>残日数</th>
+                    <th style={{padding:'7px 10px',border:K.bd,textAlign:'center',fontSize:12,fontWeight:500}}>申請件数</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {staff.map(s=>{
+                    const pl=paidLeave[s.id]||{granted:0,history:[]};
+                    const used=calcUsedDays(pl.history);
+                    const rem=calcRemaining(pl.granted,pl.history);
+                    const cnt=(pl.history||[]).length;
+                    return(
+                      <tr key={s.id}>
+                        <td style={{padding:'6px 10px',border:K.bd}}>
+                          <div style={{display:'flex',alignItems:'center',gap:6}}>
+                            <span style={{width:8,height:8,borderRadius:'50%',background:s.color,flexShrink:0}}/>
+                            <span style={{fontWeight:500,fontSize:13}}>{s.name}</span>
+                          </div>
+                        </td>
+                        <td style={{padding:'6px 10px',border:K.bd,textAlign:'center'}}>
+                          <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:4}}>
+                            <button onClick={()=>setPaidGranted(s.id,(pl.granted||0)-1)} style={{...cntBtn}}>-</button>
+                            <span style={{fontSize:14,fontWeight:500,minWidth:30,textAlign:'center'}}>{pl.granted||0}</span>
+                            <button onClick={()=>setPaidGranted(s.id,(pl.granted||0)+1)} style={{...cntBtn}}>+</button>
+                            <span style={{fontSize:11,color:K.textS}}>日</span>
+                          </div>
+                        </td>
+                        <td style={{padding:'6px 10px',border:K.bd,textAlign:'center',fontSize:13}}>{used}</td>
+                        <td style={{padding:'6px 10px',border:K.bd,textAlign:'center'}}>
+                          <span style={{fontSize:14,fontWeight:600,color:rem<=0?'#D85A30':rem<=3?'#D97706':'#1D9E75'}}>{rem}</span>
+                          <span style={{fontSize:11,color:K.textS,marginLeft:2}}>日</span>
+                          {rem<=0&&used>0&&<span style={{display:'block',fontSize:10,color:'#D85A30'}}>残日数なし</span>}
+                        </td>
+                        <td style={{padding:'6px 10px',border:K.bd,textAlign:'center',fontSize:13,color:K.textS}}>{cnt}件</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {/* ── 使い方ガイド ── */}
