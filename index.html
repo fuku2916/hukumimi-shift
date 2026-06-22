@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>シフト管理 v81</title>
+<title>シフト管理 v82</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -46,7 +46,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v81';
+const APP_VERSION = 'v82';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── 診療枠カラーパレット ──
@@ -839,6 +839,29 @@ const APP_UNIT=(()=>{
 const UNIT_LABELS={clerk:'クラーク',nurse:'ナース',doctor:'ドクター'};
 const APP_UNIT_LABEL=UNIT_LABELS[APP_UNIT]||'';
 const ROW_ID=APP_UNIT||'main'; // Supabaseの保存行ID（clerk / nurse / doctor）
+// ── マルチクリニック対応（2026-06-22）──
+// クリニックを指定すると shift_data を行 id=<clinic> で扱い、診療枠/休診日を data.shared に一本化する。
+// クリニック未指定（従来URL）は legacy モード＝今までどおり id=main の {clerk,nurse,doctor} を使う（後方互換）。
+const CLINIC_KEYS=['ekimae','iguchi','karasuma']; // 駅前 / いぐち / みずたに（烏丸今出川）。demachiは対象外
+const CLINIC_LABELS={ekimae:'駅前',iguchi:'いぐち',karasuma:'みずたに'};
+const APP_CLINIC=(()=>{
+  try{
+    const qs=new URLSearchParams(location.search);
+    const c=(qs.get('clinic')||qs.get('c')||'').toLowerCase();
+    if(CLINIC_KEYS.indexOf(c)>=0)return c;
+    const h=(location.hash||'').replace(/^#/,'').toLowerCase();
+    if(CLINIC_KEYS.indexOf(h)>=0)return h;
+    const p=(location.pathname||'').toLowerCase();
+    for(const k of CLINIC_KEYS){ if(p.indexOf(k)>=0)return k; }
+    const saved=(localStorage.getItem('fukumimi_clinic')||'').toLowerCase();
+    if(CLINIC_KEYS.indexOf(saved)>=0)return saved;
+  }catch(e){}
+  return '';
+})();
+const CLINIC_LABEL=CLINIC_LABELS[APP_CLINIC]||'';
+const CLINIC_MODE=!!APP_CLINIC; // true＝クリニック行モード（shift_dataをid=<clinic>で扱う）
+// data.shared に置く共通キー（クリニック内の全職種で共有）
+const SHARED_KEYS=['clinicName','slots','newSlotCounter','manualClosedDays'];
 try{ document.title='シフト管理'+(APP_UNIT_LABEL?'（'+APP_UNIT_LABEL+'）':'')+' '+APP_VERSION; }catch(e){}
 // ================================================================
 
@@ -869,13 +892,27 @@ const SB={
   signOut(){ SB_ACCESS_TOKEN=''; try{localStorage.removeItem(PASS_KEY);}catch(e){} },
   // 既存の「main」行をそのまま使い、その中を職種(clerk/nurse/doctor)ごとに小分けして保存。
   // 新しい行を作らないので、クラウド側の権限設定（行作成の許可）が不要。
+  // shift_data はクリニックモードなら行 id=<clinic>、それ以外は従来 id=main。
+  _rowId(table){ return (table==='shift_data'&&CLINIC_MODE)?APP_CLINIC:'main'; },
+  // クリニック行 data（{shared,doctor,nurse,clerk}）から、自職種ぶん＋共通(shared)を1つに合成。
+  // アプリ内の形（slots等を含む1つのオブジェクト）は従来どおりに保つ。
+  _mergeClinic(all){
+    const u=APP_UNIT||'doctor';
+    const unitData=(all&&typeof all==='object'&&all[u]&&typeof all[u]==='object')?all[u]:{};
+    const shared=(all&&all.shared&&typeof all.shared==='object')?all.shared:{};
+    const merged={...unitData};
+    SHARED_KEYS.forEach(k=>{ if(shared[k]!==undefined)merged[k]=shared[k]; });
+    return (Object.keys(unitData).length||Object.keys(shared).length)?merged:null;
+  },
   async get(table){
+    const rid=this._rowId(table); const clinic=(table==='shift_data'&&CLINIC_MODE);
     for(let a=0;a<2;a++){
       try{
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.main&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
         if(r.status===401&&a===0&&await sbReauth())continue;
         if(!r.ok)return null;
         const d=await r.json(); const all=d[0]?.data; const u=APP_UNIT||'main';
+        if(clinic)return this._mergeClinic(all);
         return (all&&typeof all==='object'&&Object.prototype.hasOwnProperty.call(all,u))?all[u]:null;
       }catch(e){return null;}
     }
@@ -883,12 +920,14 @@ const SB={
   },
   // ok=クラウドに到達できたか（empty と 通信失敗 を区別する）
   async getSafe(table){
+    const rid=this._rowId(table); const clinic=(table==='shift_data'&&CLINIC_MODE);
     for(let a=0;a<2;a++){
       try{
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.main&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
         if(r.status===401&&a===0&&await sbReauth())continue;
         if(!r.ok)return {ok:false,data:null};
         const d=await r.json(); const all=d[0]?.data; const u=APP_UNIT||'main';
+        if(clinic)return {ok:true,data:this._mergeClinic(all)};
         return {ok:true,data:(all&&typeof all==='object'&&Object.prototype.hasOwnProperty.call(all,u))?all[u]:null};
       }catch(e){return {ok:false,data:null};}
     }
@@ -908,16 +947,29 @@ const SB={
   },
   async set(table,data){
     const u=APP_UNIT||'main';
+    const rid=this._rowId(table); const clinic=(table==='shift_data'&&CLINIC_MODE);
     for(let a=0;a<2;a++){
       try{
-        // 既存のmain行を読み、他職種の小分け(clerk/nurse/doctor)を保ったまま、自分の職種ぶんだけ更新
+        // 既存行を読み、他職種・他のsharedキーを保ったまま、該当ぶんだけ更新
         let all={};
         try{
-          const cur=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.main&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
-          if(cur.ok){const j=await cur.json();const ex=j[0]?.data;if(ex&&typeof ex==='object'){['clerk','nurse','doctor'].forEach(k=>{if(ex[k]!==undefined)all[k]=ex[k];});}}
+          const cur=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+          if(cur.ok){const j=await cur.json();const ex=j[0]?.data;if(ex&&typeof ex==='object'){
+            if(clinic){ all={...ex}; }
+            else { ['clerk','nurse','doctor'].forEach(k=>{if(ex[k]!==undefined)all[k]=ex[k];}); }
+          }}
         }catch(_){}
-        all[u]=data;
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.main`,{
+        if(clinic){
+          // 診療枠・休診日など共通キーは data.shared に、それ以外は data[職種] に格納
+          const shared={...(all.shared&&typeof all.shared==='object'?all.shared:{})};
+          SHARED_KEYS.forEach(k=>{ if(data[k]!==undefined)shared[k]=data[k]; });
+          shared.updatedAt=new Date().toISOString();
+          const unitData={...data}; SHARED_KEYS.forEach(k=>{delete unitData[k];});
+          all.shared=shared; all[u]=unitData;
+        } else {
+          all[u]=data;
+        }
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${rid}`,{
           method:'PATCH',
           headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer(),'Content-Type':'application/json','Prefer':'return=minimal'},
           body:JSON.stringify({data:all,updated_at:new Date().toISOString()})
@@ -931,9 +983,10 @@ const SB={
 };
 const SB_ENABLED=SUPABASE_URL!=='YOUR_SUPABASE_URL';
 
+const _LSC=APP_CLINIC?('_'+APP_CLINIC):''; // 端末保存もクリニックごとに分ける（未指定なら従来キー）
 const _LSU=APP_UNIT?('_'+APP_UNIT):''; // 端末保存も職種ごとに分ける
-const LS_KEY='fukumimi_shift_v4'+_LSU;
-const LS_REQ='fukumimi_requests_v1'+_LSU; // スタッフ申請データ（モード共通）
+const LS_KEY='fukumimi_shift_v4'+_LSC+_LSU;
+const LS_REQ='fukumimi_requests_v1'+_LSC+_LSU; // スタッフ申請データ（モード共通）
 const ADMIN_PIN_KEY='fukumimi_admin_pin'; // 管理者PIN（localStorage直接保存）
 function loadAdminPin(){try{return localStorage.getItem(ADMIN_PIN_KEY)||'';}catch(e){return '';}}
 function saveAdminPin(pin){try{if(pin)localStorage.setItem(ADMIN_PIN_KEY,pin);else localStorage.removeItem(ADMIN_PIN_KEY);}catch(e){}}
@@ -2440,6 +2493,40 @@ ${bodyHtml}
     setLockedMonths(prev=>{const n={...prev};delete n[curMonthKey];return n;});
     setLockedAsgn(prev=>{const n={...prev};dates.forEach(d=>{delete n[tdk(d)];});return n;});
   }
+  // ── 駅前データの移行（旧 id=main の {clerk,nurse,doctor} → 新 id=ekimae の {shared,doctor,nurse,clerk}）──
+  // 一度きり。ドクターの slots/manualClosedDays を共通(shared)の「正」に昇格。実行前にJSONバックアップを自動保存。
+  async function migrateEkimaeFromMain(){
+    if(APP_CLINIC!=='ekimae'){alert('移行は駅前モードで実行してください。\nURL末尾に ?clinic=ekimae&unit=doctor を付けて開いてから実行してください。');return;}
+    if(!window.confirm('駅前の旧データ(id=main)を新クリニック行(id=ekimae)へ移行します。\n・診療枠／休診日は「ドクター」を正として共通(shared)に昇格\n・各職種の配置・スタッフ等はそのまま移行\n\n先に旧データのJSONバックアップを保存します。続けますか？'))return;
+    try{
+      const main=await SB.getFull('shift_data');
+      if(!main||typeof main!=='object'||!(main.doctor||main.nurse||main.clerk)){alert('旧データ(id=main)が取得できませんでした。ログイン状態とデータをご確認ください。');return;}
+      // バックアップ保存
+      try{
+        const blob=new Blob([JSON.stringify(main,null,2)],{type:'application/json'});
+        const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+        a.download='backup_shift_data_main_'+new Date().toISOString().replace(/[:.]/g,'-')+'.json';
+        document.body.appendChild(a);a.click();a.remove();
+      }catch(_){}
+      const base=main.doctor||main.nurse||main.clerk||{};
+      const shared={
+        clinicName:(base.clinicName||'京都駅前耳鼻咽喉科アレルギー科クリニック'),
+        slots:base.slots||{},
+        newSlotCounter:base.newSlotCounter||0,
+        manualClosedDays:base.manualClosedDays||{},
+        updatedAt:new Date().toISOString()
+      };
+      const all={shared};
+      ['doctor','nurse','clerk'].forEach(k=>{ const b={...(main[k]||{})}; SHARED_KEYS.forEach(s=>delete b[s]); all[k]=b; });
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.ekimae`,{
+        method:'PATCH',
+        headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer(),'Content-Type':'application/json','Prefer':'return=minimal'},
+        body:JSON.stringify({data:all,updated_at:new Date().toISOString()})
+      });
+      if(r.ok){alert('✅ 移行が完了しました。\nページを再読み込みすると、駅前(ekimae)の共通構造で表示されます。\n（旧 id=main はそのまま残っています）');}
+      else{alert('移行の書き込みに失敗しました（status '+r.status+'）。\nSupabaseで id=ekimae の行が作成済みか、権限をご確認ください。');}
+    }catch(e){alert('移行に失敗しました：'+(e&&e.message||e));}
+  }
 
   function togExclusion(dk,slotId,sid){
     const inAsgn=(asgn[dk]?.[slotId]||[]).includes(sid);
@@ -3732,7 +3819,7 @@ ${bodyHtml}
       <div style={{minHeight:'100vh',background:'linear-gradient(135deg,#EBF4FF 0%,#F0FDF4 100%)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
         <div style={{background:'#fff',borderRadius:20,padding:32,width:'100%',maxWidth:360,boxShadow:'0 8px 32px rgba(0,0,0,0.10)',textAlign:'center'}}>
           <div style={{fontSize:34,marginBottom:8}}>🔒</div>
-          <div style={{fontWeight:700,fontSize:18,color:'#1E293B',marginBottom:2}}>医療法人 福耳会{APP_UNIT_LABEL?'（'+APP_UNIT_LABEL+'）':''}</div>
+          <div style={{fontWeight:700,fontSize:18,color:'#1E293B',marginBottom:2}}>医療法人 福耳会{(CLINIC_LABEL||APP_UNIT_LABEL)?'（'+[CLINIC_LABEL,APP_UNIT_LABEL].filter(Boolean).join('・')+'）':''}</div>
           <div style={{fontSize:13,color:'#64748B',marginBottom:20}}>シフト管理システム</div>
           {authStatus==='checking'?(
             <div style={{fontSize:13,color:'#64748B',padding:'20px 0'}}>🔄 確認中…</div>
@@ -3767,7 +3854,7 @@ ${bodyHtml}
         <div style={{background:'#fff',borderRadius:20,padding:32,width:'100%',maxWidth:380,boxShadow:'0 8px 32px rgba(0,0,0,0.10)',textAlign:'center'}}>
           {/* ロゴを5回タップすると管理者の入口が出る（スタッフには見えない隠し入口） */}
           <div onClick={onSecretAdminTap} style={{fontSize:36,marginBottom:10,cursor:'default',userSelect:'none'}}>🏥</div>
-          <div style={{fontWeight:700,fontSize:20,color:'#1E293B',marginBottom:3}}>医療法人 福耳会{APP_UNIT_LABEL?'（'+APP_UNIT_LABEL+'）':''}</div>
+          <div style={{fontWeight:700,fontSize:20,color:'#1E293B',marginBottom:3}}>医療法人 福耳会{(CLINIC_LABEL||APP_UNIT_LABEL)?'（'+[CLINIC_LABEL,APP_UNIT_LABEL].filter(Boolean).join('・')+'）':''}</div>
           <div style={{fontSize:13,color:'#64748B',marginBottom:28}}>シフト管理システム <span style={{fontSize:11,color:'#94A3B8',marginLeft:4}}>{APP_VERSION}</span></div>
 
           {/* 管理者モード PIN入力（隠し入口：showAdminEntryのときだけ表示） */}
@@ -3934,7 +4021,7 @@ ${bodyHtml}
           <button onClick={async()=>{await flushStaffToCloud();setAppMode('select');setStaffMyId(null);setStaffReqDk(null);setStaffTab('shift');}}
             style={{display:'flex',alignItems:'center',gap:4,padding:'4px 8px',border:'none',background:'none',cursor:'pointer',marginRight:8,flexShrink:0}}>
             <span style={{fontSize:18}}>🏥</span>
-            <span style={{fontWeight:700,fontSize:14,color:'#1E293B',whiteSpace:'nowrap'}}>福耳会{APP_UNIT_LABEL?'｜'+APP_UNIT_LABEL:''}</span>
+            <span style={{fontWeight:700,fontSize:14,color:'#1E293B',whiteSpace:'nowrap'}}>福耳会{CLINIC_LABEL?'｜'+CLINIC_LABEL:''}{APP_UNIT_LABEL?'｜'+APP_UNIT_LABEL:''}</span>
           </button>
           {/* 名前 */}
           <span style={{width:9,height:9,borderRadius:'50%',background:staffMe?.color||'#7C3AED',flexShrink:0,marginRight:6}}/>
@@ -4315,7 +4402,7 @@ ${bodyHtml}
           <button onClick={()=>{setAppMode('select');setAdminPinInput('');setAdminPinErr('');setOpenMenu(null);}}
             style={{display:'flex',alignItems:'center',gap:4,padding:'4px 8px',border:'none',background:'none',cursor:'pointer',marginRight:6,flexShrink:0}}>
             <span style={{fontSize:20}}>🏥</span>
-            <span style={{fontWeight:700,fontSize:'var(--fs-menu)',color:K.text,whiteSpace:'nowrap'}}>福耳会{APP_UNIT_LABEL?'｜'+APP_UNIT_LABEL:''}</span>
+            <span style={{fontWeight:700,fontSize:'var(--fs-menu)',color:K.text,whiteSpace:'nowrap'}}>福耳会{CLINIC_LABEL?'｜'+CLINIC_LABEL:''}{APP_UNIT_LABEL?'｜'+APP_UNIT_LABEL:''}</span>
           </button>
 
           {/* スタッフ申請バッジ */}
@@ -4417,6 +4504,7 @@ ${bodyHtml}
               <MenuItem icon="💾" label="全データ保存" onClick={()=>{saveData();setOpenMenu(null);}}/>
               <MenuItem icon="📂" label="全データ読み込み" isFile accept=".json" onChange={e=>{loadData(e);setOpenMenu(null);}}/>
               <MenuItem icon="⚠️" label="初期化..." danger onClick={()=>{setOpenMenu(null);const choice=window.prompt('1→今月 2→全月 3→完全リセット');if(choice==='1'){if(window.confirm('今月をリセット？')){setAsgn(p=>{const n={...p};dates.forEach(d=>{delete n[tdk(d)];});return n;});setTmps(p=>{const n={...p};dates.forEach(d=>{delete n[tdk(d)];});return n;});}}else if(choice==='2'){if(window.confirm('全月リセット？')){setAsgn({});setTmps({});}}else if(choice==='3'){if(window.confirm('完全リセット？')){localStorage.removeItem(LS_KEY);window.location.reload();}}}}/>
+              {CLINIC_MODE&&APP_CLINIC==='ekimae'&&<MenuItem icon="🔁" label="駅前データを移行(初回のみ)" onClick={()=>{setOpenMenu(null);migrateEkimaeFromMain();}}/>}
               <MenuDivider/>
               <MenuLabel text="設定"/>
               <MenuItem icon="👤" label="スタッフ" onClick={()=>{setTab('staff');setOpenMenu(null);}} active={tab==='staff'}/>
@@ -6842,9 +6930,34 @@ window.debugShift=function(){
   }catch(e){console.error(e);}
 };
 console.log('デバッグ: window.debugShift() で状態確認できます');
+// クリニック未選択時の選択画面（拠点を選ぶ入口）
+function ClinicPicker(){
+  const pick=(c)=>{ try{localStorage.setItem('fukumimi_clinic',c);}catch(e){} location.replace(location.pathname+'?clinic='+c); };
+  const colors={ekimae:'#2563EB',iguchi:'#059669',karasuma:'#9333EA'};
+  const btn=(c)=>(
+    <button key={c} onClick={()=>pick(c)}
+      style={{display:'flex',alignItems:'center',gap:12,width:'100%',padding:'16px 18px',marginBottom:12,
+        border:'2px solid '+colors[c],borderRadius:14,background:'#fff',color:'#1E293B',cursor:'pointer',fontSize:18,fontWeight:700,textAlign:'left'}}>
+      <span style={{fontSize:24}}>🏥</span>
+      <span>{CLINIC_LABELS[c]}クリニック</span>
+      <span style={{marginLeft:'auto',color:colors[c],fontSize:20}}>→</span>
+    </button>
+  );
+  return(
+    <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'#F1F5F9',padding:16,fontFamily:'-apple-system,BlinkMacSystemFont,Segoe UI,Hiragino Sans,sans-serif'}}>
+      <div style={{background:'#fff',borderRadius:18,boxShadow:'0 8px 32px rgba(0,0,0,0.12)',padding:28,width:'100%',maxWidth:380}}>
+        <div style={{textAlign:'center',marginBottom:6,fontSize:13,color:'#64748B'}}>🏥 医療法人 福耳会</div>
+        <div style={{textAlign:'center',fontWeight:700,fontSize:18,marginBottom:4}}>シフト管理</div>
+        <div style={{textAlign:'center',fontSize:12,color:'#64748B',marginBottom:18}}>どのクリニックをひらきますか？</div>
+        {CLINIC_KEYS.map(c=>btn(c))}
+        <div style={{fontSize:11,color:'#94A3B8',textAlign:'center',marginTop:6,lineHeight:1.6}}>一度選ぶとこの端末では次回から自動で開きます。<br/>変更はURL末尾に <b>?clinic=ekimae / iguchi / karasuma</b> を付けてもできます。</div>
+      </div>
+    </div>
+  );
+}
 // 職種未選択時の選択画面（1つのアプリでクラーク/ナース/ドクターを切り替える入口）
 function UnitPicker(){
-  const pick=(u)=>{ try{localStorage.setItem('fukumimi_unit',u);}catch(e){} location.replace(location.pathname+'?unit='+u); };
+  const pick=(u)=>{ try{localStorage.setItem('fukumimi_unit',u);}catch(e){} const c=APP_CLINIC?('clinic='+APP_CLINIC+'&'):''; location.replace(location.pathname+'?'+c+'unit='+u); };
   const btn=(u,label,icon,color)=>(
     <button key={u} onClick={()=>pick(u)}
       style={{display:'flex',alignItems:'center',gap:12,width:'100%',padding:'16px 18px',marginBottom:12,
@@ -6868,7 +6981,10 @@ function UnitPicker(){
     </div>
   );
 }
-ReactDOM.createRoot(document.getElementById('root')).render(APP_UNIT?<App />:<UnitPicker />);
+// 起動時の画面切替：拠点も職種も未指定→クリニック選択／拠点のみ済→職種選択／職種済→アプリ
+// ※ 従来URL（?unit=…でクリニック未指定）はそのままアプリ起動＝legacyモードで後方互換。
+const _rootView=(!APP_CLINIC&&!APP_UNIT)?<ClinicPicker />:(!APP_UNIT?<UnitPicker />:<App />);
+ReactDOM.createRoot(document.getElementById('root')).render(_rootView);
 </script>
 </body>
 </html>
