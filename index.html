@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>シフト管理 v86</title>
+<title>シフト管理 v87</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -46,7 +46,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v86';
+const APP_VERSION = 'v87';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── 診療枠カラーパレット ──
@@ -1370,6 +1370,13 @@ function App(){
         // 新クリニックを移行前に一度開いた端末で、空データがクラウドより新しく見えて読み込まれない問題への対策。
         const localHasShift=!!(saved&&saved.asgn&&Object.keys(saved.asgn).length>0);
         const cloudWins = !localHasShift || !localTs || (cloudTs && cloudTs>=localTs);
+        // クリニックモードの共通(shared)＝診療枠・休診日・採番は全職種で同一。
+        // ある職種の未公開編集の有無に関わらず、共通部分は常にクラウドの版を採用する。
+        if(CLINIC_MODE && sd){
+          if(sd.slots)setSlots(sd.slots);
+          if(sd.manualClosedDays)setManualClosedDays(sd.manualClosedDays);
+          if(sd.newSlotCounter)setNewSlotCounter(sd.newSlotCounter);
+        }
         if(sd&&Object.keys(sd).length>0 && cloudWins){
           if(sd.staff)setStaff(sd.staff);
           if(sd.slots)setSlots(sd.slots);
