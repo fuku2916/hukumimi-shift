@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v104</title>
+<title>シフト管理 v105</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -50,7 +50,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v104';
+const APP_VERSION = 'v105';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -3755,10 +3755,12 @@ ${bodyHtml}
     const sObj=sid=>staff.find(x=>x.id===sid);
     const skillOK=(sid,slot)=>{const s=sObj(sid);if(!s)return false;const sk=staffSkill(s);if(slot.type==='out'&&sk==='surg')return false;if(slot.type==='surg'&&sk==='out')return false;return true;};
     const slotGap=(da,dk,slot,dow)=>{const r=slotRangeMin(slot);if(!r||r.s==null)return null;const iv=(da[slot.id]||[]).filter(sid=>!isOffOrExcl(dk,slot.id,sid)).map(sid=>staffPresenceInSlot(sObj(sid),slot,dow,da,manualExclusions[dk])).filter(Boolean);return firstUncoveredBand(r,iv);};
+    // v105: 無人帯ゼロを最優先。この入れ替えは無人帯解消のためだけに走るので、本人の「希望」週上限
+    // (wh.max=「○時間以内」等)はソフト扱いにして超過を許す（例: 上限20hの大滝を午後手術に入れ24hでも可）。
+    // ただし「1日8時間(DAILY_LIMIT)」と「法定相当の週上限 WEEKLY_LIMIT(40h)」は引き続き厳守する。
     const dayWeekOK=(dk,sid,trial,week)=>{
       if(dayHours(dk,sid,trial,manualExclusions,slots,staff)>DAILY_LIMIT)return false;
-      const s=sObj(sid);const wh=parseWeeklyHours(s&&s.notes);
-      if(wh&&wh.max>0&&week.length>0){const wkH=week.reduce((a,d3)=>a+dayHours(tdk(d3),sid,trial,manualExclusions,slots,staff),0);if(wkH>Math.min(wh.max,WEEKLY_LIMIT))return false;}
+      if(week.length>0){const wkH=week.reduce((a,d3)=>a+dayHours(tdk(d3),sid,trial,manualExclusions,slots,staff),0);if(wkH>WEEKLY_LIMIT)return false;}
       return true;
     };
     dates.forEach(d=>{
