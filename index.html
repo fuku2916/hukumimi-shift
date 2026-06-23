@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v106</title>
+<title>シフト管理 v107</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -50,7 +50,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v106';
+const APP_VERSION = 'v107';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -169,6 +169,10 @@ function staffStartMin(s,dow){
 // 午前手術＋午後手術の「通し」は6時間勤務(9:30→15:30)として退勤を15:30に丸める労務ルール。
 // 重要：固定ID('am_surg'等)ではなく「その曜日に現在ある手術コマ」を時間帯で判定する。
 // これにより、コマID変更で残った古い割当（例: 旧'am_surg'）に引っ張られて誤って15:30になる不具合を防ぐ。
+// v107: 午前手術・午後手術の双方に「本人以外の在席者」がいる場合は、その人達がいる間に中抜け休憩を
+//       取れる＝通し(連続6h)ではないので、15:30キャップを適用しない（本人の通常退勤まで働ける）。
+//       例: 午前手術=北口+青木 / 午後手術=大滝+青木 なら、青木は休憩を挟んで18:00まで在席可。
+//       本人しか手術コマにいない（真の通し）場合は従来どおり15:30で打ち切る。
 function daySlotsForDow(dow){
   return (SLOTS_BY_DOW&&SLOTS_BY_DOW[dow])||(SLOTS&&SLOTS[dow])||[];
 }
@@ -177,15 +181,25 @@ function bothSurgeryCap(da,sid,dow,excl){
   var daySlots=daySlotsForDow(dow);
   // 本人が入っている「現在の手術コマ」だけを集める（存在しない古いコマIDは無視）。
   // 除外（手動で外した）コマは通し判定に含めない。
-  var hasAm=false,hasPm=false;
+  var amSlots=[],pmSlots=[];
   daySlots.forEach(function(sl){
     if(!sl||sl.type!=='surg')return;
     if((da[sl.id]||[]).indexOf(sid)<0)return;
     if(excl&&(excl[sl.id]||[]).indexOf(sid)>=0)return; // このコマは除外されているので通しに数えない
     var r=slotRangeMin(sl); if(!r||r.s==null)return;
-    if(r.s<12*60)hasAm=true; else hasPm=true;
+    if(r.s<12*60)amSlots.push(sl); else pmSlots.push(sl);
   });
-  return (hasAm&&hasPm)?(15*60+30):null;
+  if(!(amSlots.length&&pmSlots.length))return null; // 通しでない
+  // v107: 双方の手術コマに本人以外の在席者がいれば、中抜け休憩が可能なのでキャップしない
+  var hasOther=function(list){
+    return list.some(function(sl){
+      return (da[sl.id]||[]).some(function(o){
+        return o!==sid && !(excl&&(excl[sl.id]||[]).indexOf(o)>=0);
+      });
+    });
+  };
+  if(hasOther(amSlots)&&hasOther(pmSlots))return null;
+  return (15*60+30); // 本人しかいない＝真の通し → 15:30
 }
 // その日の実効退勤時刻（分）。通し手術なら15:30で打ち切る。excl=その日の除外マップ(manualExclusions[dk])
 function effEndMin(s,dow,da,excl){
