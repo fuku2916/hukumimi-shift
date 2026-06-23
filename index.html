@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v105</title>
+<title>シフト管理 v106</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -50,7 +50,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v105';
+const APP_VERSION = 'v106';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -3477,12 +3477,12 @@ ${bodyHtml}
     };
     // sidがそのコマに有資格か
     //  ・外来(out)コマ: 特別なスキル不要 → 勤務可能な人は誰でも配置可（新規登録者も対象）
-    //  ・手術(surg)等: ベース登録 or 当月同曜日で担当実績がある人のみ（専門性を担保）
+    //  ・手術(surg)等: v106 → 勤務条件のスキル(staffSkill)で判定。「手術のみ/外来・手術可」の人は手術コマOK、
+    //    「外来のみ」は不可。（旧版はベース登録/同曜日実績のみ許可していたため、手術可の人でも当該曜日に
+    //     実績がないと応援追加できず、木曜午後手術などの無人帯が埋まらなかった。スキルが信頼できる現行データに合わせて緩和）
     const qualified=(dk,sid,slot,dow)=>{
       if(slot.type==='out')return true;
-      const inBase=['A','B'].some(p=>(((baseShift[p]||{})[dow]||{})[slot.id]||[]).includes(sid));
-      if(inBase)return true;
-      return dates.some(d2=>{const k2=tdk(d2);return d2.getDay()===dow&&k2!==dk&&(na[k2]?.[slot.id]||[]).includes(sid);});
+      return staffSkill(staff.find(x=>x.id===sid))!=='out';
     };
     // sがその曜日(dow)に勤務可能か（新規応援配置の安全弁）
     //  ・勤務条件(cond.days)が設定されていればそれを信頼（UIで登録した人はこちら）
@@ -3497,12 +3497,13 @@ ${bodyHtml}
       return dates.some(d2=>d2.getDay()===dow&&Object.values(na[tdk(d2)]||{}).some(ids=>(ids||[]).includes(s.id)));
     };
     // trial配置でsidが1日8h・週上限を超えないか
+    // v106: 無人帯解消を最優先（v105と整合）。本人の「希望」週上限(wh.max=○時間以内等)はソフト扱いにして
+    //       超過を許す。1日8時間(DAILY_LIMIT)と法定相当の週40時間(WEEKLY_LIMIT)のみ厳守。
     const trialOK=(dk,sid,trial,week)=>{
       if(dayHours(dk,sid,trial,manualExclusions,slots,staff)>DAILY_LIMIT)return false;
-      const s=staff.find(x=>x.id===sid); const wh=parseWeeklyHours(s&&s.notes);
-      if(wh&&wh.max>0&&week&&week.length>0){
+      if(week&&week.length>0){
         const wkH=week.reduce((sum,d3)=>sum+dayHours(tdk(d3),sid,trial,manualExclusions,slots,staff),0);
-        if(wkH>Math.min(wh.max,WEEKLY_LIMIT))return false;
+        if(wkH>WEEKLY_LIMIT)return false;
       }
       return true;
     };
