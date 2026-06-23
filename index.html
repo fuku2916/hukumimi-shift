@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>シフト管理 v87</title>
+<title>シフト管理 v89</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -46,7 +46,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v87';
+const APP_VERSION = 'v89';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── 診療枠カラーパレット ──
@@ -1606,7 +1606,7 @@ function App(){
   const [eid,setEid]=useState(null);
   const [ef,setEf]=useState({});
   const [showAdd,setShowAdd]=useState(false);
-  const [addF,setAddF]=useState({name:'',cond:defaultCond(),memo:'',color:COLORS[0],pin:'',workType:'normal',code:'',fullName:''});
+  const [addF,setAddF]=useState({name:'',cond:defaultCond(),memo:'',color:COLORS[0],pin:'',workType:'normal',code:'',fullName:'',email:''});
   const [nid,setNid]=useState(()=>saved?.staff?Math.max(...saved.staff.map(s=>s.id),9)+1:10);
   const [aLoad,setALoad]=useState(false);
   const [aRes,setARes]=useState(null);
@@ -2634,17 +2634,17 @@ ${bodyHtml}
     const cond=addF.cond||defaultCond();
     const notes=condToNotes(cond);
     const _ac=(addF.code||'').replace(/\D/g,'');
-    setStaff(p=>[...p,{id:newId,name:addF.name.trim(),color:addF.color,notes,cond,memo:addF.memo||'',pin:addF.pin||'',workType:addF.workType||'normal',code:_ac?_ac.padStart(7,'0'):'',fullName:(addF.fullName||'').trim()}]);
+    setStaff(p=>[...p,{id:newId,name:addF.name.trim(),color:addF.color,notes,cond,memo:addF.memo||'',pin:addF.pin||'',workType:addF.workType||'normal',code:_ac?_ac.padStart(7,'0'):'',fullName:(addF.fullName||'').trim(),email:(addF.email||'').trim()}]);
     setPaidLeave(prev=>({...prev,[newId]:{granted:0,history:[]}}));
     setNid(n=>n+1);
-    setAddF({name:'',cond:defaultCond(),memo:'',color:COLORS[nid%COLORS.length],pin:'',workType:'normal',code:'',fullName:''});
+    setAddF({name:'',cond:defaultCond(),memo:'',color:COLORS[nid%COLORS.length],pin:'',workType:'normal',code:'',fullName:'',email:''});
     setShowAdd(false);
   }
   function sEdit(s){
     let cond,memo;
     if(s.cond){cond=s.cond;memo=s.memo||'';}
     else{const m=notesToCond(s.notes);cond=m.cond;memo=m.memo;}
-    setEid(s.id);setEf({name:s.name,cond,memo,color:s.color,pin:s.pin||'',workType:s.workType||'normal',code:s.code||'',fullName:s.fullName||''});
+    setEid(s.id);setEf({name:s.name,cond,memo,color:s.color,pin:s.pin||'',workType:s.workType||'normal',code:s.code||'',fullName:s.fullName||'',email:s.email||''});
   }
   function svEdit(){
     setStaff(p=>p.map(s=>{
@@ -2653,7 +2653,7 @@ ${bodyHtml}
       const notes=condToNotes(cond); // 入力式から“決まった書式”の条件文を生成
       const codeDigits=(ef.code||'').replace(/\D/g,'');
       const code=codeDigits?codeDigits.padStart(7,'0'):'';
-      return {...s,name:ef.name,color:ef.color,pin:ef.pin,workType:ef.workType,cond,memo:ef.memo||'',notes,code,fullName:(ef.fullName||'').trim()};
+      return {...s,name:ef.name,color:ef.color,pin:ef.pin,workType:ef.workType,cond,memo:ef.memo||'',notes,code,fullName:(ef.fullName||'').trim(),email:(ef.email||'').trim()};
     }));
     setEid(null);
   }
@@ -4426,6 +4426,26 @@ ${bodyHtml}
             <span style={{fontWeight:700,fontSize:'var(--fs-menu)',color:K.text,whiteSpace:'nowrap'}}>福耳会{CLINIC_LABEL?'｜'+CLINIC_LABEL:''}{APP_UNIT_LABEL?'｜'+APP_UNIT_LABEL:''}</span>
           </button>
 
+          {/* クリニック切替セレクタ（管理画面のみ・クリニックモード時）。選ぶと ?clinic=<院> 付きで再読込し、その院の行を読む。
+             ・現在の院を常時明示（valueで選択中を表示＋上のロゴにも院名）
+             ・localStorageに保持しつつ、URLの?clinic=を明示するのでURL優先（誤院編集の防止）
+             ・シフト本体は自動保存しないため、未保存の編集が消えないよう切替前に確認 */}
+          {CLINIC_MODE&&(
+            <select value={APP_CLINIC}
+              title="クリニックを切り替え（ページを再読込します）"
+              onChange={e=>{
+                const c=e.target.value;
+                if(!c||c===APP_CLINIC)return;
+                if(!window.confirm('「'+(CLINIC_LABELS[c]||c)+'」に切り替えます。\n保存していない編集は失われます。\n先に「保存／公開」を済ませることをおすすめします。\n切り替えてよろしいですか？')){return;}
+                try{localStorage.setItem('fukumimi_clinic',c);}catch(_){}
+                location.replace(location.pathname+'?clinic='+c+(APP_UNIT?'&unit='+APP_UNIT:''));
+              }}
+              style={{marginRight:8,padding:'4px 8px',borderRadius:6,border:K.bd,background:K.bg,color:K.text,
+                fontSize:'var(--fs-menu)',fontWeight:700,cursor:'pointer',flexShrink:0}}>
+              {CLINIC_KEYS.map(c=>(<option key={c} value={c}>🏥 {CLINIC_LABELS[c]}</option>))}
+            </select>
+          )}
+
           {/* スタッフ申請バッジ */}
           {(()=>{let n=0;Object.values(requests).forEach(d=>Object.values(d).forEach(r=>{if(r&&['paid_full','paid_am','paid_pm','off'].includes(r.type))n++;}));return n>0?<span onClick={()=>{setTab('paid');setOpenMenu(null);}} style={{fontSize:13,background:'#FDF2F8',color:'#86198F',border:'1px solid #F9A8D4',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🌸 {n}件</span>:null;})()}
           {(()=>{let nw=0;Object.values(requests).forEach(d=>Object.values(d).forEach(r=>{if(r&&r.type==='work_wish'&&!r.decision)nw++;}));return nw>0?<span onClick={()=>{setTab('paid');setOpenMenu(null);}} style={{fontSize:13,background:'#ECFDF5',color:'#065F46',border:'1px solid #6EE7B7',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🙋 {nw}件</span>:null;})()}
@@ -5308,6 +5328,7 @@ ${bodyHtml}
                 <label style={{fontSize:11,color:K.textS,display:'block',marginBottom:4}}>氏名フルネーム（照合用・名簿と完全一致）</label>
                 <input type="text" value={addF.fullName||''} onChange={e=>setAddF({...addF,fullName:e.target.value})} placeholder="例: 小島 太郎" style={{padding:'5px 9px',border:K.bd2,borderRadius:K.rmd,fontSize:13,width:'100%',boxSizing:'border-box',background:K.bg,color:K.text}}/>
               </div>
+              <div style={{marginBottom:10}}><label style={{fontSize:11,color:K.textS,display:'block',marginBottom:3}}>✉ メールアドレス（URL送付・連絡用）</label><input type="email" value={addF.email||''} onChange={e=>setAddF({...addF,email:e.target.value})} placeholder="例: tanaka@example.com" style={{padding:'5px 9px',border:K.bd2,borderRadius:K.rmd,fontSize:13,width:'100%',boxSizing:'border-box',background:K.bg,color:K.text}}/></div>
               <button onClick={doAdd} style={{padding:'6px 18px',background:K.bgI,color:K.textI,border:K.bdI,borderRadius:K.rmd,cursor:'pointer',fontSize:13,fontWeight:500}}>追加する</button>
             </div>
           )}
@@ -5358,6 +5379,12 @@ ${bodyHtml}
                         style={{padding:'5px 9px',border:K.bd2,borderRadius:K.rmd,fontSize:13,width:'100%',boxSizing:'border-box',background:K.bg,color:K.text}}/>
                     </div>
                     <div style={{marginBottom:10}}>
+                      <label style={{fontSize:11,color:K.textS,display:'block',marginBottom:4}}>✉ メールアドレス（URL送付・連絡用）</label>
+                      <input type="email" value={ef.email||''} onChange={e=>setEf({...ef,email:e.target.value})}
+                        placeholder="例: tanaka@example.com"
+                        style={{padding:'5px 9px',border:K.bd2,borderRadius:K.rmd,fontSize:13,width:'100%',boxSizing:'border-box',background:K.bg,color:K.text}}/>
+                    </div>
+                    <div style={{marginBottom:10}}>
                       <label style={{fontSize:11,color:K.textS,display:'block',marginBottom:4}}>🌸 有給付与日数</label>
                       <div style={{display:'flex',alignItems:'center',gap:8}}>
                         <button onClick={()=>setPaidGranted(s.id,Math.max(0,(paidLeave[s.id]?.granted||0)-1))}
@@ -5386,6 +5413,18 @@ ${bodyHtml}
                         <span style={{fontSize:10,color:'#86198F',background:'#FDF2F8',borderRadius:10,padding:'1px 6px'}}>🌸 有給残{calcRemaining(paidLeave[s.id]?.granted||0,paidLeave[s.id]?.history||[])}日</span>
                       </div>
                       <div style={{fontSize:12,color:K.textS,whiteSpace:'pre-wrap',lineHeight:1.6}}>{s.notes}</div>
+                      {s.email?(
+                        <div style={{display:'flex',alignItems:'center',gap:8,marginTop:6,flexWrap:'wrap'}}>
+                          <span style={{fontSize:11,color:K.textS}}>✉ {s.email}</span>
+                          <a href={'mailto:'+s.email} title="宛先だけ入れて新規メールを開く"
+                            style={{fontSize:11,textDecoration:'none',padding:'2px 9px',borderRadius:10,border:K.bd2,background:K.bgS,color:K.text}}>✉ メール</a>
+                          <a href={'mailto:'+s.email+'?subject='+encodeURIComponent('シフト管理アプリのログインURL')+'&body='+encodeURIComponent(s.name+'さん\r\n\r\nシフトの確認・申請は、こちらのリンクからお願いします。\r\n'+location.origin+location.pathname+'?'+(APP_CLINIC?'clinic='+APP_CLINIC+'&':'')+'unit='+(APP_UNIT||'')+'\r\n\r\n※スマホで一度開いておくと、次回から自動で開きます。\r\n（医療法人 福耳会 シフト管理）')}
+                            title="件名・本文にこの人のログインURLを入れて新規メールを開く"
+                            style={{fontSize:11,textDecoration:'none',padding:'2px 9px',borderRadius:10,border:'1px solid #93C5FD',background:'#EFF6FF',color:'#1D4ED8'}}>🔗 URL送付</a>
+                        </div>
+                      ):(
+                        <div style={{fontSize:11,color:K.textS,marginTop:6}}>✉ メール未登録（「編集」から登録できます）</div>
+                      )}
                     </div>
                     <div style={{display:'flex',gap:5,flexShrink:0}}>
                       <button onClick={()=>sEdit(s)} style={{padding:'3px 10px',border:K.bd2,borderRadius:K.rmd,background:K.bgS,color:K.text,cursor:'pointer',fontSize:12}}>編集</button>
