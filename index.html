@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>シフト管理 v90</title>
+<title>シフト管理 v91</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -46,7 +46,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v90';
+const APP_VERSION = 'v91';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── 診療枠カラーパレット ──
@@ -4501,9 +4501,9 @@ ${bodyHtml}
           )}
 
           {/* スタッフ申請バッジ */}
-          {(()=>{let n=0;Object.values(requests).forEach(d=>Object.values(d).forEach(r=>{if(r&&['paid_full','paid_am','paid_pm','off'].includes(r.type))n++;}));return n>0?<span onClick={()=>{setTab('paid');setOpenMenu(null);}} style={{fontSize:13,background:'#FDF2F8',color:'#86198F',border:'1px solid #F9A8D4',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🌸 {n}件</span>:null;})()}
-          {(()=>{let nw=0;Object.values(requests).forEach(d=>Object.values(d).forEach(r=>{if(r&&r.type==='work_wish'&&!r.decision)nw++;}));return nw>0?<span onClick={()=>{setTab('paid');setOpenMenu(null);}} style={{fontSize:13,background:'#ECFDF5',color:'#065F46',border:'1px solid #6EE7B7',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🙋 {nw}件</span>:null;})()}
-          {(()=>{let nr=0;Object.values(requests).forEach(d=>Object.values(d).forEach(r=>{if(r&&r.type==='mistake_report'&&!r.resolved)nr++;}));return nr>0?<span onClick={()=>{setTab('paid');setOpenMenu(null);}} style={{fontSize:13,background:'#FFF7ED',color:'#9A3412',border:'1px solid #FDBA74',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🚩 {nr}件</span>:null;})()}
+          {(()=>{let n=0;Object.values(requests).forEach(d=>Object.values(d).forEach(r=>{if(r&&['paid_full','paid_am','paid_pm','off'].includes(r.type))n++;}));return n>0?<span onClick={()=>{setTab('paid');setOpenMenu(null);}} onDoubleClick={()=>{setTab('paid');setOpenMenu(null);setTimeout(()=>{const el=document.getElementById('paidsec-paid');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},80);}} title="ダブルクリックで休み・有給欄へ" style={{fontSize:13,background:'#FDF2F8',color:'#86198F',border:'1px solid #F9A8D4',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🌸 {n}件</span>:null;})()}
+          {(()=>{let nw=0;Object.values(requests).forEach(d=>Object.values(d).forEach(r=>{if(r&&r.type==='work_wish'&&!r.decision)nw++;}));return nw>0?<span onClick={()=>{setTab('paid');setOpenMenu(null);}} onDoubleClick={()=>{setTab('paid');setOpenMenu(null);setTimeout(()=>{const el=document.getElementById('paidsec-wish');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},80);}} title="ダブルクリックで挙手欄へ" style={{fontSize:13,background:'#ECFDF5',color:'#065F46',border:'1px solid #6EE7B7',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🙋 {nw}件</span>:null;})()}
+          {(()=>{let nr=0;Object.values(requests).forEach(d=>Object.values(d).forEach(r=>{if(r&&r.type==='mistake_report'&&!r.resolved)nr++;}));return nr>0?<span onClick={()=>{setTab('paid');setOpenMenu(null);}} onDoubleClick={()=>{setTab('paid');setOpenMenu(null);setTimeout(()=>{const el=document.getElementById('paidsec-msg');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},80);}} title="ダブルクリックでメッセージ欄へ" style={{fontSize:13,background:'#FFF7ED',color:'#9A3412',border:'1px solid #FDBA74',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🚩 {nr}件</span>:null;})()}
 
           {/* PC：メニュー項目 / スマホ：ハンバーガー */}
           <div className="pc-menu" style={{display:'flex',alignItems:'center',flex:1}}>
@@ -5503,7 +5503,163 @@ ${bodyHtml}
       {/* ================================================================ */}
       {tab==='paid'&&(
         <div style={{padding:16}}>
-          {/* ── スタッフからのミス報告（最上部・常時表示） ── */}
+          {/* ── 🌸 休み・有給の申請 ── */}
+          <div id="paidsec-paid" style={{scrollMarginTop:60}}>
+          {(()=>{
+            const pending=[];
+            Object.entries(requests).forEach(([dk,dayMap])=>{
+              Object.entries(dayMap).forEach(([sidStr,req])=>{
+                const sid=parseInt(sidStr);
+                if(!req||!['paid_full','paid_am','paid_pm','off'].includes(req.type))return;
+                const s=staff.find(x=>x.id===sid);
+                if(!s)return;
+                const alreadyApplied=(tmps[dk]?.[String(sid)]&&['paid','paid_am','paid_pm','off'].includes(tmps[dk][String(sid)].type));
+                pending.push({dk,sid,req,staffName:s.name,staffColor:s.color,alreadyApplied});
+              });
+            });
+            pending.sort((a,b)=>a.dk>b.dk?1:-1);
+            const unreflected=pending.filter(p=>!p.alreadyApplied);
+            return(
+              <div style={{background:K.bg,border:'1px solid #F9A8D4',borderRadius:K.rlg,padding:16,marginBottom:16}}>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:pending.length?12:0,paddingBottom:pending.length?8:0,borderBottom:pending.length?K.bd:'none'}}>
+                  <div>
+                    <div style={{fontWeight:600,fontSize:14,color:'#86198F'}}>🌸 休み・有給の申請</div>
+                    <div style={{fontSize:11,color:K.textS,marginTop:2}}>{pending.length===0?'現在、申請はありません。':(unreflected.length>0?unreflected.length+'件の未反映申請があります':'すべて反映済みです')}</div>
+                  </div>
+                  {unreflected.length>0&&(
+                    <button onClick={()=>{
+                      const newTmps={...tmps};
+                      const newPL={...paidLeave};
+                      const typeToTmp={paid_full:'paid',paid_am:'paid_am',paid_pm:'paid_pm',off:'off'};
+                      const typeToUnit={paid_full:'full',paid_am:'am',paid_pm:'pm'};
+                      unreflected.forEach(({dk,sid,req})=>{
+                        newTmps[dk]={...(newTmps[dk]||{})};
+                        newTmps[dk][String(sid)]={type:typeToTmp[req.type]||req.type,note:'',unit:typeToUnit[req.type]||''};
+                        if(req.type==='paid_full'||req.type==='paid_am'||req.type==='paid_pm'){
+                          const cur=newPL[sid]||{granted:0,history:[]};
+                          const filtered=(cur.history||[]).filter(r=>r.dk!==dk);
+                          newPL[sid]={...cur,history:[...filtered,{dk,unit:typeToUnit[req.type],appliedAt:req.appliedAt||new Date().toISOString()}]};
+                        }
+                      });
+                      setTmps(newTmps);setPaidLeave(newPL);
+                      alert('✓ '+unreflected.length+'件の申請をシフトと有給管理に反映しました');
+                    }}
+                      style={{padding:'7px 14px',border:'1px solid #D946A8',borderRadius:K.rmd,background:'#FDF2F8',color:'#86198F',cursor:'pointer',fontSize:12,fontWeight:600,whiteSpace:'nowrap'}}>
+                      ✓ 一括反映する
+                    </button>
+                  )}
+                </div>
+                {pending.length>0&&<div style={{display:'flex',flexDirection:'column',gap:6}}>
+                  {pending.map(({dk,sid,req,staffName,staffColor,alreadyApplied},i)=>{
+                    const d=new Date(dk);
+                    const rt=REQ_TYPES[req.type]||{label:req.type,color:'#64748B',bg:'#F8FAFC',border:'#CBD5E1',icon:'📋'};
+                    return(
+                      <div key={i} style={{padding:'9px 12px',borderRadius:K.rmd,background:alreadyApplied?K.bgG:rt.bg,border:'1px solid '+(alreadyApplied?'#86EFAC':rt.border),opacity:alreadyApplied?0.85:1}}>
+                       <div style={{display:'flex',alignItems:'center',gap:10}}>
+                        <span style={{width:8,height:8,borderRadius:'50%',background:staffColor,flexShrink:0}}/>
+                        <div style={{flex:1}}>
+                          <span style={{fontWeight:600,fontSize:12,color:K.text}}>{staffName}</span>
+                          <span style={{fontSize:11,color:K.textS,marginLeft:6}}>{d.getMonth()+1}/{d.getDate()}({DAY_JP[d.getDay()]})</span>
+                          <span style={{fontSize:11,marginLeft:6,fontWeight:600,color:rt.color}}>{rt.icon} {rt.label}</span>
+                        </div>
+                        {alreadyApplied
+                          ?<span style={{fontSize:10,color:K.textG,background:K.bgG,border:'1px solid #86EFAC',borderRadius:6,padding:'1px 6px',whiteSpace:'nowrap'}}>✓ 反映済み</span>
+                          :<button onClick={()=>{
+                            const newTmps={...tmps};
+                            const newPL={...paidLeave};
+                            const typeToTmp={paid_full:'paid',paid_am:'paid_am',paid_pm:'paid_pm',off:'off'};
+                            const typeToUnit={paid_full:'full',paid_am:'am',paid_pm:'pm'};
+                            newTmps[dk]={...(newTmps[dk]||{})};
+                            newTmps[dk][String(sid)]={type:typeToTmp[req.type]||req.type,note:'',unit:typeToUnit[req.type]||''};
+                            if(req.type==='paid_full'||req.type==='paid_am'||req.type==='paid_pm'){
+                              const cur=newPL[sid]||{granted:0,history:[]};
+                              const filtered=(cur.history||[]).filter(r=>r.dk!==dk);
+                              newPL[sid]={...cur,history:[...filtered,{dk,unit:typeToUnit[req.type],appliedAt:req.appliedAt||new Date().toISOString()}]};
+                            }
+                            setTmps(newTmps);setPaidLeave(newPL);
+                          }} style={{padding:'3px 9px',border:'1px solid #D946A8',borderRadius:6,background:'#FDF2F8',color:'#86198F',cursor:'pointer',fontSize:11,whiteSpace:'nowrap',fontWeight:500}}>反映する</button>
+                        }
+                       </div>
+                       <RepliesView replies={req.replies}/>
+                       <ReplyBox dk={dk} rkey={String(sid)} draft={replyDraft} setDraft={setReplyDraft} onSend={sendReply} defaultText={alreadyApplied?'反映されました':''}/>
+                      </div>
+                    );
+                  })}
+                </div>}
+              </div>
+            );
+          })()}
+          </div>
+
+          {/* ── 🙋 挙手（出勤希望） ── */}
+          <div id="paidsec-wish" style={{scrollMarginTop:60}}>
+          {(()=>{
+            const pending=[];
+            Object.entries(requests).forEach(([dk,dayMap])=>{
+              Object.entries(dayMap).forEach(([sidStr,req])=>{
+                const sid=parseInt(sidStr);
+                if(!req||req.type!=='work_wish')return;
+                const s=staff.find(x=>x.id===sid);
+                if(!s)return;
+                const alreadyApplied=!!req.decision;
+                pending.push({dk,sid,req,staffName:s.name,staffColor:s.color,alreadyApplied});
+              });
+            });
+            pending.sort((a,b)=>a.dk>b.dk?1:-1);
+            const unreflected=pending.filter(p=>!p.alreadyApplied);
+            return(
+              <div style={{background:K.bg,border:'1px solid #6EE7B7',borderRadius:K.rlg,padding:16,marginBottom:16}}>
+                <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:pending.length?12:0,paddingBottom:pending.length?8:0,borderBottom:pending.length?K.bd:'none'}}>
+                  <div style={{fontWeight:600,fontSize:14,color:'#065F46'}}>🙋 挙手（出勤希望）</div>
+                  {unreflected.length>0&&<span style={{fontSize:11,background:'#D1FAE5',color:'#065F46',borderRadius:10,padding:'1px 8px',fontWeight:600}}>未対応 {unreflected.length}件</span>}
+                </div>
+                {pending.length===0
+                  ?<div style={{fontSize:12,color:K.textS}}>現在、挙手はありません。</div>
+                  :<div style={{display:'flex',flexDirection:'column',gap:6}}>
+                  {pending.map(({dk,sid,req,staffName,staffColor,alreadyApplied},i)=>{
+                    const d=new Date(dk);
+                    const rt=REQ_TYPES[req.type]||{label:req.type,color:'#64748B',bg:'#F8FAFC',border:'#CBD5E1',icon:'🙋'};
+                    return(
+                      <div key={i} style={{padding:'9px 12px',borderRadius:K.rmd,background:alreadyApplied?K.bgG:rt.bg,border:'1px solid '+(alreadyApplied?'#86EFAC':rt.border),opacity:alreadyApplied?0.85:1}}>
+                       <div style={{display:'flex',alignItems:'center',gap:10}}>
+                        <span style={{width:8,height:8,borderRadius:'50%',background:staffColor,flexShrink:0}}/>
+                        <div style={{flex:1}}>
+                          <span style={{fontWeight:600,fontSize:12,color:K.text}}>{staffName}</span>
+                          <span style={{fontSize:11,color:K.textS,marginLeft:6}}>{d.getMonth()+1}/{d.getDate()}({DAY_JP[d.getDay()]})</span>
+                          <span style={{fontSize:11,marginLeft:6,fontWeight:600,color:rt.color}}>{rt.icon} {rt.label}</span>
+                          {req.slotLabels&&<span style={{fontSize:10,color:'#374151',marginLeft:4}}>（{req.slotLabels.join('・')}）</span>}
+                        </div>
+                        {alreadyApplied
+                          ?<span style={{fontSize:10,color:req.decision==='rejected'?'#991B1B':K.textG,background:req.decision==='rejected'?'#FEF2F2':K.bgG,border:'1px solid '+(req.decision==='rejected'?'#FCA5A5':'#86EFAC'),borderRadius:6,padding:'1px 6px',whiteSpace:'nowrap'}}>{req.decision==='rejected'?'✕ 却下済み':'✓ 承認済み'}</span>
+                          :<div style={{display:'flex',gap:4,flexShrink:0}}>
+                            <button onClick={()=>{
+                              touchReqEdit();
+                              const slotIds=(req.slots||[]);
+                              if(slotIds.length){setAsgn(prev=>{const day={...(prev[dk]||{})};slotIds.forEach(slid=>{const cur=day[slid]||[];if(!cur.includes(sid))day[slid]=[...cur,sid];});return{...prev,[dk]:day};});}
+                              setRequests(prev=>{const day={...(prev[dk]||{})};day[String(sid)]={...(day[String(sid)]||{}),approved:true,decision:'approved',decidedAt:new Date().toISOString()};return{...prev,[dk]:day};});
+                              alert('承認しました。シフトに追加しました。\n本人の「申請一覧」に「承認」と表示されます。\n（シフト表への反映は「☁ 保存／公開」で確定してください）');
+                            }} style={{padding:'3px 9px',border:'1px solid #10B981',borderRadius:6,background:'#ECFDF5',color:'#065F46',cursor:'pointer',fontSize:11,whiteSpace:'nowrap',fontWeight:600}}>勤務を承認</button>
+                            <button onClick={()=>{
+                              if(!window.confirm('この出勤希望を却下しますか？\n本人の「申請一覧」に「見送り」と表示されます。'))return;
+                              touchReqEdit();
+                              setRequests(prev=>{const day={...(prev[dk]||{})};day[String(sid)]={...(day[String(sid)]||{}),decision:'rejected',decidedAt:new Date().toISOString()};return{...prev,[dk]:day};});
+                            }} style={{padding:'3px 8px',border:'1px solid #E2E8F0',borderRadius:6,background:'#F8FAFC',color:'#64748B',cursor:'pointer',fontSize:11,whiteSpace:'nowrap'}}>却下</button>
+                          </div>
+                        }
+                       </div>
+                       <RepliesView replies={req.replies}/>
+                       <ReplyBox dk={dk} rkey={String(sid)} draft={replyDraft} setDraft={setReplyDraft} onSend={sendReply} defaultText={req.decision==='approved'?'反映されました':''}/>
+                      </div>
+                    );
+                  })}
+                </div>}
+              </div>
+            );
+          })()}
+          </div>
+
+          {/* ── 🚩 メッセージ ── */}
+          <div id="paidsec-msg" style={{scrollMarginTop:60}}>
           {(()=>{
             const reports=[];
             Object.entries(requests).forEach(([dk,dayMap])=>{
@@ -5514,11 +5670,11 @@ ${bodyHtml}
             return(
               <div style={{background:K.bg,border:'1px solid #FDBA74',borderRadius:K.rlg,padding:16,marginBottom:16}}>
                 <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:reports.length?12:0,paddingBottom:reports.length?8:0,borderBottom:reports.length?K.bd:'none'}}>
-                  <div style={{fontWeight:600,fontSize:14,color:'#9A3412'}}>✉ スタッフからのメッセージ</div>
+                  <div style={{fontWeight:600,fontSize:14,color:'#9A3412'}}>🚩 スタッフからのメッセージ</div>
                   {unresolved.length>0&&<span style={{fontSize:11,background:'#FFEDD5',color:'#9A3412',borderRadius:10,padding:'1px 8px',fontWeight:600}}>未対応 {unresolved.length}件</span>}
                 </div>
                 {reports.length===0
-                  ?<div style={{fontSize:12,color:K.textS}}>現在、スタッフからの報告はありません。</div>
+                  ?<div style={{fontSize:12,color:K.textS}}>現在、スタッフからのメッセージはありません。</div>
                   :<div style={{display:'flex',flexDirection:'column',gap:8}}>
                     {reports.map(({dk,key,r})=>{
                       const d=new Date(dk);
@@ -5545,120 +5701,7 @@ ${bodyHtml}
               </div>
             );
           })()}
-
-          {/* ── スタッフからの申請（未反映） ── */}
-          {(()=>{
-            const pending=[];
-            Object.entries(requests).forEach(([dk,dayMap])=>{
-              Object.entries(dayMap).forEach(([sidStr,req])=>{
-                const sid=parseInt(sidStr);
-                const s=staff.find(x=>x.id===sid);
-                if(!s)return;
-                if(req.type==='mistake_report')return; // 報告は別パネルで扱う
-                // 反映済み判定：応援出勤は承認フラグ、その他はtmps
-                const alreadyApplied=req.type==='work_wish'
-                  ? !!req.decision
-                  : (tmps[dk]?.[String(sid)]&&['paid','paid_am','paid_pm','off'].includes(tmps[dk][String(sid)].type));
-                pending.push({dk,sid,req,staffName:s.name,staffColor:s.color,alreadyApplied});
-              });
-            });
-            pending.sort((a,b)=>a.dk>b.dk?1:-1);
-            if(pending.length===0)return null;
-            const unreflected=pending.filter(p=>!p.alreadyApplied);
-            return(
-              <div style={{background:K.bg,border:'1px solid #F9A8D4',borderRadius:K.rlg,padding:16,marginBottom:20}}>
-                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12,paddingBottom:8,borderBottom:K.bd}}>
-                  <div>
-                    <div style={{fontWeight:600,fontSize:14,color:'#86198F'}}>🌸 スタッフからの申請</div>
-                    <div style={{fontSize:11,color:K.textS,marginTop:2}}>{unreflected.length>0?unreflected.length+'件の未反映申請があります':'すべて反映済みです'}</div>
-                  </div>
-                  {unreflected.length>0&&(
-                    <button onClick={()=>{
-                      // 一括反映
-                      const newTmps={...tmps};
-                      const newPL={...paidLeave};
-                      const typeToTmp={paid_full:'paid',paid_am:'paid_am',paid_pm:'paid_pm',off:'off'};
-                      const typeToUnit={paid_full:'full',paid_am:'am',paid_pm:'pm'};
-                      unreflected.forEach(({dk,sid,req})=>{
-                        if(req.type==='work_wish')return; // 応援出勤は個別に承認
-                        newTmps[dk]={...(newTmps[dk]||{})};
-                        newTmps[dk][String(sid)]={type:typeToTmp[req.type]||req.type,note:'',unit:typeToUnit[req.type]||''};
-                        if(req.type==='paid_full'||req.type==='paid_am'||req.type==='paid_pm'){
-                          const cur=newPL[sid]||{granted:0,history:[]};
-                          const filtered=(cur.history||[]).filter(r=>r.dk!==dk);
-                          newPL[sid]={...cur,history:[...filtered,{dk,unit:typeToUnit[req.type],appliedAt:req.appliedAt||new Date().toISOString()}]};
-                        }
-                      });
-                      setTmps(newTmps);setPaidLeave(newPL);
-                      alert('✓ '+unreflected.length+'件の申請をシフトと有給管理に反映しました');
-                    }}
-                      style={{padding:'7px 14px',border:'1px solid #D946A8',borderRadius:K.rmd,background:'#FDF2F8',color:'#86198F',cursor:'pointer',fontSize:12,fontWeight:600,whiteSpace:'nowrap'}}>
-                      ✓ 一括反映する
-                    </button>
-                  )}
-                </div>
-                <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                  {pending.map(({dk,sid,req,staffName,staffColor,alreadyApplied},i)=>{
-                    const d=new Date(dk);
-                    const rt=REQ_TYPES[req.type]||{label:req.type,color:'#64748B',bg:'#F8FAFC',border:'#CBD5E1',icon:'📋'};
-                    return(
-                      <div key={i} style={{padding:'9px 12px',
-                        borderRadius:K.rmd,background:alreadyApplied?K.bgG:rt.bg,
-                        border:'1px solid '+(alreadyApplied?'#86EFAC':rt.border),opacity:alreadyApplied?0.85:1}}>
-                       <div style={{display:'flex',alignItems:'center',gap:10}}>
-                        <span style={{width:8,height:8,borderRadius:'50%',background:staffColor,flexShrink:0}}/>
-                        <div style={{flex:1}}>
-                          <span style={{fontWeight:600,fontSize:12,color:K.text}}>{staffName}</span>
-                          <span style={{fontSize:11,color:K.textS,marginLeft:6}}>
-                            {d.getMonth()+1}/{d.getDate()}({DAY_JP[d.getDay()]})
-                          </span>
-                          <span style={{fontSize:11,marginLeft:6,fontWeight:600,color:rt.color}}>{rt.icon} {rt.label}</span>
-                        {req.type==='work_wish'&&req.slotLabels&&<span style={{fontSize:10,color:'#374151',marginLeft:4}}>（{req.slotLabels.join('・')}）</span>}
-                        </div>
-                        {alreadyApplied
-                          ?<span style={{fontSize:10,color:req.decision==='rejected'?'#991B1B':K.textG,background:req.decision==='rejected'?'#FEF2F2':K.bgG,border:'1px solid '+(req.decision==='rejected'?'#FCA5A5':'#86EFAC'),borderRadius:6,padding:'1px 6px',whiteSpace:'nowrap'}}>{req.type==='work_wish'?(req.decision==='rejected'?'✕ 却下済み':'✓ 承認済み'):'✓ 反映済み'}</span>
-                          :req.type==='work_wish'
-                          ?<div style={{display:'flex',gap:4,flexShrink:0}}>
-                            <button onClick={()=>{
-                              touchReqEdit();
-                              const slotIds=(req.slots||[]);
-                              if(slotIds.length){setAsgn(prev=>{const day={...(prev[dk]||{})};slotIds.forEach(slid=>{const cur=day[slid]||[];if(!cur.includes(sid))day[slid]=[...cur,sid];});return{...prev,[dk]:day};});}
-                              setRequests(prev=>{const day={...(prev[dk]||{})};day[String(sid)]={...(day[String(sid)]||{}),approved:true,decision:'approved',decidedAt:new Date().toISOString()};return{...prev,[dk]:day};});
-                              alert('承認しました。シフトに追加しました。\n本人の「申請一覧」に「承認」と表示されます。\n（シフト表への反映は「☁ 保存／公開」で確定してください）');
-                            }} style={{padding:'3px 9px',border:'1px solid #10B981',borderRadius:6,background:'#ECFDF5',color:'#065F46',cursor:'pointer',fontSize:11,whiteSpace:'nowrap',fontWeight:600}}>勤務を承認</button>
-                            <button onClick={()=>{
-                              if(!window.confirm('この出勤希望を却下しますか？\n本人の「申請一覧」に「見送り」と表示されます。'))return;
-                              touchReqEdit();
-                              setRequests(prev=>{const day={...(prev[dk]||{})};day[String(sid)]={...(day[String(sid)]||{}),decision:'rejected',decidedAt:new Date().toISOString()};return{...prev,[dk]:day};});
-                            }} style={{padding:'3px 8px',border:'1px solid #E2E8F0',borderRadius:6,background:'#F8FAFC',color:'#64748B',cursor:'pointer',fontSize:11,whiteSpace:'nowrap'}}>却下</button>
-                          </div>
-                          :<button onClick={()=>{
-                            const newTmps={...tmps};
-                            const newPL={...paidLeave};
-                            const typeToTmp={paid_full:'paid',paid_am:'paid_am',paid_pm:'paid_pm',off:'off'};
-                            const typeToUnit={paid_full:'full',paid_am:'am',paid_pm:'pm'};
-                            newTmps[dk]={...(newTmps[dk]||{})};
-                            newTmps[dk][String(sid)]={type:typeToTmp[req.type]||req.type,note:'',unit:typeToUnit[req.type]||''};
-                            if(req.type==='paid_full'||req.type==='paid_am'||req.type==='paid_pm'){
-                              const cur=newPL[sid]||{granted:0,history:[]};
-                              const filtered=(cur.history||[]).filter(r=>r.dk!==dk);
-                              newPL[sid]={...cur,history:[...filtered,{dk,unit:typeToUnit[req.type],appliedAt:req.appliedAt||new Date().toISOString()}]};
-                            }
-                            setTmps(newTmps);setPaidLeave(newPL);
-                          }} style={{padding:'3px 9px',border:'1px solid #D946A8',borderRadius:6,background:'#FDF2F8',color:'#86198F',cursor:'pointer',fontSize:11,whiteSpace:'nowrap',fontWeight:500}}>
-                            反映する
-                          </button>
-                        }
-                       </div>
-                       <RepliesView replies={req.replies}/>
-                       <ReplyBox dk={dk} rkey={String(sid)} draft={replyDraft} setDraft={setReplyDraft} onSend={sendReply} defaultText={(req.type==='work_wish'?req.decision==='approved':alreadyApplied)?'反映されました':''}/>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })()}
+          </div>
 
           {/* ── デバッグ: tmps内容確認 ── */}
           {(()=>{
