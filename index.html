@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v102</title>
+<title>シフト管理 v104</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -50,7 +50,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v102';
+const APP_VERSION = 'v104';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -216,6 +216,8 @@ function canCoverSlot(s,slot,dow){
   var dur=r.e-r.s; if(dur<=0)return true;
   return slotCoveredMinutes(s,slot,dow) >= dur*0.5;
 }
+// 「ベースシフト固定」スタッフか（自動配置で追加・移動の対象外。ベースシフト通りにだけ配置）
+function isBaseOnly(s){ return !!(s && s.cond && s.cond.baseOnly); }
 // その曜日(dow)に勤務可能な設定か（勤務できる曜日 cond.days を参照。未設定なら可とみなす）
 function staffWorksDow(s,dow){
   if(!s)return false;
@@ -441,7 +443,7 @@ function parseEmploymentType(notes){
 
 // ── 勤務条件を「入力式(cond)」⇔「条件文(notes)」で相互変換 ──
 function minToHM2(m){if(m==null||m==='')return '';return Math.floor(m/60)+':'+String(m%60).padStart(2,'0');}
-function defaultCond(){const dt={};[1,2,3,4,5,6].forEach(d=>{dt[d]={s:'',e:''};});return {days:{1:true,2:true,3:true,4:true,5:true,6:true},dayTimes:dt,weekMinH:'',weekMaxH:'',slot:'both',emp:''};}
+function defaultCond(){const dt={};[1,2,3,4,5,6].forEach(d=>{dt[d]={s:'',e:''};});return {days:{1:true,2:true,3:true,4:true,5:true,6:true},dayTimes:dt,weekMinH:'',weekMaxH:'',slot:'both',emp:'',baseOnly:false};}
 // 入力式の値から、AI・判定が読める“決まった書式”の条件文を生成（曜日別の勤務時間に対応）
 function condToNotes(c){
   if(!c)return '';
@@ -1432,6 +1434,13 @@ function CondEditor({cond,onCond,memo,onMemo}){
       </div></div>
       <div><label style={lbl}>自由メモ（隔週・月◯回などの特記。AIが参考にします）</label>
         <textarea value={memo||''} onChange={e=>onMemo(e.target.value)} rows={2} placeholder="例：土曜は隔週（B週）のみ／土は月1〜2回 など" style={{width:'100%',padding:'6px 9px',border:'1px solid #CBD5E1',borderRadius:6,fontSize:12,boxSizing:'border-box',lineHeight:1.5,background:'#fff',color:'#1E293B'}}/></div>
+      {/* ベースシフト固定：隔週・午前のみ等の複雑な条件は自動配置が理解できないため、この人は基本シフト通りにだけ置く */}
+      <div style={{marginTop:4,padding:'8px 10px',background:c.baseOnly?'#FEF3C7':'#F8FAFC',border:'1px solid '+(c.baseOnly?'#FCD34D':'#E2E8F0'),borderRadius:8}}>
+        <label style={{display:'flex',alignItems:'flex-start',gap:8,cursor:'pointer'}}>
+          <input type="checkbox" checked={!!c.baseOnly} onChange={e=>set('baseOnly',e.target.checked)} style={{marginTop:2,width:16,height:16,flexShrink:0}}/>
+          <span style={{fontSize:12,lineHeight:1.5,color:'#1E293B'}}><b>ベースシフト通りに固定する</b>（自動シフト作成・配置を自動調整で、この人を勝手に追加・移動しない）<br/><span style={{fontSize:11,color:'#64748B'}}>「土曜は奇数週の午前だけ」など複雑な条件の人に。ベースシフト（A週/B週）で設定した通りにだけ配置されます。</span></span>
+        </label>
+      </div>
     </div>
   );
 }
@@ -2546,6 +2555,31 @@ ${bodyHtml}
     return appliedCount;
   }
 
+  // ── ベースシフト固定スタッフを、その週(A/B)・曜日のベース登録コマ以外から外す（自動操作の最後に通す）──
+  // 「土曜は奇数週の午前だけ」等の人が、自動補充で別の日・別コマに入らないようにする。
+  function enforceBaseOnly(asgnObj){
+    const targets=(staff||[]).filter(isBaseOnly);
+    if(targets.length===0)return asgnObj;
+    // ベースに一度も登場しない固定スタッフは、誤って全消ししないよう対象外（ベース未設定の保険）
+    const appearsInBase=sid=>['A','B'].some(p=>Object.values(baseShift[p]||{}).some(dayObj=>Object.values(dayObj||{}).some(ids=>(ids||[]).includes(sid))));
+    const enf=targets.filter(s=>appearsInBase(s.id));
+    if(enf.length===0)return asgnObj;
+    const na={};
+    Object.entries(asgnObj||{}).forEach(([dk,sm])=>{na[dk]={};Object.entries(sm).forEach(([slotId,ids])=>{na[dk][slotId]=[...(ids||[])];});});
+    (dates||[]).forEach(d=>{
+      const dk=tdk(d); if(!na[dk])return;
+      const dow=d.getDay();
+      const baseDay=(baseShift[getABPatternForDate(d)]||{})[dow]||{};
+      enf.forEach(s=>{
+        Object.keys(na[dk]).forEach(slotId=>{
+          if(!(na[dk][slotId]||[]).includes(s.id))return;
+          if(!(baseDay[slotId]||[]).includes(s.id))na[dk][slotId]=na[dk][slotId].filter(x=>x!==s.id);
+        });
+      });
+    });
+    return na;
+  }
+
   // ── 月切替時にベースシフトを自動展開 ──
   useEffect(()=>{
     // ベースシフトが空ならスキップ
@@ -3316,6 +3350,7 @@ ${bodyHtml}
               if(isOffOrExcl(dk,A.id,sid))return false;
               if((na[dk][B.id]||[]).includes(sid))return false;
               const so=staff.find(s=>s.id===sid);
+              if(isBaseOnly(so))return false; // ベースシフト固定の人は移動させない
               if(!canCoverSlot(so,B,dow))return false; // そのコマの半分も在席できない人は移さない
               // 移動を試算：Aから外しBへ入れて、8時間以内・週上限以内か
               const trial={...na,[dk]:{...na[dk],[A.id]:(na[dk][A.id]||[]).filter(x=>x!==sid),[B.id]:[...(na[dk][B.id]||[]),sid]}};
@@ -3385,6 +3420,7 @@ ${bodyHtml}
         const cands=staff.filter(s=>{
           if((na[dk][slot.id]||[]).includes(s.id))return false;
           if(isOffOrExcl(dk,slot.id,s.id))return false;
+          if(isBaseOnly(s))return false; // ベースシフト固定の人は延長配置しない
           if(!canCoverSlot(s,slot,dow))return false; // そのコマの半分も在席できない人は延長させない
           const sp=staffRanges(dk,s.id); if(sp.length===0)return false; // その日出勤していない人は呼ばない
           const cs=Math.min.apply(null,sp.map(x=>x.s)), ce=Math.max.apply(null,sp.map(x=>x.e));
@@ -3453,6 +3489,7 @@ ${bodyHtml}
     //  ・cond未設定の旧データは「ベース登録 or 当月同曜日の実績がある曜日」のみ可とみなす
     const worksThisDay=(s,dow)=>{
       if(!s)return false;
+      if(isBaseOnly(s))return false; // ベースシフト固定の人は不足補充の対象外
       const c=s.cond;
       if(c&&c.days&&Object.keys(c.days).length){ return c.days[dow]!==false; }
       const inBaseAnyDow=['A','B'].some(p=>{const dd=(baseShift[p]||{})[dow]||{};return Object.values(dd).some(ids=>(ids||[]).includes(s.id));});
@@ -3638,11 +3675,11 @@ ${bodyHtml}
             const bIds=(na[dk][B.id]||[]).filter(sid=>!isOffOrExcl(dk,B.id,sid));
             for(const x of aIds){
               if((na[dk][B.id]||[]).includes(x))continue;   // 既にBにいる
-              const sx=staff.find(s=>s.id===x); if(!sx||!canCoverSlot(sx,B,dow))continue;
+              const sx=staff.find(s=>s.id===x); if(!sx||isBaseOnly(sx)||!canCoverSlot(sx,B,dow))continue;
               for(const y of bIds){
                 if(y===x)continue;
                 if((na[dk][A.id]||[]).includes(y))continue;
-                const sy=staff.find(s=>s.id===y); if(!sy||!canCoverSlot(sy,A,dow))continue;
+                const sy=staff.find(s=>s.id===y); if(!sy||isBaseOnly(sy)||!canCoverSlot(sy,A,dow))continue;
                 // x↔y の交換を試算
                 const trial={...na,[dk]:{...na[dk],
                   [A.id]:(na[dk][A.id]||[]).map(z=>z===x?y:z),
@@ -3679,7 +3716,7 @@ ${bodyHtml}
   }
   function applySpanCompaction(){
     const beforeAsgn=asgn;
-    const fixed=compactDaySpans(asgn);
+    const fixed=enforceBaseOnly(compactDaySpans(asgn));
     const nameOf=id=>(staff.find(s=>s.id===id)||{}).name||('ID'+id);
     const changes=[];
     dates.forEach(d=>{
@@ -3703,10 +3740,69 @@ ${bodyHtml}
     pushEventLog('拘束時間を最適化');
     alert('拘束時間を最適化しました（入れ替え '+changes.length+'件）。\n各人の勤務が時間的に連続するようコマを入れ替えています。\n変更点は表の上に一覧表示され、移動先には ✦ が付きます。\n「元に戻す」で取り消せます。');
   }
+  // ── 無人帯ゼロ最適化：コマ終盤などが0名になるとき、別コマの人と「入れ替え」て解消する ──
+  // 例: 午後手術(〜19時)に18時退勤の人だけ→18-19が無人。19時までいられる人が別の手術/外来コマにいれば入れ替える。
+  // 既存のfixCoverageGapsは同種コマ内の移動のみだが、こちらは両方できる人なら外来↔手術もまたいで入れ替える。
+  function swapForEndCoverage(rawAsgn){
+    const na={};
+    Object.entries(rawAsgn||{}).forEach(([dk,sm])=>{na[dk]={};Object.entries(sm).forEach(([slotId,ids])=>{na[dk][slotId]=[...(ids||[])];});});
+    const isOffOrExcl=(dk,slotId,sid)=>{
+      if((manualExclusions[dk]?.[slotId]||[]).includes(sid))return true;
+      const tc=tmps[dk]?.[String(sid)];
+      return !!(tc&&['off','paid','paid_am','paid_pm'].includes(tc.type));
+    };
+    const activeIds=(dk,slotId)=>(na[dk]?.[slotId]||[]).filter(sid=>!isOffOrExcl(dk,slotId,sid));
+    const sObj=sid=>staff.find(x=>x.id===sid);
+    const skillOK=(sid,slot)=>{const s=sObj(sid);if(!s)return false;const sk=staffSkill(s);if(slot.type==='out'&&sk==='surg')return false;if(slot.type==='surg'&&sk==='out')return false;return true;};
+    const slotGap=(da,dk,slot,dow)=>{const r=slotRangeMin(slot);if(!r||r.s==null)return null;const iv=(da[slot.id]||[]).filter(sid=>!isOffOrExcl(dk,slot.id,sid)).map(sid=>staffPresenceInSlot(sObj(sid),slot,dow,da,manualExclusions[dk])).filter(Boolean);return firstUncoveredBand(r,iv);};
+    const dayWeekOK=(dk,sid,trial,week)=>{
+      if(dayHours(dk,sid,trial,manualExclusions,slots,staff)>DAILY_LIMIT)return false;
+      const s=sObj(sid);const wh=parseWeeklyHours(s&&s.notes);
+      if(wh&&wh.max>0&&week.length>0){const wkH=week.reduce((a,d3)=>a+dayHours(tdk(d3),sid,trial,manualExclusions,slots,staff),0);if(wkH>Math.min(wh.max,WEEKLY_LIMIT))return false;}
+      return true;
+    };
+    dates.forEach(d=>{
+      const dk=tdk(d); if(isClosedDay(dk)||!na[dk])return;
+      const dow=d.getDay(); const week=weeks.find(w=>w.some(x=>tdk(x)===dk))||[];
+      const daySlots=slots[dow]||[];
+      daySlots.forEach(B=>{
+        if(getReq(dk,B.id)<=0)return;
+        let guard=0;
+        while(guard++<6){
+          const gap=slotGap(na[dk],dk,B,dow); if(!gap)break;
+          let done=false;
+          for(const A of daySlots){
+            if(A.id===B.id)continue;
+            const aWasCovered=!slotGap(na[dk],dk,A,dow);
+            for(const Y of activeIds(dk,A.id)){
+              if(isBaseOnly(sObj(Y))||(na[dk][B.id]||[]).includes(Y)||!skillOK(Y,B))continue;
+              const pY=staffPresenceInSlot(sObj(Y),B,dow,na[dk],manualExclusions[dk]);
+              if(!(pY&&pY.s<=gap.s&&pY.e>=gap.e))continue; // Yが無人帯をカバーできる
+              for(const X of activeIds(dk,B.id)){
+                if(X===Y||isBaseOnly(sObj(X))||(na[dk][A.id]||[]).includes(X)||!skillOK(X,A))continue;
+                const newA=(na[dk][A.id]||[]).map(z=>z===Y?X:z);
+                const newB=(na[dk][B.id]||[]).map(z=>z===X?Y:z);
+                const trial={...na,[dk]:{...na[dk],[A.id]:newA,[B.id]:newB}};
+                const okB=!slotGap(trial[dk],dk,B,dow);
+                const okA=!slotGap(trial[dk],dk,A,dow);
+                if(okB && (okA || !aWasCovered) && dayWeekOK(dk,X,trial,week) && dayWeekOK(dk,Y,trial,week)){
+                  na[dk][A.id]=newA; na[dk][B.id]=newB; done=true; break;
+                }
+              }
+              if(done)break;
+            }
+            if(done)break;
+          }
+          if(!done)break;
+        }
+      });
+    });
+    return na;
+  }
   function applyOvertimeRelief(){
     const beforeAsgn=asgn;
-    // ①勤務不可/半分も出られないコマから除去 → ②偏り調整 → ③超過勤務の調整 → ④無人(0名)解消 → ⑤過剰配置・8時間超トリム
-    const fixed=trimOverstaff(fixCoverageGaps(relieveDailyOvertime(rebalanceDayCoverage(dropPoorCoverage(asgn)))));
+    // ①勤務不可/半分も出られないコマから除去 → ②偏り調整 → ③超過勤務の調整 → ④無人(0名)解消 → ⑤入れ替えで端の無人帯解消 → ⑥過剰配置・8時間超トリム
+    const fixed=enforceBaseOnly(trimOverstaff(swapForEndCoverage(fixCoverageGaps(relieveDailyOvertime(rebalanceDayCoverage(dropPoorCoverage(asgn)))))));
     // 変更点の差分を作成（コマ単位で 外れた人／入った人）
     const nameOf=id=>(staff.find(s=>s.id===id)||{}).name||('ID'+id);
     const changes=[];
@@ -3811,7 +3907,7 @@ ${bodyHtml}
           na[dk][slotId]=merged;
         });
       });
-      setAsgn(finalizeAsgn(na));
+      setAsgn(enforceBaseOnly(finalizeAsgn(na)));
       setApid(pat.id);
       setManualExclusions({});
     } else {
@@ -3822,7 +3918,7 @@ ${bodyHtml}
           na[dk][s2]=(Array.isArray(sids)?sids:[]).filter(sid=>staff.some(s=>s.id===sid));
         });
       });
-      setAsgn(finalizeAsgn(na));
+      setAsgn(enforceBaseOnly(finalizeAsgn(na)));
       setApid(pat.id);
     }
   }
