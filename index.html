@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>シフト管理 v94</title>
+<title>シフト管理 v95</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -46,7 +46,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v94';
+const APP_VERSION = 'v95';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── 診療枠カラーパレット ──
@@ -4092,7 +4092,7 @@ ${bodyHtml}
     const selReq=staffReqDk?requests[staffReqDk]?.[staffMyId]:null;
     const selMySlots=staffReqDk?getStaffSlots(staffMyId,staffReqDk):[];
     return(
-      <div style={{background:'#F1F5F9',minHeight:'100vh'}}>
+      <div style={{background:'#F1F5F9',minHeight:'100vh',overflowX:'hidden'}}>
         {/* PINダイアログ */}
         {(pinTarget?.mode==='request'||pinTarget?.mode==='work_wish')&&(
           <PinDialog staffName={staffMe?.name||''} onSuccess={handleRequestPin} onCancel={()=>setPinTarget(null)}/>
@@ -4141,8 +4141,8 @@ ${bodyHtml}
             </div>
           </div>
         )}
-        {/* ヘッダー＋タブ統合 */}
-        <div style={{background:'#fff',borderBottom:'1px solid #E2E8F0',display:'flex',alignItems:'center',paddingLeft:10}}>
+        {/* ヘッダー＋タブ統合（スマホで画面幅を超えても横スクロールで収め、ページ全体の横はみ出し＝縮小表示を防ぐ） */}
+        <div style={{background:'#fff',borderBottom:'1px solid #E2E8F0',display:'flex',alignItems:'center',paddingLeft:10,width:'100%',boxSizing:'border-box',overflowX:'auto'}}>
           {/* クリニックロゴ（押すとホームへ。戻る前に変更をクラウド保存。他アプリと操作統一） */}
           <button onClick={async()=>{await flushStaffToCloud();setAppMode('select');setStaffMyId(null);setStaffReqDk(null);setStaffTab('shift');}}
             style={{display:'flex',alignItems:'center',gap:4,padding:'4px 8px',border:'none',background:'none',cursor:'pointer',marginRight:8,flexShrink:0}}>
