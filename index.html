@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v100</title>
+<title>シフト管理 v102</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -50,7 +50,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v100';
+const APP_VERSION = 'v102';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -172,29 +172,31 @@ function staffStartMin(s,dow){
 function daySlotsForDow(dow){
   return (SLOTS_BY_DOW&&SLOTS_BY_DOW[dow])||(SLOTS&&SLOTS[dow])||[];
 }
-function bothSurgeryCap(da,sid,dow){
+function bothSurgeryCap(da,sid,dow,excl){
   if(!da||sid==null)return null;
   var daySlots=daySlotsForDow(dow);
-  // 本人が入っている「現在の手術コマ」だけを集める（存在しない古いコマIDは無視）
+  // 本人が入っている「現在の手術コマ」だけを集める（存在しない古いコマIDは無視）。
+  // 除外（手動で外した）コマは通し判定に含めない。
   var hasAm=false,hasPm=false;
   daySlots.forEach(function(sl){
     if(!sl||sl.type!=='surg')return;
     if((da[sl.id]||[]).indexOf(sid)<0)return;
+    if(excl&&(excl[sl.id]||[]).indexOf(sid)>=0)return; // このコマは除外されているので通しに数えない
     var r=slotRangeMin(sl); if(!r||r.s==null)return;
     if(r.s<12*60)hasAm=true; else hasPm=true;
   });
   return (hasAm&&hasPm)?(15*60+30):null;
 }
-// その日の実効退勤時刻（分）。通し手術なら15:30で打ち切る。
-function effEndMin(s,dow,da){
+// その日の実効退勤時刻（分）。通し手術なら15:30で打ち切る。excl=その日の除外マップ(manualExclusions[dk])
+function effEndMin(s,dow,da,excl){
   var lim=staffEndMin(s,dow);
-  var cap=bothSurgeryCap(da,s&&s.id,dow);
+  var cap=bothSurgeryCap(da,s&&s.id,dow,excl);
   if(cap!=null)lim=(lim==null)?cap:Math.min(lim,cap);
   return lim;
 }
 // そのスタッフがそのコマ(その曜日)で早退するなら「(帰H:MM)」を返す
-function leaveNoteForSlot(s,slot,dow,da){
-  var lim=effEndMin(s,dow,da); if(lim==null)return '';
+function leaveNoteForSlot(s,slot,dow,da,excl){
+  var lim=effEndMin(s,dow,da,excl); if(lim==null)return '';
   var r=slotRangeMin(slot); if(!r||r.e==null)return '';
   if(r.e>lim && (r.s==null || r.s<lim)) return '(帰'+fmtHM(lim)+')';
   return '';
@@ -235,10 +237,10 @@ function staffSkill(s){
 }
 function skillLabel(sk){return sk==='surg'?'手術のみ':sk==='out'?'外来のみ':'外来・手術可';}
 // そのスタッフがそのコマ(その曜日)で実際に在席できる時間帯 {s,e}（出勤開始/退勤制限を反映）。在席不可ならnull
-function staffPresenceInSlot(s,slot,dow,da){
+function staffPresenceInSlot(s,slot,dow,da,excl){
   var r=slotRangeMin(slot); if(!r||r.s==null||r.e==null)return null;
   var a=r.s, b=r.e;
-  var st=staffStartMin(s,dow), lv=effEndMin(s,dow,da);
+  var st=staffStartMin(s,dow), lv=effEndMin(s,dow,da,excl);
   if(st!=null&&st>a)a=st;
   if(lv!=null&&lv<b)b=lv;
   if(b<=a)return null;
@@ -1791,6 +1793,7 @@ function App(){
   const [showHoursPanel,setShowHoursPanel]=useState(false);
   const [showReportPanel,setShowReportPanel]=useState(false);
   const [showStaffCheck,setShowStaffCheck]=useState(false);
+  const [showLeaveAudit,setShowLeaveAudit]=useState(false);
   const [keyInput,setKeyInput]=useState('');
   const [weeklyReq,setWeeklyReq]=useState(()=>saved?.weeklyReq||WEEKLY_REQ_DEFAULT);
   const [monthlyReq,setMonthlyReq]=useState(()=>saved?.monthlyReq||{});
@@ -4816,6 +4819,7 @@ ${bodyHtml}
                     <MenuItem icon="⏱" label="勤務時間集計" onClick={()=>{setShowHoursPanel(p=>!p);setOpenMenu(null);}} active={showHoursPanel}/>
                     <MenuItem icon="📊" label="達成レポート" onClick={()=>{setShowReportPanel(p=>!p);setOpenMenu(null);}} active={showReportPanel}/>
                     <MenuItem icon="👤" label="スタッフごとのチェック" onClick={()=>{setShowStaffCheck(p=>!p);setOpenMenu(null);}} active={showStaffCheck}/>
+                    <MenuItem icon="🕖" label="退勤時刻チェック" onClick={()=>{setShowLeaveAudit(true);setOpenMenu(null);}} active={showLeaveAudit}/>
                   </>}
 
                   {/* 出力メニュー */}
@@ -4862,6 +4866,7 @@ ${bodyHtml}
               <MenuItem icon="📅" label="シフト表" onClick={()=>{setTab('shift');setOpenMenu(null);}} active={tab==='shift'}/>
               <MenuItem icon="🤖" label={aLoad?'生成中...':'自動シフト作成'} onClick={()=>{if(!aLoad){doAuto();setOpenMenu(null);}}}/>
               <MenuItem icon="👤" label="スタッフごとのチェック" onClick={()=>{setShowStaffCheck(p=>!p);setOpenMenu(null);}} active={showStaffCheck}/>
+              <MenuItem icon="🕖" label="退勤時刻チェック" onClick={()=>{setShowLeaveAudit(true);setOpenMenu(null);}} active={showLeaveAudit}/>
               <MenuDivider/>
               <MenuLabel text="出力"/>
               <MenuItem icon="🖨" label="カレンダーPDF" onClick={()=>{exportPDF();setOpenMenu(null);}}/>
@@ -5008,6 +5013,7 @@ ${bodyHtml}
           {showHoursPanel&&<HoursPanel staff={staff} weeks={weeks} dates={dates} asgn={asgn} manualExclusions={manualExclusions} slots={slots} onClose={()=>setShowHoursPanel(false)} onAutoFill={autoFillHours}/>}
           {showReportPanel&&<ReportPanel reports={generateReport()} y={y} m={m} onClose={()=>setShowReportPanel(false)} onExportPDF={exportReportPDF}/>}
           {showStaffCheck&&<StaffCheckPanel staff={staff} dates={dates} asgn={asgn} manualExclusions={manualExclusions} tmps={tmps} slots={slots} weeks={weeks} y={y} m={m} holidays={holidays} manualClosedDays={manualClosedDays} onClose={()=>setShowStaffCheck(false)}/>}
+          {showLeaveAudit&&<LeaveAudit staff={staff} dates={dates} asgn={asgn} manualExclusions={manualExclusions} tmps={tmps} slots={slots} y={y} m={m} onClose={()=>setShowLeaveAudit(false)}/>}
           {aRes&&<AutoPanel result={aRes} apid={apid} staff={staff} y={y} m={m} allSlots={allSlots} weeks={weeks} slots={slots} patReqList={patReqList} finalizeAsgn={finalizeAsgn} onApply={applyPat} onClose={()=>{setARes(null);setApid(null);}} onJump={dk=>{setSelDk(dk);setDtab('assign');}}/>}
 
           {/* バックアップ履歴パネル */}
@@ -5166,7 +5172,7 @@ ${bodyHtml}
                                             const isExcl=exclIds.includes(sid);
                                             const isOff=slotOffIds.includes(sid);
                                             const isOffTmp=['off','paid','paid_am','paid_pm'].includes(tmps[dk]?.[String(sid)]?.type);
-                                            const leaveNote=(!isOffTmp&&!isExcl)?leaveNoteForSlot(s,slot,d.getDay(),da):'';
+                                            const leaveNote=(!isOffTmp&&!isExcl)?leaveNoteForSlot(s,slot,d.getDay(),da,dExcl):'';
                                             const isReliefAdded=reliefAddedSet.has(dk+'|'+slot.id+'|'+sid);
                                             // 確定後に追加された人（出勤中・確定時には不在）＝赤枠＋＋印で「追記」表示
                                             const isAddedSinceLock=isLocked&&!isExcl&&!isOff&&activeIds.includes(sid)&&!baseActive.includes(sid);
@@ -6840,6 +6846,80 @@ function ReportPanel({reports,y,m,onClose,onExportPDF}){
 // ================================================================
 // 勤務時間集計パネル
 // ================================================================
+// ── 退勤時刻チェック（全スタッフ×全日：帰宅（早退）になっている箇所と理由を一覧） ──
+function LeaveAudit({staff,dates,asgn,manualExclusions,tmps,slots,y,m,onClose}){
+  const AM_OFF=['am_out','am_surg','surg'], PM_OFF=['pm_surg','pm_out','pm1','pm2'];
+  const byStaff={}; let nTsuro=0,nCond=0;
+  (staff||[]).forEach(s=>{byStaff[s.id]={name:s.name,color:s.color,tsuro:[],cond:[]};});
+  (dates||[]).forEach(d=>{
+    const dk=tdk(d),dow=d.getDay();
+    const da=asgn[dk]||{}, dExcl=manualExclusions[dk]||{}, dt=tmps[dk]||{};
+    const daySlots=slots[dow]||[];
+    (staff||[]).forEach(s=>{
+      if(!byStaff[s.id])return;
+      const tc=dt[String(s.id)];
+      if(tc&&['off','paid'].includes(tc.type))return; // 終日休/有給
+      const cap=bothSurgeryCap(da,s.id,dow,dExcl);
+      const condEnd=staffEndMin(s,dow);
+      const lim=effEndMin(s,dow,da,dExcl);
+      daySlots.forEach(slot=>{
+        if(!(da[slot.id]||[]).includes(s.id))return;
+        if((dExcl[slot.id]||[]).includes(s.id))return;
+        if(tc&&tc.type==='paid_am'&&AM_OFF.includes(slot.id))return;
+        if(tc&&tc.type==='paid_pm'&&PM_OFF.includes(slot.id))return;
+        const note=leaveNoteForSlot(s,slot,dow,da,dExcl);
+        if(!note)return;
+        const leave=note.replace(/[()帰]/g,'');
+        const isTsuro=(cap!=null&&lim===cap&&(condEnd==null||cap<=condEnd));
+        const row={mo:d.getMonth()+1,day:d.getDate(),dow:dow,label:slot.label,leave:leave};
+        if(isTsuro){byStaff[s.id].tsuro.push(row);nTsuro++;}
+        else{byStaff[s.id].cond.push({...row,condEnd:condEnd});nCond++;}
+      });
+    });
+  });
+  const ids=Object.keys(byStaff).filter(id=>byStaff[id].tsuro.length||byStaff[id].cond.length);
+  return(
+    <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:2000,padding:16}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:14,width:'100%',maxWidth:680,maxHeight:'86vh',overflowY:'auto',padding:20,boxShadow:'0 8px 32px rgba(0,0,0,0.2)'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+          <div style={{fontWeight:700,fontSize:16}}>🕖 退勤時刻チェック（{y}年{m}月）</div>
+          <button onClick={onClose} style={{border:'none',background:'none',fontSize:20,cursor:'pointer',color:'#64748B'}}>×</button>
+        </div>
+        <div style={{fontSize:12,color:'#475569',background:'#F1F5F9',borderRadius:8,padding:'8px 12px',marginBottom:14,lineHeight:1.7}}>
+          この月で「帰（早退）」が付く全箇所を、理由つきで一覧にしています。理由は次の2つだけのはずです：<br/>
+          ・<b style={{color:'#9A3412'}}>通し手術</b>（午前手術＋午後手術の両方に実働）＝6時間勤務で15:30退勤の労務ルール<br/>
+          ・<b style={{color:'#1D4ED8'}}>勤務条件</b>（各自の「◯時まで」設定）<br/>
+          合計：通し手術 <b>{nTsuro}</b> 件／勤務条件 <b>{nCond}</b> 件。意図しないものがあれば、そのスタッフの勤務条件を確認してください。
+        </div>
+        {ids.length===0
+          ?<div style={{textAlign:'center',padding:'24px 0',color:'#166534',fontSize:14,fontWeight:600}}>✓ 早退（帰）になっている箇所はありません</div>
+          :ids.map(id=>{
+            const b=byStaff[id];
+            return(
+              <div key={id} style={{border:'1px solid #E2E8F0',borderRadius:10,padding:'10px 12px',marginBottom:10}}>
+                <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
+                  <span style={{width:9,height:9,borderRadius:'50%',background:b.color,flexShrink:0}}/>
+                  <span style={{fontWeight:700,fontSize:14}}>{b.name}</span>
+                </div>
+                {b.tsuro.length>0&&<div style={{marginBottom:b.cond.length?6:0}}>
+                  <div style={{fontSize:11,fontWeight:700,color:'#9A3412',marginBottom:3}}>通し手術 → 15:30退勤（{b.tsuro.length}件）</div>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
+                    {b.tsuro.map((r,i)=><span key={i} style={{fontSize:11,background:'#FFF7ED',border:'1px solid #FDBA74',color:'#9A3412',borderRadius:6,padding:'1px 6px'}}>{r.mo}/{r.day}({DAY_JP[r.dow]}) {r.label}</span>)}
+                  </div>
+                </div>}
+                {b.cond.length>0&&<div>
+                  <div style={{fontSize:11,fontWeight:700,color:'#1D4ED8',marginBottom:3}}>勤務条件による早退（{b.cond.length}件）</div>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
+                    {b.cond.map((r,i)=><span key={i} style={{fontSize:11,background:'#EFF6FF',border:'1px solid #BFDBFE',color:'#1D4ED8',borderRadius:6,padding:'1px 6px'}}>{r.mo}/{r.day}({DAY_JP[r.dow]}) {r.label} 帰{r.leave}</span>)}
+                  </div>
+                </div>}
+              </div>
+            );
+          })}
+      </div>
+    </div>
+  );
+}
 // ── スタッフごとの勤務チェック（勤務条件との適合＋日別の出退勤・休憩・実働） ──
 function StaffCheckPanel({staff,dates,asgn,manualExclusions,tmps,slots,weeks,y,m,holidays,manualClosedDays,onClose}){
   const AM_OFF=['am_out','am_surg','surg'], PM_OFF=['pm_surg','pm_out','pm1','pm2'];
@@ -6863,7 +6943,7 @@ function StaffCheckPanel({staff,dates,asgn,manualExclusions,tmps,slots,weeks,y,m
     const rs=assigned.map(sl=>slotRangeMin(sl)).filter(r=>r&&r.s!=null&&r.e!=null);
     if(rs.length===0)return null;
     let start=Math.min.apply(null,rs.map(r=>r.s)), end=Math.max.apply(null,rs.map(r=>r.e));
-    const lv=effEndMin(s,dow,da); if(lv!=null&&lv<end)end=lv;
+    const lv=effEndMin(s,dow,da,dExcl); if(lv!=null&&lv<end)end=lv;
     const span=Math.max(0,end-start), brk=legalBreak(span), work=Math.max(0,span-brk);
     const issues=[];
     if(!staffWorksDow(s,dow))issues.push('勤務不可の曜日に配置');
