@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v99</title>
+<title>シフト管理 v100</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -50,7 +50,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v99';
+const APP_VERSION = 'v100';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -167,17 +167,28 @@ function staffStartMin(s,dow){
   return staffStartLimitMin(s.notes);
 }
 // 午前手術＋午後手術の「通し」は6時間勤務(9:30→15:30)として退勤を15:30に丸める労務ルール。
-// da（その日の配置: slotId→[staffId]）で両手術に入っていれば15:30(=930分)、そうでなければnull。
-function bothSurgeryCap(da,sid){
+// 重要：固定ID('am_surg'等)ではなく「その曜日に現在ある手術コマ」を時間帯で判定する。
+// これにより、コマID変更で残った古い割当（例: 旧'am_surg'）に引っ張られて誤って15:30になる不具合を防ぐ。
+function daySlotsForDow(dow){
+  return (SLOTS_BY_DOW&&SLOTS_BY_DOW[dow])||(SLOTS&&SLOTS[dow])||[];
+}
+function bothSurgeryCap(da,sid,dow){
   if(!da||sid==null)return null;
-  var inAm=(da['am_surg']||[]).indexOf(sid)>=0;
-  var inPm=(da['pm_surg']||[]).indexOf(sid)>=0;
-  return (inAm&&inPm)?(15*60+30):null;
+  var daySlots=daySlotsForDow(dow);
+  // 本人が入っている「現在の手術コマ」だけを集める（存在しない古いコマIDは無視）
+  var hasAm=false,hasPm=false;
+  daySlots.forEach(function(sl){
+    if(!sl||sl.type!=='surg')return;
+    if((da[sl.id]||[]).indexOf(sid)<0)return;
+    var r=slotRangeMin(sl); if(!r||r.s==null)return;
+    if(r.s<12*60)hasAm=true; else hasPm=true;
+  });
+  return (hasAm&&hasPm)?(15*60+30):null;
 }
 // その日の実効退勤時刻（分）。通し手術なら15:30で打ち切る。
 function effEndMin(s,dow,da){
   var lim=staffEndMin(s,dow);
-  var cap=bothSurgeryCap(da,s&&s.id);
+  var cap=bothSurgeryCap(da,s&&s.id,dow);
   if(cap!=null)lim=(lim==null)?cap:Math.min(lim,cap);
   return lim;
 }
@@ -562,6 +573,8 @@ function slotHours(dow,slotId,slotsState){
 }
 // スタッフID→スタッフ情報 の参照表（曜日別の退勤時刻などを参照するため。Appが更新する）
 var STAFF_OBJ_LOOKUP={};
+// 曜日→現在の診療枠 の参照表（通し手術の判定で「今あるコマ」を見るため。Appが更新する）
+var SLOTS_BY_DOW={};
 // 実労働時間の計算：拘束時間（最早出勤〜退勤）から、6時間以上なら休憩1時間を引く
 // ・複数コマの重複は通し時間で計算（二重計上しない）
 // ・「○時まで」の退勤時刻で終わりを打ち切る
@@ -587,11 +600,18 @@ function dayHours(dk,staffId,asgn,excl,slotsState,staffArr){
     if(r&&r.s!=null&&r.e!=null)ranges.push(r);
   });
   const s=(staffArr?staffArr.find(x=>x.id===staffId):null)||STAFF_OBJ_LOOKUP[staffId]||null;
-  // 通し手術(午前手術＋午後手術)は6時間勤務＝15:30退勤として扱う
+  // 通し手術(午前手術＋午後手術)は6時間勤務＝15:30退勤として扱う。
+  // 固定IDではなく「その曜日に現在ある手術コマ」を時間帯で判定（古い割当に引っ張られない）。
   var lv=staffEndMin(s,dow);
-  var exAm=excl&&(excl[dk]?.['am_surg']||[]).includes(staffId);
-  var exPm=excl&&(excl[dk]?.['pm_surg']||[]).includes(staffId);
-  if((da['am_surg']||[]).includes(staffId)&&!exAm&&(da['pm_surg']||[]).includes(staffId)&&!exPm){
+  var hasAm=false,hasPm=false;
+  (src[dow]||[]).forEach(function(sl){
+    if(!sl||sl.type!=='surg')return;
+    if(!(da[sl.id]||[]).includes(staffId))return;
+    if(excl&&(excl[dk]?.[sl.id]||[]).includes(staffId))return;
+    var r=slotRangeMin(sl); if(!r||r.s==null)return;
+    if(r.s<12*60)hasAm=true; else hasPm=true;
+  });
+  if(hasAm&&hasPm){
     var cap=15*60+30; lv=(lv==null)?cap:Math.min(lv,cap);
   }
   return daySpanHours(ranges, lv);
@@ -1788,6 +1808,8 @@ function App(){
     Object.entries(SLOTS).forEach(([dow,sls])=>{s[dow]=sls.map(sl=>({...sl}));});
     return s;
   });
+  // 通し手術判定が「現在のコマ」を参照できるよう、描画ごとに同期
+  SLOTS_BY_DOW=slots||{};
   // 診療枠 編集 state
   const [editSlotKey,setEditSlotKey]=useState(null);
   const [editSlotF,setEditSlotF]=useState({});
