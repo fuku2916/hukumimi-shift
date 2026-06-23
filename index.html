@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>シフト管理 v91</title>
+<title>シフト管理 v92</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -46,7 +46,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v91';
+const APP_VERSION = 'v92';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── 診療枠カラーパレット ──
@@ -994,6 +994,32 @@ function loadLS(){try{const r=localStorage.getItem(LS_KEY);return r?JSON.parse(r
 function saveLS(d){try{localStorage.setItem(LS_KEY,JSON.stringify(d));}catch(e){}}
 function loadRequests(){try{const r=localStorage.getItem(LS_REQ);return r?JSON.parse(r):{};}catch(e){return {};}}
 function saveRequests(d){try{localStorage.setItem(LS_REQ,JSON.stringify(d));}catch(e){}}
+// 管理者→スタッフ返信の「既読」状態（端末ローカルのみ・クラウド非書込で競合ゼロ）。
+// 形: { [staffId]: { [dk+'|'+reqKey]: 既読済みの最新返信のat(ISO) } }。返信のatはISOなので文字列比較でOK。
+const LS_REQ_READ='fukumimi_req_read_v1'+_LSC+_LSU;
+function loadReqRead(){try{const r=localStorage.getItem(LS_REQ_READ);return r?JSON.parse(r):{};}catch(e){return {};}}
+function saveReqRead(d){try{localStorage.setItem(LS_REQ_READ,JSON.stringify(d));}catch(e){}}
+// 1スタッフ分の未読を集計。seen=既読マップ(ck->at)。returns {count, byReq:{ck:件数}, latest:{ck:maxAt}}
+function calcUnreadReplies(requests,sid,seen){
+  sid=String(sid); seen=seen||{};
+  let count=0; const byReq={}, latest={};
+  Object.entries(requests||{}).forEach(([dk,dayMap])=>{
+    Object.entries(dayMap||{}).forEach(([k,r])=>{
+      if(!r)return;
+      const mine=String(k)===sid||(r.type==='mistake_report'&&String(r.staffId)===sid);
+      if(!mine)return;
+      const reps=(r.replies||[]).filter(rp=>rp&&(rp.from==='admin'||rp.from==='system'));
+      if(!reps.length)return;
+      const ck=dk+'|'+k;
+      const maxAt=reps.reduce((m,rp)=>String(rp.at||'')>m?String(rp.at||''):m,'');
+      latest[ck]=maxAt;
+      const seenAt=String(seen[ck]||'');
+      const n=reps.filter(rp=>String(rp.at||'')>seenAt).length;
+      if(n>0){count+=n;byReq[ck]=n;}
+    });
+  });
+  return {count,byReq,latest};
+}
 // requestsのマージ保存用：他端末が追加した申請・メッセージを消さずに統合する。
 // localを基準に、cloudにしか無いキー（他端末の追加）を取り込む。ただし最近ローカルで削除したキー(tomb)は復活させない。
 function mergeRequests(local,cloud,tomb){
@@ -1522,6 +1548,11 @@ function App(){
   const [requests,setRequests]=useState(()=>loadRequests());
   // 管理者→スタッフ返信の下書き（キー: "dk|reqKey"）。送信すると当該申請の replies[] に積まれる。
   const [replyDraft,setReplyDraft]=useState({});
+  // 返信の既読状態（端末ローカル・スタッフ別）。{ [staffId]:{ [dk|key]: 既読済み最新at } }
+  const [reqReadMap,setReqReadMap]=useState(()=>loadReqRead());
+  // 「申請一覧」を今回開いたときに未読だった申請（ck->true）。個別ハイライト用。開いている間は保持。
+  const [unreadSnapshot,setUnreadSnapshot]=useState({});
+  const prevStaffTabRef=React.useRef(null);
   // スタッフのアイコン設定（codeごと）と打刻修正の申告（配列）。requests_data の包みに同居。
   const [avatars,setAvatars]=useState({});
   const [corrections,setCorrections]=useState([]);
@@ -3769,6 +3800,29 @@ ${bodyHtml}
   },[staffMyPL,requests,staffMyId]);
   const staffRemain=useMemo(()=>Math.max(0,(staffMyPL.granted||0)-staffUsed),[staffMyPL,staffUsed]);
   const staffReqCount=useMemo(()=>Object.values(requests).filter(d=>d[staffMyId]).length,[requests,staffMyId]);
+  // 自分宛ての未読返信（タブ赤バッジ用）。端末ローカルの既読マップと突き合わせて算出。
+  const staffUnread=useMemo(()=>{
+    if(appMode!=='staff'||staffMyId==null)return {count:0,byReq:{},latest:{}};
+    return calcUnreadReplies(requests,staffMyId,reqReadMap[String(staffMyId)]||{});
+  },[appMode,staffMyId,requests,reqReadMap]);
+  // 「申請一覧」を開いた瞬間に①未読を個別ハイライト用にスナップショット②既読として端末に記録（バッジを消す）。
+  // 開いている最中に届いた返信は静かに既読化（ハイライトのチラつき防止）。タブを離れたらスナップショットを破棄。
+  useEffect(()=>{
+    if(appMode!=='staff'||staffMyId==null){prevStaffTabRef.current=staffTab;return;}
+    const sid=String(staffMyId);
+    const entering=staffTab==='requests'&&prevStaffTabRef.current!=='requests';
+    prevStaffTabRef.current=staffTab;
+    if(staffTab!=='requests'){ if(Object.keys(unreadSnapshot).length)setUnreadSnapshot({}); return; }
+    const u=calcUnreadReplies(requests,sid,reqReadMap[sid]||{});
+    if(entering)setUnreadSnapshot(u.byReq); // 入場時のみ：どの申請が新着だったかを固定
+    if(u.count>0){ // 既読マップを最新atまで進める（端末ローカルのみ保存）
+      setReqReadMap(prev=>{
+        const cur={...(prev[sid]||{})};
+        Object.entries(u.latest).forEach(([ck,at])=>{ if(String(cur[ck]||'')<String(at))cur[ck]=at; });
+        const next={...prev,[sid]:cur}; saveReqRead(next); return next;
+      });
+    }
+  },[appMode,staffMyId,staffTab,requests,reqReadMap,unreadSnapshot]);
 
   function staffIsClosedDay(dk){
     if(manualClosedDays[dk]===false)return false;
@@ -4093,12 +4147,13 @@ ${bodyHtml}
           <span style={{width:9,height:9,borderRadius:'50%',background:staffMe?.color||'#7C3AED',flexShrink:0,marginRight:6}}/>
           <span style={{fontWeight:700,fontSize:14,marginRight:16,whiteSpace:'nowrap'}}>{staffMe?.name}</span>
           {/* タブ */}
-          {[{id:'shift',label:'📅 シフト表'},{id:'requests',label:'📋 申請一覧'+(staffReqCount>0?' ('+staffReqCount+')':'')},{id:'timecard',label:'⏱ 勤務状況'},{id:'settings',label:'⚙ 設定'}].map(t=>(
+          {[{id:'shift',label:'📅 シフト表'},{id:'requests',label:'📋 申請一覧'+(staffReqCount>0?' ('+staffReqCount+')':''),unread:staffUnread.count},{id:'timecard',label:'⏱ 勤務状況'},{id:'settings',label:'⚙ 設定'}].map(t=>(
             <button key={t.id} onClick={()=>setStaffTab(t.id)}
-              style={{padding:'12px 14px',border:'none',background:'none',cursor:'pointer',fontSize:13,
+              style={{position:'relative',padding:'12px 14px',border:'none',background:'none',cursor:'pointer',fontSize:13,
                 fontWeight:staffTab===t.id?600:400,color:staffTab===t.id?'#185FA5':'#64748B',
                 borderBottom:staffTab===t.id?'2px solid #185FA5':'2px solid transparent',whiteSpace:'nowrap'}}>
               {t.label}
+              {t.unread>0&&<span title="管理者からの新着返信" style={{position:'absolute',top:6,right:2,minWidth:16,height:16,padding:'0 4px',boxSizing:'border-box',background:'#DC2626',color:'#fff',borderRadius:8,fontSize:10,fontWeight:700,lineHeight:'16px',textAlign:'center'}}>{t.unread}</span>}
             </button>
           ))}
           {/* 有給残・ホーム */}
@@ -4284,8 +4339,10 @@ ${bodyHtml}
                     {myList.map(({dk,key,req})=>{
                       const d=new Date(dk),rt=REQ_TYPES[req.type]||{icon:'📋',label:req.type,color:'#374151',bg:'#F8FAFC',border:'#CBD5E1'};
                       const isMsg=req.type==='mistake_report';
+                      const hasNewReply=!!unreadSnapshot[dk+'|'+key]; // 今回開いたとき未読だった返信
                       return(
-                        <div key={dk+'|'+key} style={{padding:'10px 12px',background:isMsg?'#FFF7ED':rt.bg,border:'1px solid '+(isMsg?'#FDBA74':rt.border),borderRadius:8}}>
+                        <div key={dk+'|'+key} style={{padding:'10px 12px',background:isMsg?'#FFF7ED':rt.bg,border:'1px solid '+(isMsg?'#FDBA74':rt.border),borderRadius:8,boxShadow:hasNewReply?'0 0 0 2px #DC2626':'none'}}>
+                          {hasNewReply&&<div style={{display:'inline-block',background:'#DC2626',color:'#fff',fontSize:10,fontWeight:700,borderRadius:6,padding:'1px 7px',marginBottom:6}}>🔴 管理者から新しい返信</div>}
                           <div style={{display:'flex',alignItems:'center',gap:10}}>
                             <div style={{flex:1}}>
                               <div style={{fontWeight:700,fontSize:12,color:isMsg?'#9A3412':rt.color}}>{isMsg?'📩':rt.icon} {d.getMonth()+1}/{d.getDate()}({DAY_JP[d.getDay()]}){isMsg?' に送ったメッセージ':''}</div>
