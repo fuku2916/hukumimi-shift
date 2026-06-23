@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v97</title>
+<title>シフト管理 v98</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -50,7 +50,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v97';
+const APP_VERSION = 'v98';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -72,6 +72,11 @@ async function fetchLatestAppVersion(){
     return m?m[1]:null;
   }catch(e){ return null; }
 }
+// 更新リロードをまたいで「ログイン中スタッフ・タブ・表示月」を復元するための一時保存（sessionStorage）。
+// sessionStorage はリロードでは残るが、アプリを完全に閉じると消える＝恒久ログインにはせず、更新時だけ画面を維持する。
+function loadResume(){try{const r=sessionStorage.getItem('fukumimi_resume');return r?JSON.parse(r):null;}catch(e){return null;}}
+function saveResume(o){try{sessionStorage.setItem('fukumimi_resume',JSON.stringify(o));}catch(e){}}
+function clearResume(){try{sessionStorage.removeItem('fukumimi_resume');}catch(e){}}
 // 起動時：古い版を開いていたら自動で最新へ。1セッションにつき同じ版へのリロードは1回だけ（無限ループ防止）。
 (async()=>{
   const latest=await fetchLatestAppVersion();
@@ -1415,7 +1420,8 @@ function App(){
   // 「手元の最新の作成日時」を常に保持するref。クラウド読込の競合判定で、起動時固定の saved ではなくこれを使う（未公開の編集が消える不具合の対策）。
   const shiftTsRef=React.useRef(saved?.shiftUpdatedAt||'');
   // ── アプリモード ──
-  const [appMode,setAppMode]=useState('select'); // 'select'|'admin'|'staff'
+  // 更新リロード後にログイン中の画面を復元（sessionStorageに直前のセッションがあれば使う）
+  const [appMode,setAppMode]=useState(()=>{const r=loadResume();return (r&&r.appMode==='staff'&&r.staffMyId!=null)?'staff':'select';}); // 'select'|'admin'|'staff'
   const [sbLoading,setSbLoading]=useState(false);
   const [sbStatus,setSbStatus]=useState(''); // ''|'ok'|'error'
   // 使用中に新しい版が公開されたら通知（入力中に勝手にリロードしないよう、バナーでタップ更新を促す）
@@ -1591,16 +1597,21 @@ function App(){
     s.timer=setTimeout(()=>{s.count=0;},1500); // 1.5秒以内に5回タップ
   }
   const [openMenu,setOpenMenu]=useState(null); // 'file'|'settings'|'design'|'output'|null
-  // ── スタッフモード用 state ──
-  const [staffMyId,setStaffMyId]=useState(null);
+  // ── スタッフモード用 state ──（更新リロード後は直前のセッションを復元）
+  const [staffMyId,setStaffMyId]=useState(()=>{const r=loadResume();return (r&&r.appMode==='staff')?r.staffMyId:null;});
   const [helpTarget,setHelpTarget]=useState(null); // ⚠不足コマからの「挙手」対象 {dk,slotId,slotLabel,mo,day,dow}
-  const [staffTab,setStaffTab]=useState('shift');
+  const [staffTab,setStaffTab]=useState(()=>{const r=loadResume();return (r&&r.staffTab)?r.staffTab:'shift';});
   const [avDraft,setAvDraft]=useState(null);   // アイコン設定の下書き {color,icon}
   const [corrDraft,setCorrDraft]=useState({date:'',newIn:'',newOut:'',reason:''}); // 打刻修正の下書き
   const [staffReqDk,setStaffReqDk]=useState(null);
   const [pinTarget,setPinTarget]=useState(null); // {mode:'login'|'request'|'cancel', dk?, type?}
-  const [staffY,setStaffY]=useState(new Date().getFullYear());
-  const [staffM,setStaffM]=useState(new Date().getMonth()+1);
+  const [staffY,setStaffY]=useState(()=>{const r=loadResume();return (r&&r.staffY)?r.staffY:new Date().getFullYear();});
+  const [staffM,setStaffM]=useState(()=>{const r=loadResume();return (r&&r.staffM)?r.staffM:new Date().getMonth()+1;});
+  // ログイン中はセッションを保存し、更新リロードをまたいで同じ画面に復帰できるようにする。ログアウト時は消す。
+  useEffect(()=>{
+    if(appMode==='staff'&&staffMyId!=null)saveResume({appMode:'staff',staffMyId,staffTab,staffY,staffM});
+    else clearResume();
+  },[appMode,staffMyId,staffTab,staffY,staffM]);
   // 申請データはlocalStorageから読み書き（管理者モードと共有）
   const [requests,setRequests]=useState(()=>loadRequests());
   // 管理者→スタッフ返信の下書き（キー: "dk|reqKey"）。送信すると当該申請の replies[] に積まれる。
