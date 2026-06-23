@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v98</title>
+<title>シフト管理 v99</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -50,7 +50,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v98';
+const APP_VERSION = 'v99';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -4244,13 +4244,13 @@ ${bodyHtml}
         {/* シフト表タブ */}
         {staffTab==='shift'&&(
           <div style={{padding:0}}>
-            {/* 月ナビ */}
-            <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 8px'}}>
+            {/* 月ナビ（スマホで横に収まらない時は折り返す＝ボタンが切れて消えないように） */}
+            <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 8px',flexWrap:'wrap'}}>
               <button onClick={()=>{if(staffM===1){setStaffY(v=>v-1);setStaffM(12);}else setStaffM(v=>v-1);setStaffReqDk(null);}} style={{border:'1px solid #CBD5E1',borderRadius:8,padding:'4px 10px',background:'#fff',cursor:'pointer',fontSize:14}}>◀</button>
               <span style={{fontWeight:700,fontSize:15}}>{staffY}年 {staffM}月</span>
               <button onClick={()=>{if(staffM===12){setStaffY(v=>v+1);setStaffM(1);}else setStaffM(v=>v+1);setStaffReqDk(null);}} style={{border:'1px solid #CBD5E1',borderRadius:8,padding:'4px 10px',background:'#fff',cursor:'pointer',fontSize:14}}>▶</button>
-              {/* 表示切替トグル（横長／カレンダー）。選択は端末に記憶。 */}
-              <div style={{display:'flex',border:'1px solid #CBD5E1',borderRadius:8,overflow:'hidden'}}>
+              {/* 表示切替トグル（横長／カレンダー）。選択は端末に記憶。縮小・クリップ防止でflexShrink:0。 */}
+              <div style={{display:'flex',border:'1px solid #CBD5E1',borderRadius:8,overflow:'hidden',flexShrink:0}}>
                 {[{id:'table',label:'📋 一覧'},{id:'calendar',label:'🗓 カレンダー'}].map(v=>(
                   <button key={v.id} onClick={()=>{setStaffShiftView(v.id);saveStaffView(v.id);setStaffReqDk(null);}}
                     style={{border:'none',padding:'4px 10px',cursor:'pointer',fontSize:12,fontWeight:staffShiftView===v.id?700:400,
