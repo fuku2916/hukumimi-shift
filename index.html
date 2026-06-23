@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>シフト管理 v92</title>
+<title>シフト管理 v93</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -46,7 +46,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v92';
+const APP_VERSION = 'v93';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── 診療枠カラーパレット ──
@@ -999,6 +999,10 @@ function saveRequests(d){try{localStorage.setItem(LS_REQ,JSON.stringify(d));}cat
 const LS_REQ_READ='fukumimi_req_read_v1'+_LSC+_LSU;
 function loadReqRead(){try{const r=localStorage.getItem(LS_REQ_READ);return r?JSON.parse(r):{};}catch(e){return {};}}
 function saveReqRead(d){try{localStorage.setItem(LS_REQ_READ,JSON.stringify(d));}catch(e){}}
+// スタッフのシフト表示モード（'table'=従来の横長 / 'calendar'=カレンダー）。端末ごとに前回選択を記憶。
+const LS_STAFF_VIEW='fukumimi_staff_view_v1'+_LSC+_LSU;
+function loadStaffView(){try{const v=localStorage.getItem(LS_STAFF_VIEW);return v==='calendar'?'calendar':'table';}catch(e){return 'table';}}
+function saveStaffView(v){try{localStorage.setItem(LS_STAFF_VIEW,v);}catch(e){}}
 // 1スタッフ分の未読を集計。seen=既読マップ(ck->at)。returns {count, byReq:{ck:件数}, latest:{ck:maxAt}}
 function calcUnreadReplies(requests,sid,seen){
   sid=String(sid); seen=seen||{};
@@ -3791,6 +3795,8 @@ ${bodyHtml}
     }catch(e){return false;}
   }
   const staffDates=useMemo(()=>getWorkDates(staffY,staffM),[staffY,staffM]);
+  const staffWeeks=useMemo(()=>groupByWeek(staffDates),[staffDates]); // カレンダー表示用（月曜区切り・月〜土）
+  const [staffShiftView,setStaffShiftView]=useState(()=>loadStaffView()); // 'table'|'calendar'：前回選択を端末に記憶
   const staffHolidays=useMemo(()=>getJapaneseHolidays(staffY),[staffY]);
   const staffMyPL=useMemo(()=>paidLeave[staffMyId]||{granted:0,history:[]},[paidLeave,staffMyId]);
   const staffUsed=useMemo(()=>{
@@ -4173,7 +4179,15 @@ ${bodyHtml}
               <button onClick={()=>{if(staffM===1){setStaffY(v=>v-1);setStaffM(12);}else setStaffM(v=>v-1);setStaffReqDk(null);}} style={{border:'1px solid #CBD5E1',borderRadius:8,padding:'4px 10px',background:'#fff',cursor:'pointer',fontSize:14}}>◀</button>
               <span style={{fontWeight:700,fontSize:15}}>{staffY}年 {staffM}月</span>
               <button onClick={()=>{if(staffM===12){setStaffY(v=>v+1);setStaffM(1);}else setStaffM(v=>v+1);setStaffReqDk(null);}} style={{border:'1px solid #CBD5E1',borderRadius:8,padding:'4px 10px',background:'#fff',cursor:'pointer',fontSize:14}}>▶</button>
-              <span style={{fontSize:11,color:'#64748B'}}>自分の行をタップ→申請</span>
+              {/* 表示切替トグル（横長／カレンダー）。選択は端末に記憶。 */}
+              <div style={{display:'flex',border:'1px solid #CBD5E1',borderRadius:8,overflow:'hidden'}}>
+                {[{id:'table',label:'📋 一覧'},{id:'calendar',label:'🗓 カレンダー'}].map(v=>(
+                  <button key={v.id} onClick={()=>{setStaffShiftView(v.id);saveStaffView(v.id);setStaffReqDk(null);}}
+                    style={{border:'none',padding:'4px 10px',cursor:'pointer',fontSize:12,fontWeight:staffShiftView===v.id?700:400,
+                      background:staffShiftView===v.id?'#185FA5':'#fff',color:staffShiftView===v.id?'#fff':'#64748B'}}>{v.label}</button>
+                ))}
+              </div>
+              <span style={{fontSize:11,color:'#64748B'}}>{staffShiftView==='calendar'?'日付をダブルタップ→申請':'自分の行をタップ→申請'}</span>
               {/* クラウド同期ステータス（管理PIN不要で自動取得していることを明示） */}
               {SB_ENABLED&&(
                 <span style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:5,fontSize:11,padding:'3px 9px',borderRadius:8,
@@ -4184,6 +4198,7 @@ ${bodyHtml}
                 </span>
               )}
             </div>
+            {staffShiftView==='table'&&(<>
             <div style={{fontSize:12,color:'#9A3412',background:'#FFF7ED',border:'1px solid #FDBA74',borderRadius:8,padding:'8px 12px',margin:'0 8px 10px',lineHeight:1.6}}>
               ※ <strong>⚠</strong> のところはスタッフが不足しています。勤務できる方は、その<strong>⚠を直接タップ</strong>して「挙手」を押すと管理者に伝わります（自分の行の日付からも申請できます）。
             </div>
@@ -4301,6 +4316,79 @@ ${bodyHtml}
                 </tbody>
               </table>
             </div>
+            </>)}
+            {/* ── 閲覧専用カレンダー表示（管理画面のカレンダーに近い見た目・編集不可） ── */}
+            {staffShiftView==='calendar'&&(
+              <div style={{padding:'0 8px'}}>
+                <div style={{fontSize:12,color:'#185FA5',background:'#EBF4FF',border:'1px solid #93C5FD',borderRadius:8,padding:'8px 12px',marginBottom:10,lineHeight:1.6}}>
+                  🗓 閲覧専用です。<strong>日付をダブルタップ</strong>すると、その日の休み希望・挙手・管理者へのメッセージを申請できます（<span style={{color:'#185FA5',fontWeight:700}}>青枠</span>が自分の出番）。
+                </div>
+                <table style={{borderCollapse:'collapse',width:'100%',tableLayout:'fixed'}}>
+                  <thead>
+                    <tr>{['月','火','水','木','金','土'].map((wd,i)=>(
+                      <th key={wd} style={{padding:'4px 2px',border:'1px solid #E2E8F0',fontSize:12,fontWeight:600,textAlign:'center',background:i===5?'#FFFBEB':'#F8FAFC',color:i===5?'#92400E':'#64748B',width:'16.666%'}}>{wd}</th>
+                    ))}</tr>
+                  </thead>
+                  <tbody>
+                    {staffWeeks.map((wk,wi)=>{
+                      const cells=[],fd=wk[0].getDay();
+                      for(let i=1;i<fd;i++)cells.push(null);
+                      wk.forEach(d=>cells.push(d));
+                      while(cells.length<6)cells.push(null);
+                      return(
+                        <tr key={wi} style={{verticalAlign:'top'}}>
+                          {cells.map((d,ci)=>{
+                            if(!d)return<td key={ci} style={{border:'1px solid #E2E8F0',background:'#F8FAFC'}}/>;
+                            const dk=tdk(d),isSat=d.getDay()===6,dow=d.getDay();
+                            const isClosed=staffIsClosedDay(dk),holName=staffHolidays[dk];
+                            const da=asgn[dk]||{},dt=tmps[dk]||{};
+                            const offIds=Object.entries(dt).filter(([,v])=>['off','paid'].includes(v.type)).map(([sid])=>parseInt(sid));
+                            const sls=slots[dow]||[];
+                            const myReq=requests[dk]?.[staffMyId],myRt=myReq?REQ_TYPES[myReq.type]:null;
+                            const cellBg=isClosed?(holName?'#FEE2E2':'#F1F5F9'):isSat?'#FFFBEB':'#fff';
+                            return(
+                              <td key={ci}
+                                onDoubleClick={()=>{if(!isClosed)setStaffReqDk(dk);}}
+                                title={isClosed?'':'ダブルタップで申請'}
+                                style={{border:'1px solid #E2E8F0',background:cellBg,padding:4,verticalAlign:'top',cursor:isClosed?'default':'pointer'}}>
+                                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:2}}>
+                                  <span style={{fontSize:13,fontWeight:700,color:isClosed&&holName?'#991B1B':isSat?'#92400E':'#1E293B'}}>{d.getDate()}{holName&&<span style={{fontSize:9,fontWeight:400,color:'#991B1B',marginLeft:2}}>{holName.slice(0,3)}</span>}</span>
+                                  {myReq&&!isClosed&&<span style={{fontSize:9,fontWeight:700,color:myRt.color,background:myRt.bg,borderRadius:3,padding:'0 3px',whiteSpace:'nowrap'}}>{myReq.type==='work_wish'?(myReq.decision==='approved'?'✓承認':myReq.decision==='rejected'?'✕見送':'🙋希望'):myRt.icon}</span>}
+                                </div>
+                                {isClosed?(
+                                  <div style={{textAlign:'center',padding:'6px 0',color:'#991B1B',fontSize:11,fontWeight:600}}>{holName||'休診'}</div>
+                                ):(
+                                  <div style={{display:'flex',flexDirection:'column',gap:2}}>
+                                    {sls.map(slot=>{
+                                      const excl=manualExclusions[dk]?.[slot.id]||[];
+                                      const activeIds=(da[slot.id]||[]).filter(sid=>!excl.includes(sid)&&!offIds.includes(sid));
+                                      const sc=getTimeColor(slot);
+                                      return(
+                                        <div key={slot.id} style={{borderLeft:'2px solid '+sc.border,background:sc.bg,borderRadius:3,padding:'1px 3px'}}>
+                                          <div style={{fontSize:9,color:'#64748B',lineHeight:1.3}}>{slot.label}</div>
+                                          <div style={{display:'flex',flexWrap:'wrap',gap:2}}>
+                                            {activeIds.length===0?<span style={{fontSize:8,color:'#CBD5E1'}}>--</span>:activeIds.map(sid=>{
+                                              const s=staff.find(x=>x.id===sid); if(!s)return null;
+                                              const isMe=sid===staffMyId;
+                                              return<span key={sid} style={{fontSize:10,background:s.color,color:'#fff',borderRadius:3,padding:'0 3px',whiteSpace:'nowrap',fontWeight:isMe?700:400,boxShadow:isMe?'0 0 0 2px #185FA5':'none'}}>{s.name}</span>;
+                                            })}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                    {sls.length===0&&<span style={{fontSize:9,color:'#CBD5E1'}}>—</span>}
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
             {(()=>{
               const hasShift=staffDates.some(d=>Object.values(asgn[tdk(d)]||{}).some(ids=>ids&&ids.length>0));
               if(!hasShift&&!sbLoading){
@@ -4312,7 +4400,7 @@ ${bodyHtml}
               }
               return null;
             })()}
-            <div style={{fontSize:16,color:'#64748B',marginTop:10,paddingLeft:4}}>※ <strong style={{color:'#185FA5'}}>自分の行</strong>をタップすると申請できます</div>
+            <div style={{fontSize:16,color:'#64748B',marginTop:10,paddingLeft:4}}>※ {staffShiftView==='calendar'?<><strong style={{color:'#185FA5'}}>日付</strong>をダブルタップすると申請できます</>:<><strong style={{color:'#185FA5'}}>自分の行</strong>をタップすると申請できます</>}</div>
           </div>
         )}
         {/* 申請一覧タブ */}
