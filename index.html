@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>シフト管理 v89</title>
+<title>シフト管理 v90</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -46,7 +46,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v89';
+const APP_VERSION = 'v90';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── 診療枠カラーパレット ──
@@ -1123,6 +1123,34 @@ function PinDialog({staffName,onSuccess,onCancel}){
 }
 
 // ── 申請ボトムシート ──
+// 管理者からの返信スレッド表示（スタッフ・管理 双方で使用）。replies=[{from:'admin'|'system',text,at}]
+function RepliesView({replies}){
+  if(!replies||!replies.length)return null;
+  return(
+    <div style={{marginTop:8,display:'flex',flexDirection:'column',gap:4}}>
+      {replies.map((rp,i)=>(
+        <div key={i} style={{background:'#EFF6FF',border:'1px solid #BFDBFE',borderRadius:8,padding:'6px 9px'}}>
+          <div style={{fontSize:10,color:'#1D4ED8',fontWeight:700,marginBottom:2}}>{rp.from==='system'?'⚙ 自動通知':'👤 管理者より'}・{(()=>{try{return new Date(rp.at).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});}catch(e){return '';}})()}</div>
+          <div style={{fontSize:12,color:'#1E293B',whiteSpace:'pre-wrap',lineHeight:1.5}}>{rp.text}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+// 管理者→スタッフ 返信ボックス。反映済み(defaultText)のときは「反映されました」を下書き表示し、一言足して送信できる。
+function ReplyBox({dk,rkey,draft,setDraft,onSend,defaultText}){
+  const k=dk+'|'+rkey;
+  const val=draft[k]!==undefined?draft[k]:(defaultText||'');
+  return(
+    <div style={{display:'flex',gap:6,marginTop:8,alignItems:'flex-start'}}>
+      <textarea value={val} onChange={e=>setDraft(p=>({...p,[k]:e.target.value}))} rows={2}
+        placeholder="スタッフへの返信（例: 反映されました）"
+        style={{flex:1,padding:'5px 8px',border:'1px solid #CBD5E1',borderRadius:6,fontSize:12,resize:'vertical',fontFamily:'inherit',boxSizing:'border-box'}}/>
+      <button onClick={()=>onSend(dk,rkey,val)}
+        style={{padding:'6px 12px',border:'none',borderRadius:6,background:'#185FA5',color:'#fff',cursor:'pointer',fontSize:12,fontWeight:600,whiteSpace:'nowrap',flexShrink:0}}>送信</button>
+    </div>
+  );
+}
 function RequestSheet({dk,mySlots,allDaySlots,selReq,remainDays,onApply,onApplyWorkWish,onReport,onCancel,onCancelReq,workType}){
   const d=new Date(dk);
   const dateStr=(d.getMonth()+1)+'月'+d.getDate()+'日（'+DAY_JP[d.getDay()]+'）';
@@ -1492,6 +1520,8 @@ function App(){
   const [staffM,setStaffM]=useState(new Date().getMonth()+1);
   // 申請データはlocalStorageから読み書き（管理者モードと共有）
   const [requests,setRequests]=useState(()=>loadRequests());
+  // 管理者→スタッフ返信の下書き（キー: "dk|reqKey"）。送信すると当該申請の replies[] に積まれる。
+  const [replyDraft,setReplyDraft]=useState({});
   // スタッフのアイコン設定（codeごと）と打刻修正の申告（配列）。requests_data の包みに同居。
   const [avatars,setAvatars]=useState({});
   const [corrections,setCorrections]=useState([]);
@@ -1504,6 +1534,21 @@ function App(){
   // 直近のローカル編集時刻。これからしばらくはポーリング上書きを止め、承認等の編集が消えないようにする
   const lastReqEditRef=React.useRef(0);
   const touchReqEdit=()=>{lastReqEditRef.current=Date.now();};
+  // 管理者→スタッフへ返信を送る：当該申請の replies[] に1件追加（クラウド保存はrequests変更で自動実行）。
+  function sendReply(dk,rkey,text){
+    const t=(text||'').trim();
+    if(!t){alert('返信内容を入力してください');return;}
+    touchReqEdit();
+    setRequests(prev=>{
+      const day={...(prev[dk]||{})};
+      const cur=day[rkey];
+      if(!cur)return prev;
+      day[rkey]={...cur,replies:[...(cur.replies||[]),{from:'admin',text:t,at:new Date().toISOString()}]};
+      return{...prev,[dk]:day};
+    });
+    setReplyDraft(p=>({...p,[dk+'|'+rkey]:''}));
+    alert('スタッフに返信を送信しました。');
+  }
   // requestsが変わったら即保存
   React.useEffect(()=>{saveRequests(requests);},[requests]);
   // 管理者モードは申請データをポーリングで監視（3秒ごと）
@@ -4222,7 +4267,10 @@ ${bodyHtml}
               <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>申請一覧</div>
               {(()=>{
                 const myList=[];
-                Object.entries(requests).forEach(([dk,dayMap])=>{if(dayMap[String(staffMyId)])myList.push({dk,req:dayMap[String(staffMyId)]});});
+                Object.entries(requests).forEach(([dk,dayMap])=>{
+                  if(dayMap[String(staffMyId)])myList.push({dk,key:String(staffMyId),req:dayMap[String(staffMyId)]});
+                  Object.entries(dayMap).forEach(([k,r])=>{ if(r&&r.type==='mistake_report'&&String(r.staffId)===String(staffMyId))myList.push({dk,key:k,req:r}); });
+                });
                 myList.sort((a,b)=>a.dk>b.dk?1:-1);
                 if(myList.length===0)return(
                   <div style={{textAlign:'center',padding:'24px 0',color:'#64748B',fontSize:13}}>
@@ -4233,22 +4281,28 @@ ${bodyHtml}
                 );
                 return(
                   <div style={{display:'flex',flexDirection:'column',gap:7}}>
-                    {myList.map(({dk,req})=>{
+                    {myList.map(({dk,key,req})=>{
                       const d=new Date(dk),rt=REQ_TYPES[req.type]||{icon:'📋',label:req.type,color:'#374151',bg:'#F8FAFC',border:'#CBD5E1'};
+                      const isMsg=req.type==='mistake_report';
                       return(
-                        <div key={dk} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',background:rt.bg,border:'1px solid '+rt.border,borderRadius:8}}>
-                          <div style={{flex:1}}>
-                            <div style={{fontWeight:700,fontSize:12,color:rt.color}}>{rt.icon} {d.getMonth()+1}/{d.getDate()}({DAY_JP[d.getDay()]})</div>
-                            <div style={{fontSize:11,color:'#64748B',marginTop:1}}>{rt.label}{req.type==='work_wish'&&req.slotLabels?'（'+req.slotLabels.join('・')+'）':''}</div>
-                            {req.type==='work_wish'&&(
-                              req.decision==='approved'
-                                ?<div style={{fontSize:11,fontWeight:700,color:'#166534',marginTop:3}}>✓ 承認されました（出勤予定）</div>
-                                :req.decision==='rejected'
-                                ?<div style={{marginTop:3}}><div style={{fontSize:11,fontWeight:700,color:'#991B1B'}}>✕ 今回は見送りとなりました</div><div style={{fontSize:10,fontWeight:400,color:'#9A3412',lineHeight:1.6,marginTop:2}}>挙手していただきありがとうございました。今後ともよろしくお願いします。</div></div>
-                                :<div style={{fontSize:11,fontWeight:600,color:'#92400E',marginTop:3}}>⏳ 管理者の確認待ち</div>
-                            )}
+                        <div key={dk+'|'+key} style={{padding:'10px 12px',background:isMsg?'#FFF7ED':rt.bg,border:'1px solid '+(isMsg?'#FDBA74':rt.border),borderRadius:8}}>
+                          <div style={{display:'flex',alignItems:'center',gap:10}}>
+                            <div style={{flex:1}}>
+                              <div style={{fontWeight:700,fontSize:12,color:isMsg?'#9A3412':rt.color}}>{isMsg?'📩':rt.icon} {d.getMonth()+1}/{d.getDate()}({DAY_JP[d.getDay()]}){isMsg?' に送ったメッセージ':''}</div>
+                              {isMsg
+                                ?<div style={{fontSize:12,color:'#1E293B',marginTop:2,whiteSpace:'pre-wrap',lineHeight:1.5}}>{req.text}</div>
+                                :<div style={{fontSize:11,color:'#64748B',marginTop:1}}>{rt.label}{req.type==='work_wish'&&req.slotLabels?'（'+req.slotLabels.join('・')+'）':''}</div>}
+                              {req.type==='work_wish'&&(
+                                req.decision==='approved'
+                                  ?<div style={{fontSize:11,fontWeight:700,color:'#166534',marginTop:3}}>✓ 承認されました（出勤予定）</div>
+                                  :req.decision==='rejected'
+                                  ?<div style={{marginTop:3}}><div style={{fontSize:11,fontWeight:700,color:'#991B1B'}}>✕ 今回は見送りとなりました</div><div style={{fontSize:10,fontWeight:400,color:'#9A3412',lineHeight:1.6,marginTop:2}}>挙手していただきありがとうございました。今後ともよろしくお願いします。</div></div>
+                                  :<div style={{fontSize:11,fontWeight:600,color:'#92400E',marginTop:3}}>⏳ 管理者の確認待ち</div>
+                              )}
+                            </div>
+                            {!isMsg&&<button onClick={()=>setStaffReqDk(dk)} style={{padding:'4px 9px',border:'1px solid #E2E8F0',borderRadius:8,background:'#fff',color:'#64748B',cursor:'pointer',fontSize:11}}>詳細</button>}
                           </div>
-                          <button onClick={()=>setStaffReqDk(dk)} style={{padding:'4px 9px',border:'1px solid #E2E8F0',borderRadius:8,background:'#fff',color:'#64748B',cursor:'pointer',fontSize:11}}>詳細</button>
+                          <RepliesView replies={req.replies}/>
                         </div>
                       );
                     })}
@@ -5482,6 +5536,8 @@ ${bodyHtml}
                               ?<button onClick={()=>{touchReqEdit();setRequests(prev=>{const day={...(prev[dk]||{})};day[key]={...day[key],resolved:true};return{...prev,[dk]:day};});}} style={{padding:'3px 9px',border:'1px solid #10B981',borderRadius:6,background:'#ECFDF5',color:'#065F46',cursor:'pointer',fontSize:11,fontWeight:600}}>対応済みにする</button>
                               :<button onClick={()=>{touchReqEdit();markReqDeleted(dk,key);setRequests(prev=>{const day={...(prev[dk]||{})};delete day[key];if(Object.keys(day).length===0){const n={...prev};delete n[dk];return n;}return{...prev,[dk]:day};});}} style={{padding:'3px 9px',border:'1px solid #E2E8F0',borderRadius:6,background:'#F8FAFC',color:'#64748B',cursor:'pointer',fontSize:11}}>削除</button>}
                           </div>
+                          <RepliesView replies={r.replies}/>
+                          <ReplyBox dk={dk} rkey={key} draft={replyDraft} setDraft={setReplyDraft} onSend={sendReply} defaultText=""/>
                         </div>
                       );
                     })}
@@ -5546,9 +5602,10 @@ ${bodyHtml}
                     const d=new Date(dk);
                     const rt=REQ_TYPES[req.type]||{label:req.type,color:'#64748B',bg:'#F8FAFC',border:'#CBD5E1',icon:'📋'};
                     return(
-                      <div key={i} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 12px',
+                      <div key={i} style={{padding:'9px 12px',
                         borderRadius:K.rmd,background:alreadyApplied?K.bgG:rt.bg,
-                        border:'1px solid '+(alreadyApplied?'#86EFAC':rt.border),opacity:alreadyApplied?0.7:1}}>
+                        border:'1px solid '+(alreadyApplied?'#86EFAC':rt.border),opacity:alreadyApplied?0.85:1}}>
+                       <div style={{display:'flex',alignItems:'center',gap:10}}>
                         <span style={{width:8,height:8,borderRadius:'50%',background:staffColor,flexShrink:0}}/>
                         <div style={{flex:1}}>
                           <span style={{fontWeight:600,fontSize:12,color:K.text}}>{staffName}</span>
@@ -5592,6 +5649,9 @@ ${bodyHtml}
                             反映する
                           </button>
                         }
+                       </div>
+                       <RepliesView replies={req.replies}/>
+                       <ReplyBox dk={dk} rkey={String(sid)} draft={replyDraft} setDraft={setReplyDraft} onSend={sendReply} defaultText={(req.type==='work_wish'?req.decision==='approved':alreadyApplied)?'反映されました':''}/>
                       </div>
                     );
                   })}
