@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v107</title>
+<title>シフト管理 v108</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -50,7 +50,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v107';
+const APP_VERSION = 'v108';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -1023,6 +1023,51 @@ const SB={
     }
     return null;
   },
+  async getShiftDraftSafe(){
+    const u=APP_UNIT||'main';
+    const rid=this._rowId('shift_data'); const clinic=CLINIC_MODE;
+    for(let a=0;a<2;a++){
+      try{
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        if(r.status===401&&a===0&&await sbReauth())continue;
+        if(!r.ok)return {ok:false,data:null};
+        const j=await r.json(); const all=j[0]?.data||{};
+        const box=clinic?(all.drafts||{}):(all._drafts||all.drafts||{});
+        return {ok:true,data:(box&&box[u])?box[u]:null};
+      }catch(e){return {ok:false,data:null};}
+    }
+    return {ok:false,data:null};
+  },
+  async setShiftDraft(data){
+    const u=APP_UNIT||'main';
+    const rid=this._rowId('shift_data'); const clinic=CLINIC_MODE;
+    for(let a=0;a<2;a++){
+      try{
+        let all={};
+        try{
+          const cur=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+          if(cur.ok){const j=await cur.json();const ex=j[0]?.data;if(ex&&typeof ex==='object')all={...ex};}
+        }catch(_){}
+        if(clinic){
+          const drafts={...(all.drafts&&typeof all.drafts==='object'?all.drafts:{})};
+          drafts[u]=data;
+          all.drafts=drafts;
+        }else{
+          const drafts={...(all._drafts&&typeof all._drafts==='object'?all._drafts:{})};
+          drafts[u]=data;
+          all._drafts=drafts;
+        }
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}`,{
+          method:'PATCH',
+          headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer(),'Content-Type':'application/json','Prefer':'return=minimal'},
+          body:JSON.stringify({data:all,updated_at:new Date().toISOString()})
+        });
+        if(r.status===401&&a===0&&await sbReauth())continue;
+        return r.ok;
+      }catch(e){return false;}
+    }
+    return false;
+  },
   async set(table,data){
     const u=APP_UNIT||'main';
     const rid=this._rowId(table); const clinic=(table==='shift_data'&&CLINIC_MODE);
@@ -1034,7 +1079,7 @@ const SB={
           const cur=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
           if(cur.ok){const j=await cur.json();const ex=j[0]?.data;if(ex&&typeof ex==='object'){
             if(clinic){ all={...ex}; }
-            else { ['clerk','nurse','doctor'].forEach(k=>{if(ex[k]!==undefined)all[k]=ex[k];}); }
+            else { ['clerk','nurse','doctor'].forEach(k=>{if(ex[k]!==undefined)all[k]=ex[k];}); if(ex._drafts!==undefined)all._drafts=ex._drafts; if(ex.drafts!==undefined)all.drafts=ex.drafts; }
           }}
         }catch(_){}
         if(clinic){
@@ -1518,7 +1563,7 @@ function App(){
     setSbLoading(true);
     (async()=>{
       try{
-        const [sdR,rdR]=await Promise.all([SB.getSafe('shift_data'),SB.getSafe('requests_data')]);
+        const [sdR,rdR,draftR]=await Promise.all([SB.getSafe('shift_data'),SB.getSafe('requests_data'),SB.getShiftDraftSafe()]);
         if(!sdR.ok){
           // クラウドに到達できなかった → 自動保存は有効化しない（古いローカルでクラウドを上書きしないため）
           setSbStatus('error');setSbLoading(false);return;
@@ -1559,6 +1604,7 @@ function App(){
           if(Array.isArray(sd.history))setShiftHistory(sd.history); // バックアップ履歴
           if(sd.y)setY(sd.y);if(sd.m)setM(sd.m);
         }
+        if(draftR&&draftR.ok&&draftR.data&&draftR.data.draftSavedAt)setDraftSavedAt(draftR.data.draftSavedAt);
         // 手元が新しい場合は、その手元の版を「未公開」として扱う（クラウドより新しい）
         if(sd&&!cloudWins){setPublishedAt(cloudTs);}
         if(rd){const _u=unwrapReq(rd);setRequests(_u.requests);setAvatars(_u.avatars);setCorrections(_u.corrections);}
@@ -1876,14 +1922,65 @@ function App(){
     saveLS({y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths});
   },[y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths]);
 
-  // ★ シフト本体(shift_data)は自動保存しない（複数端末の競合上書き事故を防ぐため）。
-  // 　管理者が「☁ 保存／公開」ボタンを押したときだけクラウドへ保存する（publishToCloud）。
+  // ★ v108: シフト本体は「下書き保存」と「公開」を分離する。
+  // 　下書き保存＝管理者用の控え（スタッフには見えない）。公開＝スタッフ画面へ反映。
   const [publishing,setPublishing]=useState(false);
+  const [draftSaving,setDraftSaving]=useState(false);
+  const [draftSavedAt,setDraftSavedAt]=useState('');
   const [publishedAt,setPublishedAt]=useState(()=>saved?.shiftUpdatedAt||''); // 公開済みとみなす版
   const hasUnpublished = !!shiftUpdatedAt && shiftUpdatedAt!==publishedAt;
   const HISTORY_MAX=10; // クラウドに残す過去の公開版の数
   const [shiftHistory,setShiftHistory]=useState([]); // [{at,made,data}]（クラウドから取得）
   const [showHistory,setShowHistory]=useState(false);
+  function currentShiftPayload(extra){
+    return {y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,...(extra||{})};
+  }
+  function applyShiftPayload(d,opts){
+    if(!d)return; opts=opts||{};
+    if(d.staff)setStaff(d.staff);
+    if(d.slots)setSlots(d.slots);
+    if(d.asgn)setAsgn(d.asgn);
+    if(d.tmps)setTmps(d.tmps);
+    if(d.weeklyReq)setWeeklyReq(d.weeklyReq);
+    if(d.monthlyReq)setMonthlyReq(d.monthlyReq);
+    if(d.manualExclusions)setManualExclusions(d.manualExclusions);
+    if(d.manualClosedDays)setManualClosedDays(d.manualClosedDays);
+    if(d.baseShift)setBaseShift(d.baseShift);
+    if(d.paidLeave)setPaidLeave(d.paidLeave);
+    if(d.newSlotCounter)setNewSlotCounter(d.newSlotCounter);
+    if(Array.isArray(d.editLog))setEditLog(d.editLog);
+    if(d.lockedAsgn&&typeof d.lockedAsgn==='object')setLockedAsgn(d.lockedAsgn);
+    if(d.lockedMonths&&typeof d.lockedMonths==='object')setLockedMonths(d.lockedMonths);
+    shiftStampLoadRef.current=true;
+    if(d.shiftUpdatedAt!==undefined)setShiftUpdatedAt(d.shiftUpdatedAt||'');
+    if(Array.isArray(d.history))setShiftHistory(d.history);
+    if(d.y)setY(d.y); if(d.m)setM(d.m);
+    if(opts.published)setPublishedAt(d.shiftUpdatedAt||'');
+    if(d.draftSavedAt)setDraftSavedAt(d.draftSavedAt);
+  }
+  async function saveDraftToCloud(){
+    if(!SB_ENABLED){alert('クラウドが設定されていません。');return;}
+    setDraftSaving(true);
+    try{
+      const draftSavedAt=new Date().toISOString();
+      const data=currentShiftPayload({draftSavedAt});
+      const ok=await SB.setShiftDraft(data);
+      if(ok){setDraftSavedAt(draftSavedAt);alert('下書きを保存しました。スタッフ画面にはまだ公開されません。\n（下書き保存: '+fmtStamp(draftSavedAt)+'）');}
+      else alert('下書き保存に失敗しました。もう一度お試しください。');
+    }catch(e){alert('下書き保存に失敗しました：'+(e&&e.message||e));}
+    setDraftSaving(false);
+  }
+  async function loadDraftFromCloud(){
+    if(!SB_ENABLED){alert('クラウドが設定されていません。');return;}
+    try{
+      const r=await SB.getShiftDraftSafe();
+      if(!r.ok){alert('クラウドに接続できませんでした。通信状況をご確認ください。');return;}
+      if(!r.data){alert('保存済みの下書きはありません。');return;}
+      if(!window.confirm('下書き（保存 '+fmtStamp(r.data.draftSavedAt||r.data.shiftUpdatedAt)+'）を読み込みますか？\n現在の画面上の編集内容は置き換わります。'))return;
+      applyShiftPayload(r.data,{published:false});
+      setTimeout(()=>alert('下書きを読み込みました。スタッフにはまだ公開されていません。'),50);
+    }catch(e){alert('下書きの読み込みに失敗しました：'+(e&&e.message||e));}
+  }
   async function publishToCloud(){
     if(!SB_ENABLED){alert('クラウドが設定されていません。');return;}
     setPublishing(true);
@@ -1902,17 +1999,17 @@ function App(){
         const prevNoHist=Object.assign({},prev); delete prevNoHist.history;
         hist=[{at:new Date().toISOString(),made:prev.shiftUpdatedAt||'',data:prevNoHist},...hist].slice(0,HISTORY_MAX);
       }
-      const data={y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,history:hist};
+      const data=currentShiftPayload({history:hist});
       const ok=await SB.set('shift_data',data);
-      if(ok){setPublishedAt(shiftUpdatedAt);setShiftHistory(hist);alert('クラウドに保存し、スタッフへ公開しました。\n（作成: '+fmtStamp(shiftUpdatedAt)+'）\n直前の版はバックアップ履歴に自動保存されました。');}
+      if(ok){setPublishedAt(shiftUpdatedAt);setShiftHistory(hist);alert('スタッフへ公開しました。\n（作成: '+fmtStamp(shiftUpdatedAt)+'）\n直前の公開版はバックアップ履歴に自動保存されました。');}
       else alert('保存に失敗しました。もう一度お試しください。');
     }catch(e){alert('保存に失敗しました：'+(e&&e.message||e));}
     setPublishing(false);
   }
-  // 履歴の版に戻す（戻したあと「保存／公開」で確定）
+  // 履歴の版に戻す（戻したあと「公開」で確定）
   function restoreSnapshot(snap){
     if(!snap||!snap.data)return;
-    if(!window.confirm('この版（作成 '+fmtStamp(snap.made||snap.at)+'）に戻しますか？\n現在の編集内容は置き換わります。戻したあと「保存／公開」で確定してください。'))return;
+    if(!window.confirm('この版（作成 '+fmtStamp(snap.made||snap.at)+'）に戻しますか？\n現在の編集内容は置き換わります。戻したあと「公開」で確定してください。'))return;
     const d=snap.data;
     if(d.staff)setStaff(d.staff);
     if(d.slots)setSlots(d.slots);
@@ -1928,7 +2025,7 @@ function App(){
     if(d.y)setY(d.y);if(d.m)setM(d.m);
     setShiftUpdatedAt(new Date().toISOString()); // 復元＝新しい未公開版
     setShowHistory(false);
-    setTimeout(()=>alert('復元しました。内容を確認して「保存／公開」で確定してください。'),50);
+    setTimeout(()=>alert('復元しました。内容を確認して「公開」で確定してください。'),50);
   }
 
   // Supabase自動保存（requests）※shift_dataとは別タイマーで保存（互いに上書きしないように）
@@ -4853,7 +4950,7 @@ ${bodyHtml}
               onChange={e=>{
                 const c=e.target.value;
                 if(!c||c===APP_CLINIC)return;
-                if(!window.confirm('「'+(CLINIC_LABELS[c]||c)+'」に切り替えます。\n保存していない編集は失われます。\n先に「保存／公開」を済ませることをおすすめします。\n切り替えてよろしいですか？')){return;}
+                if(!window.confirm('「'+(CLINIC_LABELS[c]||c)+'」に切り替えます。\n保存していない編集は失われます。\n先に「下書き保存」または「公開」を済ませることをおすすめします。\n切り替えてよろしいですか？')){return;}
                 try{localStorage.setItem('fukumimi_clinic',c);}catch(_){}
                 location.replace(location.pathname+'?clinic='+c+(APP_UNIT?'&unit='+APP_UNIT:''));
               }}
@@ -5023,13 +5120,27 @@ ${bodyHtml}
                 🕒 作成: {shiftUpdatedAt?fmtStamp(shiftUpdatedAt):'—'}
               </span>
               {SB_ENABLED&&(
+                <button onClick={saveDraftToCloud} disabled={draftSaving}
+                  title="管理者用の下書きとしてクラウドに保存します。スタッフ画面には公開されません。"
+                  style={{padding:'5px 12px',borderRadius:K.rmd,fontSize:12,fontWeight:700,cursor:draftSaving?'wait':'pointer',whiteSpace:'nowrap',border:'1px solid #F59E0B',background:'#FFFBEB',color:'#92400E'}}>
+                  {draftSaving?'下書き保存中…':'💾 下書き保存'}
+                </button>
+              )}
+              {SB_ENABLED&&(
+                <button onClick={loadDraftFromCloud}
+                  title="クラウドに保存した管理者用下書きを読み込みます。"
+                  style={{padding:'5px 10px',borderRadius:K.rmd,fontSize:12,fontWeight:600,cursor:'pointer',whiteSpace:'nowrap',border:'1px solid #FCD34D',background:'#fff',color:'#92400E'}}>
+                  📂 下書き読込{draftSavedAt?'（'+fmtStamp(draftSavedAt)+'）':''}
+                </button>
+              )}
+              {SB_ENABLED&&(
                 <button onClick={publishToCloud} disabled={publishing}
-                  title="このシフトをクラウドに保存し、スタッフへ公開します。押したときだけ保存されます。"
+                  title="このシフトをスタッフ画面へ公開します。下書き保存とは別です。"
                   style={{padding:'5px 12px',borderRadius:K.rmd,fontSize:12,fontWeight:700,cursor:publishing?'wait':'pointer',whiteSpace:'nowrap',
                     border:'1px solid '+(hasUnpublished?'#16A34A':'#93C5FD'),
                     background:hasUnpublished?'#16A34A':'#EBF4FF',
                     color:hasUnpublished?'#fff':'#185FA5'}}>
-                  {publishing?'保存中…':hasUnpublished?'☁ 保存／公開（未公開あり）':'☁ 保存／公開（公開済み）'}
+                  {publishing?'公開中…':hasUnpublished?'☁ 公開（未公開あり）':'☁ 公開済み'}
                 </button>
               )}
               {SB_ENABLED&&(
@@ -5138,11 +5249,11 @@ ${bodyHtml}
                   <button onClick={()=>setShowHistory(false)} style={{border:'none',background:'none',cursor:'pointer',fontSize:20,color:K.textS,lineHeight:1,padding:0}}>×</button>
                 </div>
                 <div style={{padding:'10px 18px',fontSize:12,color:K.textS,borderBottom:K.bd,lineHeight:1.6}}>
-                  「保存／公開」するたびに、直前の版が自動で保存されます（最大{HISTORY_MAX}件）。戻したい版の「この版に戻す」を押し、内容を確認してから「保存／公開」で確定してください。
+                  「公開」するたびに、直前の公開版が自動で保存されます（最大{HISTORY_MAX}件）。戻したい版の「この版に戻す」を押し、内容を確認してから「公開」で確定してください。
                 </div>
                 <div style={{overflowY:'auto',padding:'10px 18px',display:'flex',flexDirection:'column',gap:8}}>
                   {shiftHistory.length===0?(
-                    <div style={{fontSize:13,color:K.textS,padding:'16px 0',textAlign:'center'}}>まだ履歴はありません。<br/>一度「保存／公開」すると、次回からここに残ります。</div>
+                    <div style={{fontSize:13,color:K.textS,padding:'16px 0',textAlign:'center'}}>まだ履歴はありません。<br/>一度「公開」すると、次回からここに残ります。</div>
                   ):shiftHistory.map((h,i)=>{
                     const dd=h.data||{};
                     const days=Object.values(dd.asgn||{}).filter(day=>Object.values(day||{}).some(ids=>(ids||[]).length>0)).length;
@@ -6003,7 +6114,7 @@ ${bodyHtml}
                               const slotIds=(req.slots||[]);
                               if(slotIds.length){setAsgn(prev=>{const day={...(prev[dk]||{})};slotIds.forEach(slid=>{const cur=day[slid]||[];if(!cur.includes(sid))day[slid]=[...cur,sid];});return{...prev,[dk]:day};});}
                               setRequests(prev=>{const day={...(prev[dk]||{})};day[String(sid)]={...(day[String(sid)]||{}),approved:true,decision:'approved',decidedAt:new Date().toISOString()};return{...prev,[dk]:day};});
-                              alert('承認しました。シフトに追加しました。\n本人の「申請一覧」に「承認」と表示されます。\n（シフト表への反映は「☁ 保存／公開」で確定してください）');
+                              alert('承認しました。シフトに追加しました。\n本人の「申請一覧」に「承認」と表示されます。\n（スタッフ画面への反映は「☁ 公開」で確定してください）');
                             }} style={{padding:'3px 9px',border:'1px solid #10B981',borderRadius:6,background:'#ECFDF5',color:'#065F46',cursor:'pointer',fontSize:11,whiteSpace:'nowrap',fontWeight:600}}>勤務を承認</button>
                             <button onClick={()=>{
                               if(!window.confirm('この出勤希望を却下しますか？\n本人の「申請一覧」に「見送り」と表示されます。'))return;
