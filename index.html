@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v115</title>
+<title>シフト管理 v116</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v115';
+const APP_VERSION = 'v116';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -1208,6 +1208,64 @@ function saveReqRead(d){try{localStorage.setItem(LS_REQ_READ,JSON.stringify(d));
 const LS_STAFF_VIEW='fukumimi_staff_view_v1'+_LSC+_LSU;
 function loadStaffView(){try{const v=localStorage.getItem(LS_STAFF_VIEW);return v==='calendar'?'calendar':'table';}catch(e){return 'table';}}
 function saveStaffView(v){try{localStorage.setItem(LS_STAFF_VIEW,v);}catch(e){}}
+
+// ── Googleカレンダー手術予定連携（Apps Script URL）──
+// 管理者カレンダーを開くたびに、Apps Scriptから「午前/午後の手術ありなし」だけを取得して表示する。
+// 返すデータは {"2026-07-01":{"am":true,"pm":false}} のような○/ー判定済みフラグだけ。
+const LS_SURGERY_CAL_URL='fukumimi_surgery_calendar_url'+_LSC;
+function loadSurgeryCalUrl(){try{return localStorage.getItem(LS_SURGERY_CAL_URL)||'';}catch(e){return '';}}
+function saveSurgeryCalUrl(v){try{const x=(v||'').trim();if(x)localStorage.setItem(LS_SURGERY_CAL_URL,x);else localStorage.removeItem(LS_SURGERY_CAL_URL);}catch(e){}}
+function normalizeSurgeryFlags(raw){
+  const src=(raw&&raw.surgeryFlags)||raw?.data||raw?.flags||raw||{};
+  const out={};
+  Object.entries(src||{}).forEach(([dk,v])=>{
+    if(!v||typeof v!=='object')return;
+    out[dk]={am:!!(v.am||v.am_surg||v.morning),pm:!!(v.pm||v.pm_surg||v.afternoon)};
+  });
+  return out;
+}
+function surgeryPeriodForSlot(slot){
+  if(!slot||slot.type!=='surg')return null;
+  const r=slotRangeMin(slot); if(!r||r.s==null)return null;
+  return r.s<12*60?'am':'pm';
+}
+function surgeryMarkForSlot(flags,dk,slot){
+  const p=surgeryPeriodForSlot(slot); if(!p)return '';
+  const v=flags&&flags[dk]; if(!v)return 'ー';
+  return v[p]?'○':'ー';
+}
+function appendParam(url,k,v){
+  const sep=url.indexOf('?')>=0?'&':'?';
+  return url+sep+encodeURIComponent(k)+'='+encodeURIComponent(v);
+}
+async function fetchJsonp(url,timeoutMs){
+  return new Promise((resolve,reject)=>{
+    const cb='__fukumimi_surgery_cb_'+Date.now()+'_'+Math.floor(Math.random()*1000000);
+    let done=false; const cleanup=()=>{try{delete window[cb];}catch(e){};try{script.remove();}catch(e){}};
+    const script=document.createElement('script');
+    const timer=setTimeout(()=>{if(done)return;done=true;cleanup();reject(new Error('timeout'));},timeoutMs||12000);
+    window[cb]=(data)=>{if(done)return;done=true;clearTimeout(timer);cleanup();resolve(data);};
+    script.onerror=()=>{if(done)return;done=true;clearTimeout(timer);cleanup();reject(new Error('jsonp error'));};
+    script.src=appendParam(url,'callback',cb);
+    document.head.appendChild(script);
+  });
+}
+async function fetchSurgeryFlagsFromUrl(baseUrl,y,m){
+  let url=(baseUrl||'').trim(); if(!url)throw new Error('URL未設定');
+  url=appendParam(url,'y',y); url=appendParam(url,'m',m);
+  if(APP_CLINIC)url=appendParam(url,'clinic',APP_CLINIC);
+  if(APP_UNIT)url=appendParam(url,'unit',APP_UNIT);
+  url=appendParam(url,'_ts',Date.now());
+  try{
+    const r=await fetch(url,{cache:'no-store'});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const data=await r.json();
+    return normalizeSurgeryFlags(data);
+  }catch(e){
+    const data=await fetchJsonp(url,12000);
+    return normalizeSurgeryFlags(data);
+  }
+}
 // 1スタッフ分の未読を集計。seen=既読マップ(ck->at)。returns {count, byReq:{ck:件数}, latest:{ck:maxAt}}
 function calcUnreadReplies(requests,sid,seen){
   sid=String(sid); seen=seen||{};
@@ -1805,6 +1863,12 @@ function App(){
     return {ok:true};
   }
   const [openMenu,setOpenMenu]=useState(null); // 'file'|'settings'|'design'|'output'|null
+  const [surgeryCalUrl,setSurgeryCalUrl]=useState(()=>loadSurgeryCalUrl());
+  const [surgeryCalInput,setSurgeryCalInput]=useState(()=>loadSurgeryCalUrl());
+  const [showSurgeryCalPanel,setShowSurgeryCalPanel]=useState(false);
+  const [surgeryFlags,setSurgeryFlags]=useState({});
+  const [surgeryCalStatus,setSurgeryCalStatus]=useState('idle'); // idle|loading|ok|error|empty
+  const [surgeryCalUpdatedAt,setSurgeryCalUpdatedAt]=useState('');
   // ── スタッフモード用 state ──（更新リロード後は直前のセッションを復元）
   const [staffMyId,setStaffMyId]=useState(()=>{const r=loadResume();return (r&&r.appMode==='staff')?r.staffMyId:null;});
   const [helpTarget,setHelpTarget]=useState(null); // ⚠不足コマからの「挙手」対象 {dk,slotId,slotLabel,mo,day,dow}
@@ -1943,6 +2007,27 @@ function App(){
   const [shiftUpdatedAt,setShiftUpdatedAt]=useState(()=>saved?.shiftUpdatedAt||'');
   const [selDk,setSelDk]=useState(null);
   const [dtab,setDtab]=useState('assign');
+
+  React.useEffect(()=>{
+    if(appMode!=='admin'||tab!=='shift')return;
+    if(!surgeryCalUrl){setSurgeryFlags({});setSurgeryCalStatus('empty');setSurgeryCalUpdatedAt('');return;}
+    let stop=false;
+    setSurgeryCalStatus('loading');
+    (async()=>{
+      try{
+        const f=await fetchSurgeryFlagsFromUrl(surgeryCalUrl,y,m);
+        if(stop)return;
+        setSurgeryFlags(f||{});
+        setSurgeryCalStatus('ok');
+        setSurgeryCalUpdatedAt(new Date().toISOString());
+      }catch(e){
+        if(stop)return;
+        setSurgeryFlags({});
+        setSurgeryCalStatus('error');
+      }
+    })();
+    return()=>{stop=true;};
+  },[appMode,tab,y,m,surgeryCalUrl]);
   // 編集中の日付のすぐ右に「割当・臨時条件」パネルを降ろすための位置計算
   const gridWrapRef=React.useRef(null);
   const selRowRef=React.useRef(null);
@@ -5156,6 +5241,7 @@ ${bodyHtml}
                     <MenuDivider/>
                     <MenuLabel text="認証"/>
                     <MenuItem icon="🔑" label={apiKey?'APIキー設定済':'APIキー未設定'} onClick={()=>{setTab('shift');setShowKeyPanel(p=>!p);setKeyInput(apiKey);setOpenMenu(null);}} active={showKeyPanel}/>
+                    <MenuItem icon="🗓" label={surgeryCalUrl?'手術カレンダー連携済':'手術カレンダー未設定'} onClick={()=>{setTab('shift');setShowSurgeryCalPanel(p=>!p);setSurgeryCalInput(surgeryCalUrl);setOpenMenu(null);}} active={showSurgeryCalPanel}/>
                     <MenuItem icon="🔐" label="管理者PIN変更" onClick={()=>{setTab('shift');setShowAdminPinSetting(p=>!p);setOpenMenu(null);}} active={showAdminPinSetting}/>
                   </>}
 
@@ -5211,6 +5297,7 @@ ${bodyHtml}
               <MenuItem icon="📅" label="ベースシフト" onClick={()=>{setTab('base');setOpenMenu(null);}} active={tab==='base'}/>
               <MenuItem icon="🌸" label="申請・メッセージ" onClick={()=>{setTab('paid');setOpenMenu(null);}} active={tab==='paid'}/>
               <MenuItem icon="🔑" label={apiKey?'APIキー設定済':'APIキー未設定'} onClick={()=>{setTab('shift');setShowKeyPanel(p=>!p);setOpenMenu(null);}}/>
+              <MenuItem icon="🗓" label={surgeryCalUrl?'手術カレンダー連携済':'手術カレンダー未設定'} onClick={()=>{setTab('shift');setShowSurgeryCalPanel(p=>!p);setSurgeryCalInput(surgeryCalUrl);setOpenMenu(null);}}/>
               <MenuItem icon="🔐" label="管理者PIN変更" onClick={()=>{setTab('shift');setShowAdminPinSetting(p=>!p);setOpenMenu(null);}}/>
               <MenuDivider/>
               <MenuLabel text="シフト設計"/>
@@ -5343,6 +5430,32 @@ ${bodyHtml}
                   style={{flex:1,padding:'7px 10px',border:K.bd2,borderRadius:K.rmd,fontSize:13,background:K.bg,color:K.text}}/>
                 <button onClick={saveKey} style={{padding:'7px 16px',background:K.bgI,color:K.textI,border:K.bdI,borderRadius:K.rmd,cursor:'pointer',fontSize:13,fontWeight:500,whiteSpace:'nowrap'}}>保存して閉じる</button>
                 {apiKey&&<button onClick={()=>{setApiKey('');setKeyInput('');localStorage.removeItem('shift_api_key');}} style={{padding:'7px 12px',background:K.bgD,color:K.textD,border:K.bdD,borderRadius:K.rmd,cursor:'pointer',fontSize:12}}>クリア</button>}
+              </div>
+            </div>
+          )}
+
+
+          {showSurgeryCalPanel&&(
+            <div style={{background:K.bg,border:K.bd,borderRadius:K.rlg,padding:16,marginBottom:14,borderLeft:'4px solid #DC2626'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:10}}>
+                <div>
+                  <div style={{fontWeight:500,fontSize:14,marginBottom:4}}>🗓 手術Googleカレンダー連携</div>
+                  <div style={{fontSize:12,color:K.textS,lineHeight:1.6}}>
+                    Google Apps ScriptのWebアプリURLを登録します。管理者カレンダーを開くたびに最新の手術予定を読み、手術コマ名の横に ○ / ー を表示します。予定タイトルや患者IDは表示しません。
+                  </div>
+                </div>
+                <button onClick={()=>setShowSurgeryCalPanel(false)} style={{border:'none',background:'none',cursor:'pointer',fontSize:18,color:K.textS,lineHeight:1,padding:0,marginLeft:10}}>×</button>
+              </div>
+              <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                <input type="url" value={surgeryCalInput} onChange={e=>setSurgeryCalInput(e.target.value)} placeholder="https://script.google.com/macros/s/.../exec"
+                  style={{flex:'1 1 360px',padding:'7px 10px',border:K.bd2,borderRadius:K.rmd,fontSize:13,background:K.bg,color:K.text}}/>
+                <button onClick={()=>{const v=(surgeryCalInput||'').trim();saveSurgeryCalUrl(v);setSurgeryCalUrl(v);setSurgeryCalInput(v);setShowSurgeryCalPanel(false);alert(v?'手術カレンダー連携URLを保存しました。':'手術カレンダー連携URLをクリアしました。');}}
+                  style={{padding:'7px 16px',background:'#FEF2F2',color:'#991B1B',border:'1px solid #FCA5A5',borderRadius:K.rmd,cursor:'pointer',fontSize:13,fontWeight:600,whiteSpace:'nowrap'}}>保存</button>
+                {surgeryCalUrl&&<button onClick={async()=>{setSurgeryCalStatus('loading');try{const f=await fetchSurgeryFlagsFromUrl(surgeryCalUrl,y,m);setSurgeryFlags(f||{});setSurgeryCalStatus('ok');setSurgeryCalUpdatedAt(new Date().toISOString());alert('手術予定を読み込みました。');}catch(e){setSurgeryCalStatus('error');alert('読み込みに失敗しました。Apps Script URLと公開設定を確認してください。');}}}
+                  style={{padding:'7px 12px',background:K.bgS,color:K.text,border:K.bd2,borderRadius:K.rmd,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>今すぐ読込テスト</button>}
+              </div>
+              <div style={{fontSize:11,color:surgeryCalStatus==='error'?K.textD:K.textS,marginTop:6}}>
+                状態: {surgeryCalStatus==='loading'?'読込中':surgeryCalStatus==='ok'?'読込済み':surgeryCalStatus==='error'?'読込失敗':surgeryCalStatus==='empty'?'未設定':'待機中'}{surgeryCalUpdatedAt?'（'+fmtStamp(surgeryCalUpdatedAt)+'）':''}
               </div>
             </div>
           )}
@@ -5521,7 +5634,7 @@ ${bodyHtml}
                                     return(
                                       <div key={slot.id} style={{marginBottom:2,padding:'1px 3px',borderRadius:3,borderLeft:'2px solid '+sc.border,background:sc.bgLight}}>
                                         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                                          <div style={{fontSize:'var(--fs-slot)',color:K.textS}}>{slot.label}</div>
+                                          <div style={{fontSize:'var(--fs-slot)',color:K.textS}}>{slot.label}{slot.type==='surg'&&surgeryCalUrl&&<span style={{marginLeft:3,fontWeight:700,color:surgeryMarkForSlot(surgeryFlags,dk,slot)==='○'?'#DC2626':'#94A3B8'}}>{surgeryMarkForSlot(surgeryFlags,dk,slot)}</span>}</div>
                                           <div style={{fontSize:'var(--fs-cell)',fontWeight:600,color:coverColor}}>{activeIds.length}/{req}</div>
                                         </div>
                                         <div style={{display:'flex',flexWrap:'wrap',gap:2}}>
