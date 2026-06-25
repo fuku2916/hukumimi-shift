@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v112</title>
+<title>シフト管理 v113</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -41,6 +41,34 @@
   .admin-header-left-scroll{overflow-x:auto !important;overflow-y:hidden !important;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
   .admin-header-left-scroll::-webkit-scrollbar{display:none;}
 }
+
+/* v113: PCではヘッダー左側を横スクロール部品にしない。
+   v110-112のスマホ対応でPCメニューとクラウド同期表示が詰まり、右端で文字が重なる問題を防ぐ。 */
+@media (min-width: 769px) {
+  .admin-header-inner { overflow: visible !important; }
+  .admin-header-left-scroll {
+    flex: 0 1 auto !important;
+    overflow: visible !important;
+    min-width: 0 !important;
+    scrollbar-width: auto !important;
+  }
+  .pc-menu {
+    display: flex !important;
+    flex: 0 0 auto !important;
+    align-items: center !important;
+    gap: 10px !important;
+    margin-left: 10px !important;
+    white-space: nowrap !important;
+  }
+  .admin-sync-indicator {
+    margin-left: auto !important;
+    padding-left: 18px !important;
+    max-width: 220px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+}
+
 @keyframes aiGenPulse{0%,100%{opacity:1}50%{opacity:.6}}
 @keyframes aiSpin{to{transform:rotate(360deg)}}
 .ai-gen-spin{width:16px;height:16px;border:2.5px solid #BFDBFE;border-top-color:#1D4ED8;border-radius:50%;animation:aiSpin .8s linear infinite;flex-shrink:0;display:inline-block}
@@ -59,7 +87,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v112';
+const APP_VERSION = 'v113';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -5119,7 +5147,7 @@ ${bodyHtml}
           )}
 
           {/* 自動保存インジケーター */}
-          <span style={{marginLeft:'auto',fontSize:14,color:K.textS,whiteSpace:'nowrap',flexShrink:0}}>
+          <span className="admin-sync-indicator" style={{marginLeft:'auto',fontSize:14,color:K.textS,whiteSpace:'nowrap',flexShrink:0}}>
           {SB_ENABLED
             ?sbLoading?'⏳ 同期中...':sbStatus==='ok'?'☁️ クラウド同期済':'⚠️ オフライン'
             :'💾 ローカル保存中'}
