@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v116</title>
+<title>シフト管理 v117</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v116';
+const APP_VERSION = 'v117';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -1252,6 +1252,9 @@ async function fetchJsonp(url,timeoutMs){
 }
 async function fetchSurgeryFlagsFromUrl(baseUrl,y,m){
   let url=(baseUrl||'').trim(); if(!url)throw new Error('URL未設定');
+  // v117: Apps Script側のサンプルは year/month を読むため、正式パラメータを year/month に統一。
+  // 旧互換として y/m も併送する（既存の別スクリプトが y/m を読んでいても壊さない）。
+  url=appendParam(url,'year',y); url=appendParam(url,'month',m);
   url=appendParam(url,'y',y); url=appendParam(url,'m',m);
   if(APP_CLINIC)url=appendParam(url,'clinic',APP_CLINIC);
   if(APP_UNIT)url=appendParam(url,'unit',APP_UNIT);
