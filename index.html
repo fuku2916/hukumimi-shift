@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v118</title>
+<title>シフト管理 v119</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v118';
+const APP_VERSION = 'v119';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -5249,9 +5249,9 @@ ${bodyHtml}
           )}
 
           {/* スタッフ申請バッジ */}
-          {(()=>{let n=0;Object.values(requests).forEach(d=>Object.values(d).forEach(r=>{if(r&&['paid_full','paid_am','paid_pm','off'].includes(r.type))n++;}));return n>0?<span onClick={()=>{setTab('paid');setOpenMenu(null);}} onDoubleClick={()=>{setTab('paid');setOpenMenu(null);setTimeout(()=>{const el=document.getElementById('paidsec-paid');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},80);}} title="ダブルクリックで休み・有給欄へ" style={{fontSize:13,background:'#FDF2F8',color:'#86198F',border:'1px solid #F9A8D4',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🌸 {n}件</span>:null;})()}
-          {(()=>{let nw=0;Object.values(requests).forEach(d=>Object.values(d).forEach(r=>{if(r&&r.type==='work_wish'&&!r.decision)nw++;}));return nw>0?<span onClick={()=>{setTab('paid');setOpenMenu(null);}} onDoubleClick={()=>{setTab('paid');setOpenMenu(null);setTimeout(()=>{const el=document.getElementById('paidsec-wish');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},80);}} title="ダブルクリックで挙手欄へ" style={{fontSize:13,background:'#ECFDF5',color:'#065F46',border:'1px solid #6EE7B7',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🙋 {nw}件</span>:null;})()}
-          {(()=>{let nr=0;Object.values(requests).forEach(d=>Object.values(d).forEach(r=>{if(r&&r.type==='mistake_report'&&!r.resolved)nr++;}));return nr>0?<span onClick={()=>{setTab('paid');setOpenMenu(null);}} onDoubleClick={()=>{setTab('paid');setOpenMenu(null);setTimeout(()=>{const el=document.getElementById('paidsec-msg');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},80);}} title="ダブルクリックでメッセージ欄へ" style={{fontSize:13,background:'#FFF7ED',color:'#9A3412',border:'1px solid #FDBA74',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🚩 {nr}件</span>:null;})()}
+          {(()=>{let n=0;Object.values(requests).forEach(d=>Object.values(d).forEach(r=>{if(r&&['paid_full','paid_am','paid_pm','off'].includes(r.type))n++;}));return n>0?<span onClick={()=>{setTab('paid');setOpenMenu(null);setTimeout(()=>{const el=document.getElementById('paidsec-paid');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},120);}} title="クリックで休み・有給欄へ" style={{fontSize:13,background:'#FDF2F8',color:'#86198F',border:'1px solid #F9A8D4',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🌸 {n}件</span>:null;})()}
+          {(()=>{let nw=0;Object.values(requests).forEach(d=>Object.values(d).forEach(r=>{if(r&&r.type==='work_wish'&&!r.decision)nw++;}));return nw>0?<span onClick={()=>{setTab('paid');setOpenMenu(null);setTimeout(()=>{const el=document.getElementById('paidsec-wish');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},120);}} title="クリックで挙手欄へ" style={{fontSize:13,background:'#ECFDF5',color:'#065F46',border:'1px solid #6EE7B7',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🙋 {nw}件</span>:null;})()}
+          {(()=>{let nr=0;Object.values(requests).forEach(d=>Object.values(d).forEach(r=>{if(r&&r.type==='mistake_report'&&!r.resolved)nr++;}));return nr>0?<span onClick={()=>{setTab('paid');setOpenMenu(null);setTimeout(()=>{const el=document.getElementById('paidsec-msg');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},120);}} title="クリックでメッセージ欄へ" style={{fontSize:13,background:'#FFF7ED',color:'#9A3412',border:'1px solid #FDBA74',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🚩 {nr}件</span>:null;})()}
 
           {/* PC：メニュー項目 / スマホ：ハンバーガー */}
           <div className="pc-menu" style={{display:'flex',alignItems:'center',flex:1}}>
