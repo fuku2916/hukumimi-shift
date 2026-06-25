@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v117</title>
+<title>シフト管理 v118</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v117';
+const APP_VERSION = 'v118';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -970,7 +970,7 @@ const APP_CLINIC=(()=>{
 const CLINIC_LABEL=CLINIC_LABELS[APP_CLINIC]||'';
 const CLINIC_MODE=!!APP_CLINIC; // true＝クリニック行モード（shift_dataをid=<clinic>で扱う）
 // data.shared に置く共通キー（クリニック内の全職種で共有）
-const SHARED_KEYS=['clinicName','slots','newSlotCounter','manualClosedDays'];
+const SHARED_KEYS=['clinicName','slots','newSlotCounter','manualClosedDays','surgeryCalUrl','surgeryCalUrlUpdatedAt'];
 try{ document.title='シフト管理'+(APP_UNIT_LABEL?'（'+APP_UNIT_LABEL+'）':'')+' '+APP_VERSION; }catch(e){}
 // ================================================================
 
@@ -1150,6 +1150,56 @@ const SB={
     }
     return false;
   },
+  async getSurgeryCalUrlSafe(){
+    const rid=this._rowId('shift_data'); const clinic=CLINIC_MODE;
+    for(let a=0;a<2;a++){
+      try{
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        if(r.status===401&&a===0&&await sbReauth())continue;
+        if(!r.ok)return {ok:false,url:''};
+        const j=await r.json(); const all=j[0]?.data||{};
+        let url='';
+        if(clinic){
+          const shared=(all.shared&&typeof all.shared==='object')?all.shared:{};
+          url=shared.surgeryCalUrl||all.surgeryCalUrl||'';
+        }else{
+          url=all.surgeryCalUrl||'';
+        }
+        return {ok:true,url:(url||'').toString()};
+      }catch(e){return {ok:false,url:''};}
+    }
+    return {ok:false,url:''};
+  },
+  async setSurgeryCalUrl(url){
+    const v=(''+(url||'')).trim();
+    const rid=this._rowId('shift_data'); const clinic=CLINIC_MODE;
+    for(let a=0;a<2;a++){
+      try{
+        let all={};
+        try{
+          const cur=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+          if(cur.ok){const j=await cur.json();const ex=j[0]?.data;if(ex&&typeof ex==='object')all={...ex};}
+        }catch(_){}
+        if(clinic){
+          const shared={...(all.shared&&typeof all.shared==='object'?all.shared:{})};
+          shared.surgeryCalUrl=v;
+          shared.surgeryCalUrlUpdatedAt=new Date().toISOString();
+          all.shared=shared;
+        }else{
+          all.surgeryCalUrl=v;
+          all.surgeryCalUrlUpdatedAt=new Date().toISOString();
+        }
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}`,{
+          method:'PATCH',
+          headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer(),'Content-Type':'application/json','Prefer':'return=minimal'},
+          body:JSON.stringify({data:all,updated_at:new Date().toISOString()})
+        });
+        if(r.status===401&&a===0&&await sbReauth())continue;
+        return r.ok;
+      }catch(e){return false;}
+    }
+    return false;
+  },
   async set(table,data){
     const u=APP_UNIT||'main';
     const rid=this._rowId(table); const clinic=(table==='shift_data'&&CLINIC_MODE);
@@ -1161,7 +1211,7 @@ const SB={
           const cur=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
           if(cur.ok){const j=await cur.json();const ex=j[0]?.data;if(ex&&typeof ex==='object'){
             if(clinic){ all={...ex}; }
-            else { ['clerk','nurse','doctor'].forEach(k=>{if(ex[k]!==undefined)all[k]=ex[k];}); if(ex._drafts!==undefined)all._drafts=ex._drafts; if(ex.drafts!==undefined)all.drafts=ex.drafts; if(ex._adminPin!==undefined)all._adminPin=ex._adminPin; if(ex.adminPin!==undefined)all.adminPin=ex.adminPin; }
+            else { ['clerk','nurse','doctor'].forEach(k=>{if(ex[k]!==undefined)all[k]=ex[k];}); if(ex._drafts!==undefined)all._drafts=ex._drafts; if(ex.drafts!==undefined)all.drafts=ex.drafts; if(ex._adminPin!==undefined)all._adminPin=ex._adminPin; if(ex.adminPin!==undefined)all.adminPin=ex.adminPin; if(ex.surgeryCalUrl!==undefined)all.surgeryCalUrl=ex.surgeryCalUrl; if(ex.surgeryCalUrlUpdatedAt!==undefined)all.surgeryCalUrlUpdatedAt=ex.surgeryCalUrlUpdatedAt; }
           }}
         }catch(_){}
         if(clinic){
@@ -1211,6 +1261,7 @@ function saveStaffView(v){try{localStorage.setItem(LS_STAFF_VIEW,v);}catch(e){}}
 
 // ── Googleカレンダー手術予定連携（Apps Script URL）──
 // 管理者カレンダーを開くたびに、Apps Scriptから「午前/午後の手術ありなし」だけを取得して表示する。
+// v118: Apps Script URLはクラウド共通設定（Supabase）として保存し、端末内保存はキャッシュのみ。
 // 返すデータは {"2026-07-01":{"am":true,"pm":false}} のような○/ー判定済みフラグだけ。
 const LS_SURGERY_CAL_URL='fukumimi_surgery_calendar_url'+_LSC;
 function loadSurgeryCalUrl(){try{return localStorage.getItem(LS_SURGERY_CAL_URL)||'';}catch(e){return '';}}
@@ -1712,6 +1763,14 @@ function App(){
           setSbStatus('error');setSbLoading(false);return;
         }
         const sd=sdR.data, rd=rdR.data;
+        // v118: 手術カレンダー連携URLはクラウド共通設定として読み込む（○/ーの結果自体は毎回Googleカレンダーから取得）
+        if(sd&&Object.prototype.hasOwnProperty.call(sd,'surgeryCalUrl')){
+          const cu=(sd.surgeryCalUrl||'').toString();
+          setSurgeryCalUrl(cu);setSurgeryCalInput(cu);saveSurgeryCalUrl(cu);
+        }else if((surgeryCalUrl||'').trim()){
+          // v116/v117の端末保存URLが残っている場合は、初回だけクラウドへ昇格する
+          try{await SB.setSurgeryCalUrl(surgeryCalUrl);}catch(_){}
+        }
         // 競合ガード：手元(localStorage)の方が新しい未公開の編集があれば、クラウドの古い版で上書きしない
         // ※ 起動時固定の saved ではなく、編集で更新される shiftTsRef を基準にする（未公開編集の消失対策）
         const localTs=shiftTsRef.current||saved?.shiftUpdatedAt||'';
@@ -2155,6 +2214,7 @@ function App(){
   function applyShiftPayload(d,opts){
     if(!d)return; opts=opts||{};
     if(d.staff)setStaff(d.staff);
+    if(d.surgeryCalUrl!==undefined){const cu=(d.surgeryCalUrl||'').toString();setSurgeryCalUrl(cu);setSurgeryCalInput(cu);saveSurgeryCalUrl(cu);}
     if(d.slots)setSlots(d.slots);
     if(d.asgn)setAsgn(d.asgn);
     if(d.tmps)setTmps(d.tmps);
@@ -5444,7 +5504,7 @@ ${bodyHtml}
                 <div>
                   <div style={{fontWeight:500,fontSize:14,marginBottom:4}}>🗓 手術Googleカレンダー連携</div>
                   <div style={{fontSize:12,color:K.textS,lineHeight:1.6}}>
-                    Google Apps ScriptのWebアプリURLを登録します。管理者カレンダーを開くたびに最新の手術予定を読み、手術コマ名の横に ○ / ー を表示します。予定タイトルや患者IDは表示しません。
+                    Google Apps ScriptのWebアプリURLをクラウド共通設定として登録します。管理者カレンダーを開くたびに最新の手術予定を読み、手術コマ名の横に ○ / ー を表示します。予定タイトルや患者IDは表示しません。
                   </div>
                 </div>
                 <button onClick={()=>setShowSurgeryCalPanel(false)} style={{border:'none',background:'none',cursor:'pointer',fontSize:18,color:K.textS,lineHeight:1,padding:0,marginLeft:10}}>×</button>
@@ -5452,8 +5512,8 @@ ${bodyHtml}
               <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
                 <input type="url" value={surgeryCalInput} onChange={e=>setSurgeryCalInput(e.target.value)} placeholder="https://script.google.com/macros/s/.../exec"
                   style={{flex:'1 1 360px',padding:'7px 10px',border:K.bd2,borderRadius:K.rmd,fontSize:13,background:K.bg,color:K.text}}/>
-                <button onClick={()=>{const v=(surgeryCalInput||'').trim();saveSurgeryCalUrl(v);setSurgeryCalUrl(v);setSurgeryCalInput(v);setShowSurgeryCalPanel(false);alert(v?'手術カレンダー連携URLを保存しました。':'手術カレンダー連携URLをクリアしました。');}}
-                  style={{padding:'7px 16px',background:'#FEF2F2',color:'#991B1B',border:'1px solid #FCA5A5',borderRadius:K.rmd,cursor:'pointer',fontSize:13,fontWeight:600,whiteSpace:'nowrap'}}>保存</button>
+                <button onClick={async()=>{const v=(surgeryCalInput||'').trim();if(SB_ENABLED){const ok=await SB.setSurgeryCalUrl(v);if(!ok){alert('手術カレンダー連携URLのクラウド保存に失敗しました。通信状況をご確認ください。');return;}}saveSurgeryCalUrl(v);setSurgeryCalUrl(v);setSurgeryCalInput(v);setShowSurgeryCalPanel(false);alert(v?'手術カレンダー連携URLをクラウド保存しました。どの端末からでも同じURLを使います。':'手術カレンダー連携URLをクリアしました。');}}
+                  style={{padding:'7px 16px',background:'#FEF2F2',color:'#991B1B',border:'1px solid #FCA5A5',borderRadius:K.rmd,cursor:'pointer',fontSize:13,fontWeight:600,whiteSpace:'nowrap'}}>クラウド保存</button>
                 {surgeryCalUrl&&<button onClick={async()=>{setSurgeryCalStatus('loading');try{const f=await fetchSurgeryFlagsFromUrl(surgeryCalUrl,y,m);setSurgeryFlags(f||{});setSurgeryCalStatus('ok');setSurgeryCalUpdatedAt(new Date().toISOString());alert('手術予定を読み込みました。');}catch(e){setSurgeryCalStatus('error');alert('読み込みに失敗しました。Apps Script URLと公開設定を確認してください。');}}}
                   style={{padding:'7px 12px',background:K.bgS,color:K.text,border:K.bd2,borderRadius:K.rmd,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>今すぐ読込テスト</button>}
               </div>
