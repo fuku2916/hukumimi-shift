@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v110</title>
+<title>シフト管理 v111</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -50,7 +50,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v110';
+const APP_VERSION = 'v111';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -4953,7 +4953,9 @@ ${bodyHtml}
       {/* ── メニューバー ── */}
       <div style={{background:K.bg,borderBottom:K.bd,userSelect:'none'}}
         onClick={e=>{if(e.target===e.currentTarget)setOpenMenu(null);}}>
-        <div style={{display:'flex',alignItems:'center',padding:'0 10px',height:50,width:'100%',boxSizing:'border-box',overflowX:'auto',WebkitOverflowScrolling:'touch',scrollbarWidth:'none'}}>
+        <div style={{display:'flex',alignItems:'center',padding:'0 10px',height:50,width:'100%',boxSizing:'border-box',overflow:'hidden'}}>
+          {/* v111: スマホでは左側だけ横スクロール。☰メニューボタンは右端固定にする */}
+          <div style={{display:'flex',alignItems:'center',flex:1,minWidth:0,overflowX:'auto',WebkitOverflowScrolling:'touch',scrollbarWidth:'none'}}>
           {/* ロゴ・ホーム */}
           <button onClick={()=>{setAppMode('select');setAdminPinInput('');setAdminPinErr('');setOpenMenu(null);}}
             style={{display:'flex',alignItems:'center',gap:4,padding:'4px 8px',border:'none',background:'none',cursor:'pointer',marginRight:6,flexShrink:0}}>
@@ -5065,11 +5067,12 @@ ${bodyHtml}
           ))}
 
           </div>{/* pc-menu end */}
+          </div>{/* v111 scrollable-left header end */}
 
-          {/* スマホ：ハンバーガーボタン */}
+          {/* スマホ：ハンバーガーボタン（右端固定） */}
           <button className="mobile-menu-btn"
             onClick={e=>{e.stopPropagation();setOpenMenu(openMenu==='mobile'?null:'mobile');}}
-            style={{display:'none',padding:'6px 10px',border:'none',background:'none',cursor:'pointer',fontSize:22,marginLeft:4,flexShrink:0}}>
+            style={{display:'none',padding:'6px 10px',border:'none',background:K.bg,cursor:'pointer',fontSize:22,marginLeft:8,flexShrink:0,zIndex:1000}}>
             {openMenu==='mobile'?'✕':'☰'}
           </button>
 
