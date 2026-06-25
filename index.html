@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v111</title>
+<title>シフト管理 v112</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -32,6 +32,15 @@
   .pc-menu { display: none !important; }
   .mobile-menu-btn { display: block !important; }
 }
+
+/* v112: PCではメニュードロップダウンをクリップしない。スマホだけ左側ヘッダーを横スクロールにする */
+.admin-header-inner{overflow:visible !important;}
+.admin-header-left-scroll{overflow:visible !important;-webkit-overflow-scrolling:auto;}
+@media (max-width: 768px) {
+  .admin-header-inner{overflow:hidden !important;}
+  .admin-header-left-scroll{overflow-x:auto !important;overflow-y:hidden !important;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+  .admin-header-left-scroll::-webkit-scrollbar{display:none;}
+}
 @keyframes aiGenPulse{0%,100%{opacity:1}50%{opacity:.6}}
 @keyframes aiSpin{to{transform:rotate(360deg)}}
 .ai-gen-spin{width:16px;height:16px;border:2.5px solid #BFDBFE;border-top-color:#1D4ED8;border-radius:50%;animation:aiSpin .8s linear infinite;flex-shrink:0;display:inline-block}
@@ -50,7 +59,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v111';
+const APP_VERSION = 'v112';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -4953,9 +4962,9 @@ ${bodyHtml}
       {/* ── メニューバー ── */}
       <div style={{background:K.bg,borderBottom:K.bd,userSelect:'none'}}
         onClick={e=>{if(e.target===e.currentTarget)setOpenMenu(null);}}>
-        <div style={{display:'flex',alignItems:'center',padding:'0 10px',height:50,width:'100%',boxSizing:'border-box',overflow:'hidden'}}>
+        <div className="admin-header-inner" style={{display:'flex',alignItems:'center',padding:'0 10px',height:50,width:'100%',boxSizing:'border-box',overflow:'hidden'}}>
           {/* v111: スマホでは左側だけ横スクロール。☰メニューボタンは右端固定にする */}
-          <div style={{display:'flex',alignItems:'center',flex:1,minWidth:0,overflowX:'auto',WebkitOverflowScrolling:'touch',scrollbarWidth:'none'}}>
+          <div className="admin-header-left-scroll" style={{display:'flex',alignItems:'center',flex:1,minWidth:0,overflowX:'auto',WebkitOverflowScrolling:'touch',scrollbarWidth:'none'}}>
           {/* ロゴ・ホーム */}
           <button onClick={()=>{setAppMode('select');setAdminPinInput('');setAdminPinErr('');setOpenMenu(null);}}
             style={{display:'flex',alignItems:'center',gap:4,padding:'4px 8px',border:'none',background:'none',cursor:'pointer',marginRight:6,flexShrink:0}}>
