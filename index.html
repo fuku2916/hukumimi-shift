@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v109</title>
+<title>シフト管理 v110</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -50,7 +50,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v109';
+const APP_VERSION = 'v110';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -4468,7 +4468,7 @@ ${bodyHtml}
           </div>
         )}
         {/* ヘッダー＋タブ統合（スマホで画面幅を超えても横スクロールで収め、ページ全体の横はみ出し＝縮小表示を防ぐ） */}
-        <div style={{background:'#fff',borderBottom:'1px solid #E2E8F0',display:'flex',alignItems:'center',paddingLeft:10,width:'100%',boxSizing:'border-box',overflowX:'auto'}}>
+        <div style={{background:'#fff',borderBottom:'1px solid #E2E8F0',display:'flex',alignItems:'center',paddingLeft:10,width:'100%',boxSizing:'border-box',overflowX:'auto',WebkitOverflowScrolling:'touch',scrollbarWidth:'none'}}>
           {/* クリニックロゴ（押すとホームへ。戻る前に変更をクラウド保存。他アプリと操作統一） */}
           <button onClick={async()=>{await flushStaffToCloud();setAppMode('select');setStaffMyId(null);setStaffReqDk(null);setStaffTab('shift');}}
             style={{display:'flex',alignItems:'center',gap:4,padding:'4px 8px',border:'none',background:'none',cursor:'pointer',marginRight:8,flexShrink:0}}>
@@ -4481,7 +4481,7 @@ ${bodyHtml}
           {/* タブ */}
           {[{id:'shift',label:'📅 シフト表'},{id:'requests',label:'📋 申請一覧'+(staffReqCount>0?' ('+staffReqCount+')':''),unread:staffUnread.count},{id:'timecard',label:'⏱ 勤務状況'},{id:'settings',label:'⚙ 設定'}].map(t=>(
             <button key={t.id} onClick={()=>setStaffTab(t.id)}
-              style={{position:'relative',padding:'12px 14px',border:'none',background:'none',cursor:'pointer',fontSize:13,
+              style={{position:'relative',padding:'12px 14px',border:'none',background:'none',cursor:'pointer',fontSize:13,flexShrink:0,
                 fontWeight:staffTab===t.id?600:400,color:staffTab===t.id?'#185FA5':'#64748B',
                 borderBottom:staffTab===t.id?'2px solid #185FA5':'2px solid transparent',whiteSpace:'nowrap'}}>
               {t.label}
@@ -4953,7 +4953,7 @@ ${bodyHtml}
       {/* ── メニューバー ── */}
       <div style={{background:K.bg,borderBottom:K.bd,userSelect:'none'}}
         onClick={e=>{if(e.target===e.currentTarget)setOpenMenu(null);}}>
-        <div style={{display:'flex',alignItems:'center',padding:'0 10px',height:50}}>
+        <div style={{display:'flex',alignItems:'center',padding:'0 10px',height:50,width:'100%',boxSizing:'border-box',overflowX:'auto',WebkitOverflowScrolling:'touch',scrollbarWidth:'none'}}>
           {/* ロゴ・ホーム */}
           <button onClick={()=>{setAppMode('select');setAdminPinInput('');setAdminPinErr('');setOpenMenu(null);}}
             style={{display:'flex',alignItems:'center',gap:4,padding:'4px 8px',border:'none',background:'none',cursor:'pointer',marginRight:6,flexShrink:0}}>
