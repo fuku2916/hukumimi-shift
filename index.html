@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v114</title>
+<title>シフト管理 v115</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -43,7 +43,7 @@
 }
 
 /* v113: PCではヘッダー左側を横スクロール部品にしない。
-   v110-112のスマホ対応でPCメニューとクラウド同期表示が詰まり、右端で文字が重なる問題を防ぐ。 */
+   v110-112のスマホ対応でPCメニューが詰まる問題を防ぐ。v115で同期表示は非表示化。 */
 @media (min-width: 769px) {
   .admin-header-inner { overflow: visible !important; }
   .admin-header-left-scroll {
@@ -60,13 +60,7 @@
     margin-left: 10px !important;
     white-space: nowrap !important;
   }
-  .admin-sync-indicator {
-    margin-left: auto !important;
-    padding-left: 18px !important;
-    max-width: 220px !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
-  }
+  .admin-sync-indicator { display: none !important; }
 }
 
 @keyframes aiGenPulse{0%,100%{opacity:1}50%{opacity:.6}}
@@ -87,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v114';
+const APP_VERSION = 'v115';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -5232,12 +5226,7 @@ ${bodyHtml}
             </div>
           )}
 
-          {/* 自動保存インジケーター */}
-          <span className="admin-sync-indicator" style={{marginLeft:'auto',fontSize:14,color:K.textS,whiteSpace:'nowrap',flexShrink:0}}>
-          {SB_ENABLED
-            ?sbLoading?'⏳ 同期中...':sbStatus==='ok'?'☁️ クラウド同期済':'⚠️ オフライン'
-            :'💾 ローカル保存中'}
-        </span>
+          {/* v115: 右端でメニューと重なりやすいクラウド同期表示は非表示。同期処理自体は従来どおり動作。 */}
         </div>
       </div>
 
