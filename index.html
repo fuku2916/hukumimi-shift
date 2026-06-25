@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v108</title>
+<title>シフト管理 v109</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -50,7 +50,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v108';
+const APP_VERSION = 'v109';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -1935,6 +1935,18 @@ function App(){
   function currentShiftPayload(extra){
     return {y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,...(extra||{})};
   }
+  // ★ v109: スタッフ設定はシフト表の下書き/公開とは独立した「クラウド共通マスタ」として即時保存する。
+  // 各スタッフ欄の「保存」を押したら、Supabase上の公開データのうち staff/paidLeave だけを差し替える。
+  // asgn等の編集中シフト本体は送らないため、未公開シフトを誤って公開しない。
+  async function saveStaffMasterToCloud(nextStaff,nextPaidLeave){
+    if(!SB_ENABLED)return {ok:false,error:'クラウドが設定されていません。'};
+    const cloud=await SB.getSafe('shift_data');
+    if(!cloud.ok)return {ok:false,error:'クラウドに接続できませんでした。'};
+    const base=(cloud.data&&typeof cloud.data==='object')?cloud.data:{};
+    const data={...base,staff:nextStaff,paidLeave:nextPaidLeave||paidLeave,staffMasterUpdatedAt:new Date().toISOString()};
+    const ok=await SB.set('shift_data',data);
+    return ok?{ok:true}:{ok:false,error:'クラウド保存に失敗しました。'};
+  }
   function applyShiftPayload(d,opts){
     if(!d)return; opts=opts||{};
     if(d.staff)setStaff(d.staff);
@@ -2942,17 +2954,22 @@ ${bodyHtml}
   function setPaidGranted(sid,val){
     setPaidLeave(prev=>{const cur=prev[sid]||{granted:0,history:[]};return{...prev,[sid]:{...cur,granted:Math.max(0,Number(val)||0)}};});
   }
-  function doAdd(){
+  async function doAdd(){
     if(!addF.name.trim())return;
     const newId=nid;
     const cond=addF.cond||defaultCond();
     const notes=condToNotes(cond);
     const _ac=(addF.code||'').replace(/\D/g,'');
-    setStaff(p=>[...p,{id:newId,name:addF.name.trim(),color:addF.color,notes,cond,memo:addF.memo||'',pin:addF.pin||'',workType:addF.workType||'normal',code:_ac?_ac.padStart(7,'0'):'',fullName:(addF.fullName||'').trim(),email:(addF.email||'').trim()}]);
-    setPaidLeave(prev=>({...prev,[newId]:{granted:0,history:[]}}));
+    const newStaff={id:newId,name:addF.name.trim(),color:addF.color,notes,cond,memo:addF.memo||'',pin:addF.pin||'',workType:addF.workType||'normal',code:_ac?_ac.padStart(7,'0'):'',fullName:(addF.fullName||'').trim(),email:(addF.email||'').trim()};
+    const nextStaff=[...staff,newStaff];
+    const nextPaidLeave={...paidLeave,[newId]:{granted:0,history:[]}};
+    setStaff(nextStaff);
+    setPaidLeave(nextPaidLeave);
     setNid(n=>n+1);
     setAddF({name:'',cond:defaultCond(),memo:'',color:COLORS[nid%COLORS.length],pin:'',workType:'normal',code:'',fullName:'',email:''});
     setShowAdd(false);
+    const r=await saveStaffMasterToCloud(nextStaff,nextPaidLeave);
+    if(!r.ok)alert('スタッフを追加しましたが、クラウド保存に失敗しました。\n'+(r.error||''));
   }
   function sEdit(s){
     let cond,memo;
@@ -2960,16 +2977,20 @@ ${bodyHtml}
     else{const m=notesToCond(s.notes);cond=m.cond;memo=m.memo;}
     setEid(s.id);setEf({name:s.name,cond,memo,color:s.color,pin:s.pin||'',workType:s.workType||'normal',code:s.code||'',fullName:s.fullName||'',email:s.email||''});
   }
-  function svEdit(){
-    setStaff(p=>p.map(s=>{
+  async function svEdit(){
+    const nextStaff=staff.map(s=>{
       if(s.id!==eid)return s;
       const cond=ef.cond||defaultCond();
       const notes=condToNotes(cond); // 入力式から“決まった書式”の条件文を生成
       const codeDigits=(ef.code||'').replace(/\D/g,'');
       const code=codeDigits?codeDigits.padStart(7,'0'):'';
       return {...s,name:ef.name,color:ef.color,pin:ef.pin,workType:ef.workType,cond,memo:ef.memo||'',notes,code,fullName:(ef.fullName||'').trim(),email:(ef.email||'').trim()};
-    }));
+    });
+    setStaff(nextStaff);
     setEid(null);
+    const r=await saveStaffMasterToCloud(nextStaff,paidLeave);
+    if(r.ok)alert('スタッフ設定をクラウドに保存しました。\n他の端末でもこの設定を読み込めます。');
+    else alert('画面上のスタッフ設定は保存しましたが、クラウド保存に失敗しました。\n'+(r.error||''));
   }
 
   // ── 最低勤務時間の自動補完 ──
@@ -5959,7 +5980,7 @@ ${bodyHtml}
                     </div>
                     <div style={{display:'flex',gap:5,flexShrink:0}}>
                       <button onClick={()=>sEdit(s)} style={{padding:'3px 10px',border:K.bd2,borderRadius:K.rmd,background:K.bgS,color:K.text,cursor:'pointer',fontSize:12}}>編集</button>
-                      <button onClick={()=>{if(window.confirm(s.name+'を削除しますか?')){setStaff(p=>p.filter(x=>x.id!==s.id));if(eid===s.id)setEid(null);}}} style={{padding:'3px 10px',border:K.bdD,borderRadius:K.rmd,background:K.bg,color:K.textD,cursor:'pointer',fontSize:12}}>削除</button>
+                      <button onClick={async()=>{if(window.confirm(s.name+'を削除しますか?')){const nextStaff=staff.filter(x=>x.id!==s.id);setStaff(nextStaff);if(eid===s.id)setEid(null);const r=await saveStaffMasterToCloud(nextStaff,paidLeave);if(!r.ok)alert('スタッフを削除しましたが、クラウド保存に失敗しました。\n'+(r.error||''));}}} style={{padding:'3px 10px',border:K.bdD,borderRadius:K.rmd,background:K.bg,color:K.textD,cursor:'pointer',fontSize:12}}>削除</button>
                     </div>
                   </div>
                 )}
