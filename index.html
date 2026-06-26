@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v122</title>
+<title>シフト管理 v123</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v122';
+const APP_VERSION = 'v123';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -5399,8 +5399,9 @@ ${bodyHtml}
           {/* モバイルメニュードロップダウン */}
           {openMenu==='mobile'&&(
             <div onClick={e=>e.stopPropagation()}
-              style={{position:'fixed',top:50,left:0,right:0,background:K.bg,border:K.bd,
-                boxShadow:'0 8px 24px rgba(0,0,0,0.15)',zIndex:999,padding:'8px 0'}}>
+              style={{position:'fixed',top:50,left:0,right:0,bottom:0,background:K.bg,border:K.bd,
+                boxShadow:'0 8px 24px rgba(0,0,0,0.15)',zIndex:999,padding:'8px 0',
+                overflowY:'auto',WebkitOverflowScrolling:'touch',overscrollBehavior:'contain',touchAction:'pan-y'}}>
               <MenuLabel text="ファイル"/>
               <MenuItem icon="💾" label="全データ保存" onClick={()=>{saveData();setOpenMenu(null);}}/>
               <MenuItem icon="📂" label="全データ読み込み" isFile accept=".json" onChange={e=>{loadData(e);setOpenMenu(null);}}/>
