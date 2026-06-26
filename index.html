@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v123</title>
+<title>シフト管理 v124</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v123';
+const APP_VERSION = 'v124';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2193,18 +2193,38 @@ function App(){
   const [draftSavedAt,setDraftSavedAt]=useState('');
   const [publishedAt,setPublishedAt]=useState(()=>saved?.shiftUpdatedAt||''); // 公開済みとみなす版
   const hasUnpublished = !!shiftUpdatedAt && shiftUpdatedAt!==publishedAt;
-  const HISTORY_MAX=10; // クラウドに残す過去の公開版の数
+  const HISTORY_MAX=10; // クラウドに残す過去バックアップの数
+  const PUBLISH_ARCHIVE_MAX=5; // v124: 公開時点スナップショット（正本）は最新5件だけ保持
   const [shiftHistory,setShiftHistory]=useState([]); // [{at,made,data}]（クラウドから取得）
   const [showHistory,setShowHistory]=useState(false);
   function currentShiftPayload(extra){
     return {y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,...(extra||{})};
   }
+  function publishArchiveName(at){
+    const d=at?new Date(at):new Date();
+    const pad=n=>String(n).padStart(2,'0');
+    const clinic=(CLINIC_LABEL||APP_CLINIC||'clinic').replace(/[\\/:*?"<>|\s]+/g,'_');
+    const unit=(APP_UNIT_LABEL||APP_UNIT||'unit').replace(/[\\/:*?"<>|\s]+/g,'_');
+    return clinic+'_'+unit+'_'+y+'年'+m+'月_公開_'+d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'_'+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds());
+  }
+  function pruneShiftHistory(list){
+    let archiveCount=0, otherCount=0;
+    return (list||[]).filter(h=>{
+      if(h&&h.kind==='published_archive'){
+        archiveCount++;
+        return archiveCount<=PUBLISH_ARCHIVE_MAX;
+      }
+      otherCount++;
+      return otherCount<=HISTORY_MAX;
+    });
+  }
   // v121: 「全データ保存」もバックアップ履歴に残す。
+  // v124: 「公開」時点のシフト表も、あとから変わらない正本スナップショットとして残す。
   // 履歴はスタッフ公開データとは別枠なので、作成途中のシフトを履歴に保存してもスタッフ画面には公開されない。
-  function makeHistorySnapshot(kind,label,data){
+  function makeHistorySnapshot(kind,label,data,extra){
     const snap={...(data||currentShiftPayload())};
     delete snap.history; delete snap.drafts; delete snap._drafts;
-    return {at:new Date().toISOString(),made:snap.shiftUpdatedAt||'',kind:kind||'manual',label:label||'',data:snap};
+    return {at:new Date().toISOString(),made:snap.shiftUpdatedAt||'',kind:kind||'manual',label:label||'',data:snap,...(extra||{})};
   }
   async function saveCurrentSnapshotToHistory(kind,label){
     if(!SB_ENABLED)return {ok:false,skipped:true,error:'クラウドが設定されていません。'};
@@ -2212,7 +2232,7 @@ function App(){
     if(!cloud.ok)return {ok:false,error:'クラウドに接続できませんでした。'};
     const base=(cloud.data&&typeof cloud.data==='object')?cloud.data:{};
     const hist=(Array.isArray(base.history)?base.history:[]);
-    const nextHist=[makeHistorySnapshot(kind,label,currentShiftPayload()),...hist].slice(0,HISTORY_MAX);
+    const nextHist=pruneShiftHistory([makeHistorySnapshot(kind,label,currentShiftPayload()),...hist]);
     const ok=await SB.set('shift_data',{...base,history:nextHist});
     if(ok)setShiftHistory(nextHist);
     return ok?{ok:true,history:nextHist}:{ok:false,error:'履歴のクラウド保存に失敗しました。'};
@@ -2288,15 +2308,20 @@ function App(){
       if(cloudTs && shiftUpdatedAt && cloudTs>shiftUpdatedAt){
         if(!window.confirm('クラウドには、これより新しいシフト（'+fmtStamp(cloudTs)+'）が保存されています。\n他の端末で更新された可能性があります。上書きして公開しますか？')){setPublishing(false);return;}
       }
-      // 直前の公開版を履歴に自動退避（最大HISTORY_MAX件）
+      // 直前の公開版を履歴に自動退避し、今回公開した版も「公開時点スナップショット」として保存する。
+      // これにより、公開後に編集しても、公開時点の正本は履歴内で変化しない。
       let hist=(prev&&Array.isArray(prev.history))?prev.history:[];
+      const archiveAt=new Date().toISOString();
+      const currentArchive=makeHistorySnapshot('published_archive','公開時点スナップショット',currentShiftPayload(),{publishedAt:archiveAt,archiveName:publishArchiveName(archiveAt)});
+      const additions=[currentArchive];
       if(prev&&Object.keys(prev).length>0){
         const prevNoHist=Object.assign({},prev); delete prevNoHist.history;
-        hist=[{at:new Date().toISOString(),made:prev.shiftUpdatedAt||'',kind:'auto_publish',label:'公開前バックアップ',data:prevNoHist},...hist].slice(0,HISTORY_MAX);
+        additions.push({at:new Date().toISOString(),made:prev.shiftUpdatedAt||'',kind:'auto_publish',label:'公開前バックアップ',data:prevNoHist});
       }
+      hist=pruneShiftHistory([...additions,...hist]);
       const data=currentShiftPayload({history:hist});
       const ok=await SB.set('shift_data',data);
-      if(ok){setPublishedAt(shiftUpdatedAt);setShiftHistory(hist);alert('スタッフへ公開しました。\n（作成: '+fmtStamp(shiftUpdatedAt)+'）\n直前の公開版はバックアップ履歴に自動保存されました。');}
+      if(ok){setPublishedAt(shiftUpdatedAt);setShiftHistory(hist);alert('スタッフへ公開しました。\n（作成: '+fmtStamp(shiftUpdatedAt)+'）\n公開時点スナップショットを保存しました。\n保存名: '+currentArchive.archiveName);}
       else alert('保存に失敗しました。もう一度お試しください。');
     }catch(e){alert('保存に失敗しました：'+(e&&e.message||e));}
     setPublishing(false);
@@ -5596,7 +5621,7 @@ ${bodyHtml}
                   <button onClick={()=>setShowHistory(false)} style={{border:'none',background:'none',cursor:'pointer',fontSize:20,color:K.textS,lineHeight:1,padding:0}}>×</button>
                 </div>
                 <div style={{padding:'10px 18px',fontSize:12,color:K.textS,borderBottom:K.bd,lineHeight:1.6}}>
-                  「公開」するたびに直前の公開版が自動保存されます。v121以降は「全データ保存」でも現在の画面状態が手動バックアップとして残ります（最大{HISTORY_MAX}件）。戻したい版の「この版に戻す」を押し、内容を確認してから「公開」で確定してください。
+                  v124以降は「公開」するたびに、その時点のシフト表が「公開時点スナップショット」として固定保存されます（最新{PUBLISH_ARCHIVE_MAX}件）。直前の公開版や手動バックアップも残ります。戻したい版の「この版に戻す」を押し、内容を確認してから「公開」で確定してください。
                 </div>
                 <div style={{overflowY:'auto',padding:'10px 18px',display:'flex',flexDirection:'column',gap:8}}>
                   {shiftHistory.length===0?(
@@ -5604,11 +5629,13 @@ ${bodyHtml}
                   ):shiftHistory.map((h,i)=>{
                     const dd=h.data||{};
                     const days=Object.values(dd.asgn||{}).filter(day=>Object.values(day||{}).some(ids=>(ids||[]).length>0)).length;
+                    const typeLabel=h.kind==='published_archive'?'公開時点スナップショット':(h.kind==='manual'?'手動バックアップ':(h.label||'公開前バックアップ'));
                     return(
-                      <div key={i} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',border:K.bd,borderRadius:K.rmd,background:K.bgS}}>
+                      <div key={i} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',border:h.kind==='published_archive'?'1px solid #16A34A':K.bd,borderRadius:K.rmd,background:h.kind==='published_archive'?'#F0FDF4':K.bgS}}>
                         <div style={{flex:1,lineHeight:1.5}}>
                           <div style={{fontSize:13,fontWeight:600,color:K.text}}>作成: {fmtStamp(h.made)||'—'}</div>
-                          <div style={{fontSize:11,color:K.textS}}>種別: {h.kind==='manual'?'手動バックアップ':(h.label||'公開前バックアップ')}　/　保存: {fmtStamp(h.at)}　/　{dd.y}年{dd.m}月　配置のある日 {days}日</div>
+                          <div style={{fontSize:11,color:K.textS}}>種別: {typeLabel}　/　保存: {fmtStamp(h.at)}　/　{dd.y}年{dd.m}月　配置のある日 {days}日</div>
+                          {h.archiveName&&<div style={{fontSize:11,color:'#166534',wordBreak:'break-all'}}>保存名: {h.archiveName}</div>}
                         </div>
                         <button onClick={()=>restoreSnapshot(h)} style={{padding:'5px 12px',border:'1px solid #185FA5',borderRadius:K.rmd,background:'#EBF4FF',color:'#185FA5',cursor:'pointer',fontSize:12,fontWeight:600,whiteSpace:'nowrap'}}>この版に戻す</button>
                       </div>
