@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v121</title>
+<title>シフト管理 v122</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v121';
+const APP_VERSION = 'v122';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -5321,6 +5321,11 @@ ${bodyHtml}
                     <MenuItem icon="💾" label="全データ保存" onClick={()=>{saveData();setOpenMenu(null);}}/>
                     <MenuItem icon="📂" label="全データ読み込み" isFile accept=".json" onChange={e=>{loadData(e);setOpenMenu(null);}}/>
                     <MenuDivider/>
+                    <MenuLabel text="クラウド下書き・履歴"/>
+                    {SB_ENABLED&&<MenuItem icon="💾" label={draftSaving?'下書き保存中…':'下書き保存'} onClick={()=>{saveDraftToCloud();setOpenMenu(null);}}/>}
+                    {SB_ENABLED&&<MenuItem icon="📂" label={'下書き読込'+(draftSavedAt?'（'+fmtStamp(draftSavedAt)+'）':'')} onClick={()=>{loadDraftFromCloud();setOpenMenu(null);}}/>}
+                    {SB_ENABLED&&<MenuItem icon="🕘" label={'履歴'+(shiftHistory.length>0?'('+shiftHistory.length+')':'')} onClick={()=>{setShowHistory(true);setOpenMenu(null);}}/>}
+                    <MenuDivider/>
                     <MenuLabel text="危険操作"/>
                     <MenuItem icon="⚠️" label="初期化..." danger onClick={()=>{
                       setOpenMenu(null);
@@ -5356,6 +5361,13 @@ ${bodyHtml}
                     <MenuDivider/>
                     <MenuItem icon="🤖" label={aLoad?'生成中...':totalExclusions>0?'修正を反映して再作成':'自動シフト作成'}
                       onClick={()=>{if(!aLoad){doAuto();setOpenMenu(null);}}}/>
+                    {curMonthLockedAt
+                      ?<MenuItem icon="🔒" label={'確定済み（'+fmtStamp(curMonthLockedAt)+'）解除'} onClick={()=>{unlockCurrentMonth();setOpenMenu(null);}}/>
+                      :<MenuItem icon="🔓" label="シフトを確定（ロック）" onClick={()=>{lockCurrentMonth();setOpenMenu(null);}}/>}
+                    <MenuItem icon="⚖" label="配置を自動調整（無人帯・偏り・超過）" onClick={()=>{applyOvertimeRelief();setOpenMenu(null);}}/>
+                    <MenuItem icon="⏱" label="拘束時間を最適化" onClick={()=>{applySpanCompaction();setOpenMenu(null);}}/>
+                    {preReliefAsgn!=null&&<MenuItem icon="↩" label="自動調整を元に戻す" onClick={()=>{undoOvertimeRelief();setOpenMenu(null);}}/>}
+                    {totalExclusions>0&&<MenuItem icon="🧹" label={'除外リセット（'+totalExclusions+'件）'} onClick={()=>{setManualExclusions({});setOpenMenu(null);}}/>}
                     <MenuDivider/>
                     <MenuItem icon="⏱" label="勤務時間集計" onClick={()=>{setShowHoursPanel(p=>!p);setOpenMenu(null);}} active={showHoursPanel}/>
                     <MenuItem icon="📊" label="達成レポート" onClick={()=>{setShowReportPanel(p=>!p);setOpenMenu(null);}} active={showReportPanel}/>
@@ -5392,6 +5404,9 @@ ${bodyHtml}
               <MenuLabel text="ファイル"/>
               <MenuItem icon="💾" label="全データ保存" onClick={()=>{saveData();setOpenMenu(null);}}/>
               <MenuItem icon="📂" label="全データ読み込み" isFile accept=".json" onChange={e=>{loadData(e);setOpenMenu(null);}}/>
+              {SB_ENABLED&&<MenuItem icon="💾" label={draftSaving?'下書き保存中…':'下書き保存'} onClick={()=>{saveDraftToCloud();setOpenMenu(null);}}/>}
+              {SB_ENABLED&&<MenuItem icon="📂" label={'下書き読込'+(draftSavedAt?'（'+fmtStamp(draftSavedAt)+'）':'')} onClick={()=>{loadDraftFromCloud();setOpenMenu(null);}}/>}
+              {SB_ENABLED&&<MenuItem icon="🕘" label={'履歴'+(shiftHistory.length>0?'('+shiftHistory.length+')':'')} onClick={()=>{setShowHistory(true);setOpenMenu(null);}}/>}
               <MenuItem icon="⚠️" label="初期化..." danger onClick={()=>{setOpenMenu(null);const choice=window.prompt('1→今月 2→全月 3→完全リセット');if(choice==='1'){if(window.confirm('今月をリセット？')){setAsgn(p=>{const n={...p};dates.forEach(d=>{delete n[tdk(d)];});return n;});setTmps(p=>{const n={...p};dates.forEach(d=>{delete n[tdk(d)];});return n;});}}else if(choice==='2'){if(window.confirm('全月リセット？')){setAsgn({});setTmps({});}}else if(choice==='3'){if(window.confirm('完全リセット？')){localStorage.removeItem(LS_KEY);window.location.reload();}}}}/>
               {CLINIC_MODE&&APP_CLINIC==='ekimae'&&<MenuItem icon="🔁" label="駅前データを移行(初回のみ)" onClick={()=>{setOpenMenu(null);migrateEkimaeFromMain();}}/>}
               <MenuDivider/>
@@ -5407,7 +5422,14 @@ ${bodyHtml}
               <MenuDivider/>
               <MenuLabel text="シフト設計"/>
               <MenuItem icon="📅" label="シフト表" onClick={()=>{setTab('shift');setOpenMenu(null);}} active={tab==='shift'}/>
-              <MenuItem icon="🤖" label={aLoad?'生成中...':'自動シフト作成'} onClick={()=>{if(!aLoad){doAuto();setOpenMenu(null);}}}/>
+              <MenuItem icon="🤖" label={aLoad?'生成中...':totalExclusions>0?'修正を反映して再作成':'自動シフト作成'} onClick={()=>{if(!aLoad){doAuto();setOpenMenu(null);}}}/>
+              {curMonthLockedAt
+                ?<MenuItem icon="🔒" label={'確定済み（'+fmtStamp(curMonthLockedAt)+'）解除'} onClick={()=>{unlockCurrentMonth();setOpenMenu(null);}}/>
+                :<MenuItem icon="🔓" label="シフトを確定（ロック）" onClick={()=>{lockCurrentMonth();setOpenMenu(null);}}/>}
+              <MenuItem icon="⚖" label="配置を自動調整（無人帯・偏り・超過）" onClick={()=>{applyOvertimeRelief();setOpenMenu(null);}}/>
+              <MenuItem icon="⏱" label="拘束時間を最適化" onClick={()=>{applySpanCompaction();setOpenMenu(null);}}/>
+              {preReliefAsgn!=null&&<MenuItem icon="↩" label="自動調整を元に戻す" onClick={()=>{undoOvertimeRelief();setOpenMenu(null);}}/>}
+              {totalExclusions>0&&<MenuItem icon="🧹" label={'除外リセット（'+totalExclusions+'件）'} onClick={()=>{setManualExclusions({});setOpenMenu(null);}}/>}
               <MenuItem icon="👤" label="スタッフごとのチェック" onClick={()=>{setShowStaffCheck(p=>!p);setOpenMenu(null);}} active={showStaffCheck}/>
               <MenuItem icon="🕖" label="退勤時刻チェック" onClick={()=>{setShowLeaveAudit(true);setOpenMenu(null);}} active={showLeaveAudit}/>
               <MenuDivider/>
@@ -5448,47 +5470,17 @@ ${bodyHtml}
                 🕒 作成: {shiftUpdatedAt?fmtStamp(shiftUpdatedAt):'—'}
               </span>
               {SB_ENABLED&&(
-                <button onClick={saveDraftToCloud} disabled={draftSaving}
-                  title="管理者用の下書きとしてクラウドに保存します。スタッフ画面には公開されません。"
-                  style={{padding:'5px 12px',borderRadius:K.rmd,fontSize:12,fontWeight:700,cursor:draftSaving?'wait':'pointer',whiteSpace:'nowrap',border:'1px solid #F59E0B',background:'#FFFBEB',color:'#92400E'}}>
-                  {draftSaving?'下書き保存中…':'💾 下書き保存'}
-                </button>
-              )}
-              {SB_ENABLED&&(
-                <button onClick={loadDraftFromCloud}
-                  title="クラウドに保存した管理者用下書きを読み込みます。"
-                  style={{padding:'5px 10px',borderRadius:K.rmd,fontSize:12,fontWeight:600,cursor:'pointer',whiteSpace:'nowrap',border:'1px solid #FCD34D',background:'#fff',color:'#92400E'}}>
-                  📂 下書き読込{draftSavedAt?'（'+fmtStamp(draftSavedAt)+'）':''}
-                </button>
-              )}
-              {SB_ENABLED&&(
                 <button onClick={publishToCloud} disabled={publishing}
                   title="このシフトをスタッフ画面へ公開します。下書き保存とは別です。"
-                  style={{padding:'5px 12px',borderRadius:K.rmd,fontSize:12,fontWeight:700,cursor:publishing?'wait':'pointer',whiteSpace:'nowrap',
+                  style={{padding:'5px 14px',borderRadius:K.rmd,fontSize:12,fontWeight:700,cursor:publishing?'wait':'pointer',whiteSpace:'nowrap',
                     border:'1px solid '+(hasUnpublished?'#16A34A':'#93C5FD'),
                     background:hasUnpublished?'#16A34A':'#EBF4FF',
                     color:hasUnpublished?'#fff':'#185FA5'}}>
                   {publishing?'公開中…':hasUnpublished?'☁ 公開（未公開あり）':'☁ 公開済み'}
                 </button>
               )}
-              {SB_ENABLED&&(
-                <button onClick={()=>setShowHistory(true)} title="過去の公開版に戻せます"
-                  style={{padding:'5px 10px',borderRadius:K.rmd,fontSize:12,fontWeight:600,cursor:'pointer',whiteSpace:'nowrap',border:'1px solid #CBD5E1',background:'#fff',color:'#334155'}}>
-                  🕘 履歴{shiftHistory.length>0?'('+shiftHistory.length+')':''}
-                </button>
-              )}
-              {curMonthLockedAt
-                ?<button onClick={unlockCurrentMonth} title={'このシフトは '+fmtStamp(curMonthLockedAt)+' に確定されています。クリックで確定を解除します。'}
-                  style={{padding:'5px 12px',borderRadius:K.rmd,fontSize:12,fontWeight:700,cursor:'pointer',border:'1px solid #B91C1C',background:'#FEF2F2',color:'#991B1B',whiteSpace:'nowrap'}}>🔒 確定済み（{fmtStamp(curMonthLockedAt)}）</button>
-                :<button onClick={lockCurrentMonth} title="今の配置を「確定（基準）」として保存します。以降に変わった所を赤二重線＋追記で表示します。"
-                  style={{padding:'5px 12px',borderRadius:K.rmd,fontSize:12,fontWeight:700,cursor:'pointer',border:'1px solid #475569',background:'#F1F5F9',color:'#334155',whiteSpace:'nowrap'}}>🔓 シフトを確定（ロック）</button>}
-              <button onClick={applyOvertimeRelief} title="①余剰枠→不足枠へ配置を均す ②8時間超の人を末尾コマから外し空いた枠を延長で補う"
-                style={{padding:'5px 12px',borderRadius:K.rmd,fontSize:12,fontWeight:600,cursor:'pointer',border:'1px solid #D85A30',background:'#FFF7ED',color:'#9A3412',whiteSpace:'nowrap'}}>⚖ 配置を自動調整（無人帯・偏り・超過）</button>
-              <button onClick={applySpanCompaction} title="同じ人に時間が離れたコマ（午前＋夜など）が割り当たって拘束時間が伸びている所を、同種コマ間で2人を入れ替えて勤務が連続するよう短縮します。出勤者と各人の勤務時間は変わりません（座る外来コマが入れ替わるだけ）。有給・希望休・除外した駒は動かしません。変更点はプレビュー表示され、元に戻せます。"
-                style={{padding:'5px 12px',borderRadius:K.rmd,fontSize:12,fontWeight:600,cursor:'pointer',border:'1px solid #2563EB',background:'#EFF6FF',color:'#1E40AF',whiteSpace:'nowrap'}}>⏱ 拘束時間を最適化</button>
-              {preReliefAsgn!=null&&(
-                <button onClick={undoOvertimeRelief} title="自動調整を取り消して調整前に戻します"
-                  style={{padding:'5px 12px',borderRadius:K.rmd,fontSize:12,fontWeight:600,cursor:'pointer',border:'1px solid #64748B',background:'#F1F5F9',color:'#334155',whiteSpace:'nowrap'}}>↩ 元に戻す</button>
+              {totalExclusions>0&&(
+                <span title="除外リセットは『シフト設計』メニューに移動しました" style={{fontSize:11,color:K.textW,background:K.bgW,border:K.bdW,borderRadius:10,padding:'2px 10px',whiteSpace:'nowrap',fontWeight:500}}>除外中: {totalExclusions}件</span>
               )}
               {aErr&&aErr!=='AUTH_ERROR'&&(
                 <div style={{fontSize:11,color:K.textD,maxWidth:300,lineHeight:1.4,cursor:'pointer'}} title={aErr} onClick={()=>alert(aErr)}>エラー（詳細はクリック）</div>
