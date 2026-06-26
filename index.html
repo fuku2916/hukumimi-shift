@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v120</title>
+<title>シフト管理 v121</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v120';
+const APP_VERSION = 'v121';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2199,6 +2199,24 @@ function App(){
   function currentShiftPayload(extra){
     return {y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,...(extra||{})};
   }
+  // v121: 「全データ保存」もバックアップ履歴に残す。
+  // 履歴はスタッフ公開データとは別枠なので、作成途中のシフトを履歴に保存してもスタッフ画面には公開されない。
+  function makeHistorySnapshot(kind,label,data){
+    const snap={...(data||currentShiftPayload())};
+    delete snap.history; delete snap.drafts; delete snap._drafts;
+    return {at:new Date().toISOString(),made:snap.shiftUpdatedAt||'',kind:kind||'manual',label:label||'',data:snap};
+  }
+  async function saveCurrentSnapshotToHistory(kind,label){
+    if(!SB_ENABLED)return {ok:false,skipped:true,error:'クラウドが設定されていません。'};
+    const cloud=await SB.getSafe('shift_data');
+    if(!cloud.ok)return {ok:false,error:'クラウドに接続できませんでした。'};
+    const base=(cloud.data&&typeof cloud.data==='object')?cloud.data:{};
+    const hist=(Array.isArray(base.history)?base.history:[]);
+    const nextHist=[makeHistorySnapshot(kind,label,currentShiftPayload()),...hist].slice(0,HISTORY_MAX);
+    const ok=await SB.set('shift_data',{...base,history:nextHist});
+    if(ok)setShiftHistory(nextHist);
+    return ok?{ok:true,history:nextHist}:{ok:false,error:'履歴のクラウド保存に失敗しました。'};
+  }
   // ★ v109: スタッフ設定はシフト表の下書き/公開とは独立した「クラウド共通マスタ」として即時保存する。
   // 各スタッフ欄の「保存」を押したら、Supabase上の公開データのうち staff/paidLeave だけを差し替える。
   // asgn等の編集中シフト本体は送らないため、未公開シフトを誤って公開しない。
@@ -2274,7 +2292,7 @@ function App(){
       let hist=(prev&&Array.isArray(prev.history))?prev.history:[];
       if(prev&&Object.keys(prev).length>0){
         const prevNoHist=Object.assign({},prev); delete prevNoHist.history;
-        hist=[{at:new Date().toISOString(),made:prev.shiftUpdatedAt||'',data:prevNoHist},...hist].slice(0,HISTORY_MAX);
+        hist=[{at:new Date().toISOString(),made:prev.shiftUpdatedAt||'',kind:'auto_publish',label:'公開前バックアップ',data:prevNoHist},...hist].slice(0,HISTORY_MAX);
       }
       const data=currentShiftPayload({history:hist});
       const ok=await SB.set('shift_data',data);
@@ -2385,14 +2403,23 @@ function App(){
 
   // ── データ保存 ──
   async function saveData(){
-    const data={version:2,savedAt:new Date().toISOString(),shiftUpdatedAt,staff,slots,weeklyReq,monthlyReq,asgn,tmps,manualExclusions,manualClosedDays,baseShift,y,m,newSlotCounter,paidLeave};
+    const savedAt=new Date().toISOString();
+    const data={version:2,type:'admin_full_backup',savedAt,appVersion:APP_VERSION,clinic:APP_CLINIC,clinicLabel:CLINIC_LABEL,unit:APP_UNIT,unitLabel:APP_UNIT_LABEL,...currentShiftPayload()};
     const json=JSON.stringify(data,null,2);
     // 時刻入りファイル名（毎回別ファイルになり、空ファイルとの取り違えを防ぐ）
     const ts=new Date();const pad=n=>String(n).padStart(2,'0');
-    const fileName='shift_data_'+(APP_UNIT_LABEL?APP_UNIT_LABEL+'_':'')+y+'_'+String(m).padStart(2,'0')+'_'+ts.getFullYear()+pad(ts.getMonth()+1)+pad(ts.getDate())+'-'+pad(ts.getHours())+pad(ts.getMinutes())+'.json';
+    const fileName='shift_data_'+(CLINIC_LABEL?CLINIC_LABEL+'_':'')+(APP_UNIT_LABEL?APP_UNIT_LABEL+'_':'')+y+'_'+String(m).padStart(2,'0')+'_'+ts.getFullYear()+pad(ts.getMonth()+1)+pad(ts.getDate())+'-'+pad(ts.getHours())+pad(ts.getMinutes())+'.json';
     // ダウンロード方式に統一（ファイルピッカーの中途半端な書き込みで空ファイルが残る不具合を回避）
     const blob=new Blob([json],{type:'application/json'});
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fileName;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+    // v121: ファイル保存だけでなく、クラウドのバックアップ履歴にも現在の画面状態を保存する。
+    if(SB_ENABLED){
+      const r=await saveCurrentSnapshotToHistory('manual','全データ保存');
+      if(r.ok)alert('全データをファイル保存し、バックアップ履歴にも保存しました。');
+      else alert('全データのファイル保存は実行しましたが、バックアップ履歴への保存に失敗しました。\n'+(r.error||''));
+    }else{
+      alert('全データをファイル保存しました。');
+    }
   }
 
   // ── スタッフポータル用データ出力 ──
@@ -5576,7 +5603,7 @@ ${bodyHtml}
                   <button onClick={()=>setShowHistory(false)} style={{border:'none',background:'none',cursor:'pointer',fontSize:20,color:K.textS,lineHeight:1,padding:0}}>×</button>
                 </div>
                 <div style={{padding:'10px 18px',fontSize:12,color:K.textS,borderBottom:K.bd,lineHeight:1.6}}>
-                  「公開」するたびに、直前の公開版が自動で保存されます（最大{HISTORY_MAX}件）。戻したい版の「この版に戻す」を押し、内容を確認してから「公開」で確定してください。
+                  「公開」するたびに直前の公開版が自動保存されます。v121以降は「全データ保存」でも現在の画面状態が手動バックアップとして残ります（最大{HISTORY_MAX}件）。戻したい版の「この版に戻す」を押し、内容を確認してから「公開」で確定してください。
                 </div>
                 <div style={{overflowY:'auto',padding:'10px 18px',display:'flex',flexDirection:'column',gap:8}}>
                   {shiftHistory.length===0?(
@@ -5588,7 +5615,7 @@ ${bodyHtml}
                       <div key={i} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',border:K.bd,borderRadius:K.rmd,background:K.bgS}}>
                         <div style={{flex:1,lineHeight:1.5}}>
                           <div style={{fontSize:13,fontWeight:600,color:K.text}}>作成: {fmtStamp(h.made)||'—'}</div>
-                          <div style={{fontSize:11,color:K.textS}}>退避: {fmtStamp(h.at)}　/　{dd.y}年{dd.m}月　配置のある日 {days}日</div>
+                          <div style={{fontSize:11,color:K.textS}}>種別: {h.kind==='manual'?'手動バックアップ':(h.label||'公開前バックアップ')}　/　保存: {fmtStamp(h.at)}　/　{dd.y}年{dd.m}月　配置のある日 {days}日</div>
                         </div>
                         <button onClick={()=>restoreSnapshot(h)} style={{padding:'5px 12px',border:'1px solid #185FA5',borderRadius:K.rmd,background:'#EBF4FF',color:'#185FA5',cursor:'pointer',fontSize:12,fontWeight:600,whiteSpace:'nowrap'}}>この版に戻す</button>
                       </div>
