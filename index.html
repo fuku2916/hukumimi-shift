@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v119</title>
+<title>シフト管理 v120</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v119';
+const APP_VERSION = 'v120';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2537,8 +2537,13 @@ function App(){
 
   // ── シフト表PDF ──
   function exportPDF(){
+    // v120: 管理カレンダー画面と同じ現在状態から印刷する。
+    // 旧実装は manualExclusions だけを見ており、臨時休み/有給(tmps)・手術予定○/ー・退勤注記が反映されず、
+    // 画面とPDFが違って見えることがあったため、画面側の判定に寄せる。
     const printWin=window.open('','_blank','width=900,height=1200');
     const allDates=getWorkDates(y,m),allWeeks=groupByWeek(allDates);
+    const printTitle=['医療法人 福耳会',CLINIC_LABEL,APP_UNIT_LABEL,'シフト表'].filter(Boolean).join('　');
+    const dataPlace=[CLINIC_LABEL||'clinic未指定',APP_UNIT_LABEL||APP_UNIT||'unit未指定'].filter(Boolean).join(' / ');
     let calHtml='';
     allWeeks.forEach(wk=>{
       const cells=[],fd=wk[0].getDay();
@@ -2547,48 +2552,58 @@ function App(){
       calHtml+='<tr>';
       cells.forEach(d=>{
         if(!d){calHtml+='<td class="empty"></td>';return;}
-        const dk=tdk(d),isSat=d.getDay()===6,da=asgn[dk]||{},dExcl=manualExclusions[dk]||{},sls=slots[d.getDay()]||[];
-        let sh='';
-        sls.forEach(slot=>{
-          const activeIds=(da[slot.id]||[]).filter(sid=>!(dExcl[slot.id]||[]).includes(sid));
-          const req=getReq(dk,slot.id),met=activeIds.length>=req;
-          const names=activeIds.map(sid=>{const s=staff.find(x=>x.id===sid);return s?`<span style="background:${s.color};color:#fff;border-radius:3px;padding:0 3px;font-size:9pt;font-weight:700">${s.name}</span>`:'';}).join('');
-          const lbl2=slot.label||'';const slotBg=lbl2.includes('夜')?'#F3F0FF':lbl2.includes('昼')||lbl2.includes('午後')?'#FFF7ED':'#EFF6FF';const slotBd=lbl2.includes('夜')?'#7C3AED':lbl2.includes('昼')||lbl2.includes('午後')?'#C05C00':'#1D6FCC';
-          sh+=`<div style="background:${slotBg};border-left:3px solid ${slotBd};border-radius:2px;padding:1px 2px;margin-bottom:2px"><div style="display:flex;justify-content:space-between"><span style="font-size:8pt;font-weight:700;color:${slotBd}">${slot.label}</span><span style="font-size:7.5pt;font-weight:700;color:${met?'#166534':'#DC2626'}">${activeIds.length}/${req}</span></div><div style="display:flex;flex-wrap:wrap;gap:2px;margin-top:1px">${names||'<span style="font-size:7pt;color:#999">未配置</span>'}</div></div>`;
-        });
+        const dk=tdk(d),dow=d.getDay(),isSat=dow===6,da=asgn[dk]||{},dExcl=manualExclusions[dk]||{},dt=tmps[dk]||{},sls=slots[dow]||[];
         const isClosed2=isClosedDay(dk),holName2=holidays[dk],dnColor=holName2?'#991B1B':isSat?'#92400E':'#000';
-        calHtml+=`<td class="${isSat?'sat':''}" style="${isClosed2?'background:#FEF2F2':''}"><div class="dn" style="color:${dnColor}">${d.getDate()}${holName2?'<span style="font-size:6pt;margin-left:2px">'+holName2.slice(0,4)+'</span>':''}</div>${isClosed2?'<div style="font-size:8pt;color:#991B1B;text-align:center">休診</div>':sh}</td>`;
+        let sh='';
+        if(!isClosed2){
+          sls.forEach(slot=>{
+            const allIds=da[slot.id]||[];
+            const exclIds=dExcl[slot.id]||[];
+            // 管理カレンダー画面と同じく、終日休/全日有給の人は人数カウントから除外する。
+            const slotOffIds=Object.entries(dt).filter(([,v])=>['off','paid'].includes(v.type)).map(([sid])=>parseInt(sid));
+            const activeIds=allIds.filter(sid=>!exclIds.includes(sid)&&!slotOffIds.includes(sid));
+            const req=getReq(dk,slot.id),met=activeIds.length>=req;
+            const lbl2=slot.label||'';
+            const slotBg=lbl2.includes('夜')?'#F3F0FF':lbl2.includes('昼')||lbl2.includes('午後')?'#FFF7ED':'#EFF6FF';
+            const slotBd=lbl2.includes('夜')?'#7C3AED':lbl2.includes('昼')||lbl2.includes('午後')?'#C05C00':'#1D6FCC';
+            const surgMark=(slot.type==='surg'&&surgeryCalUrl)?surgeryMarkForSlot(surgeryFlags,dk,slot):'';
+            const markHtml=surgMark?`<span class="surg-mark ${surgMark==='○'?'on':'off'}">${surgMark}</span>`:'';
+            const names=allIds.map(sid=>{
+              const st=staff.find(x=>x.id===sid);if(!st)return '';
+              const isExcl=exclIds.includes(sid);
+              const isOff=slotOffIds.includes(sid);
+              const isOffTmp=['off','paid','paid_am','paid_pm'].includes(tmps[dk]?.[String(sid)]?.type);
+              const leaveNote=(!isOffTmp&&!isExcl)?leaveNoteForSlot(st,slot,dow,da,dExcl):'';
+              const muted=isExcl||isOffTmp||isOff;
+              const bg=muted?'#94A3B8':st.color;
+              const txt=st.name+(isOffTmp?'(休)':(leaveNote?leaveNote:''));
+              return `<span class="sname ${muted?'muted':''}" style="background:${bg};color:#fff">${txt}</span>`;
+            }).join('');
+            sh+=`<div class="slot" style="background:${slotBg};border-left:3px solid ${slotBd}"><div class="sl-hd"><span class="sl-lbl" style="color:${slotBd}">${slot.label}${markHtml}</span><span class="sl-cnt ${met?'':'unmet'}">${activeIds.length}/${req}</span></div><div class="sl-names">${names||'<span class="no-staff">--</span>'}</div></div>`;
+          });
+          const offN=Object.entries(dt).filter(([,v])=>['off','paid','paid_am','paid_pm'].includes(v.type)).map(([sid,v])=>{
+            const nm=(staff.find(st=>String(st.id)===String(sid))||{}).name;if(!nm)return null;
+            const lbl=v.type==='paid'?'有給':v.type==='paid_am'?'有(午前)':v.type==='paid_pm'?'有(午後)':'休';
+            return nm+'('+lbl+')';
+          }).filter(Boolean);
+          if(offN.length)sh+=`<div class="off-list">🌸 ${offN.join('　')}</div>`;
+        }
+        calHtml+=`<td class="${isSat?'sat':''}" style="${isClosed2?'background:#FEF2F2':''}"><div class="dn" style="color:${dnColor}">${d.getDate()}${holName2?'<span style="font-size:6pt;margin-left:2px">'+holName2.slice(0,4)+'</span>':''}</div>${isClosed2?'<div class="closed">'+(holName2||'休診')+'</div>':sh}</td>`;
       });
       calHtml+='</tr>';
     });
-    const legendHtml=staff.map((s,i)=>`<span class="li">${s.name}</span>`).join('');
     const wc=allWeeks.length,scale=wc>=6?0.62:wc===5?0.75:0.88;
     printWin.document.write(`<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><title>シフト表 ${y}年${m}月</title><style>
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{width:210mm;background:#fff;color:#000}
 body{font-family:"Helvetica Neue",-apple-system,"Hiragino Sans",sans-serif;padding:6mm;transform-origin:top left;transform:scale(${scale});width:calc(210mm / ${scale});-webkit-print-color-adjust:exact;print-color-adjust:exact}
-h1{font-size:13pt;font-weight:700;margin-bottom:1.5mm}
-.sub{font-size:8pt;color:#333;margin-bottom:2mm}
-table{border-collapse:collapse;width:100%;table-layout:fixed}
-th{background:#fff;color:#000;font-size:10pt;font-weight:700;padding:2px;border:2px solid #000;text-align:center}
-td{border:1.5px solid #000;padding:2px;vertical-align:top;background:#fff}
-td.empty{background:#fff}
-td.sat{background:#FFFBEB}
-.dn{font-size:11pt;font-weight:700;margin-bottom:1mm;padding-bottom:0.5mm;border-bottom:1px solid #555}
-.slot{padding:0;margin-bottom:0}
-.slot:last-child{border-bottom:none}
-.sl-hd{display:flex;justify-content:space-between;align-items:center}
-.sl-lbl{font-size:8pt;font-weight:700}
-.sl-cnt{font-size:7.5pt;font-weight:700;padding:0 1px}
-.unmet{color:#DC2626;font-weight:700}
-.sl-names{display:flex;flex-wrap:wrap;gap:2px;margin-top:0.5px}
-.sname{font-size:9pt;font-weight:700;padding:0 1px}
-.no-staff{font-size:7pt;color:#000;font-weight:400}
-@page{size:A4 portrait;margin:8mm}
-@media print{body{transform:scale(${scale});transform-origin:top left;width:calc(210mm / ${scale});padding:0}}
+h1{font-size:13pt;font-weight:700;margin-bottom:1.5mm}.sub{font-size:8pt;color:#333;margin-bottom:2mm}.warn{font-size:7pt;color:#666;margin-bottom:1.5mm}
+table{border-collapse:collapse;width:100%;table-layout:fixed}th{background:#fff;color:#000;font-size:10pt;font-weight:700;padding:2px;border:2px solid #000;text-align:center}td{border:1.5px solid #000;padding:2px;vertical-align:top;background:#fff}td.empty{background:#fff}td.sat{background:#FFFBEB}.dn{font-size:11pt;font-weight:700;margin-bottom:1mm;padding-bottom:0.5mm;border-bottom:1px solid #555}.closed{font-size:8pt;color:#991B1B;text-align:center;font-weight:700}.slot{border-radius:2px;padding:1px 2px;margin-bottom:2px}.sl-hd{display:flex;justify-content:space-between;align-items:center}.sl-lbl{font-size:8pt;font-weight:700}.sl-cnt{font-size:7.5pt;font-weight:700;color:#166534;padding:0 1px}.unmet{color:#DC2626!important;font-weight:700}.sl-names{display:flex;flex-wrap:wrap;gap:2px;margin-top:0.5px}.sname{font-size:9pt;font-weight:700;padding:0 2px;border-radius:3px;line-height:1.25}.sname.muted{opacity:.45;text-decoration:line-through}.no-staff{font-size:7pt;color:#999;font-weight:400}.off-list{font-size:7.5pt;color:#BE185D;margin-top:1mm}.surg-mark{font-size:9pt;font-weight:900;margin-left:2px}.surg-mark.on{color:#DC2626}.surg-mark.off{color:#64748B}
+@page{size:A4 portrait;margin:8mm}@media print{body{transform:scale(${scale});transform-origin:top left;width:calc(210mm / ${scale});padding:0}}
 </style></head><body>
-<h1>医療法人　福耳会　シフト表　${y}年 ${m}月</h1>
-<div class="sub">印刷日: ${new Date().toLocaleDateString('ja-JP')}　／　シフト作成: ${shiftUpdatedAt?fmtStamp(shiftUpdatedAt):'—'}</div>
+<h1>${printTitle}　${y}年 ${m}月</h1>
+<div class="sub">保存先: ${dataPlace}　／　印刷日: ${new Date().toLocaleDateString('ja-JP')}　／　シフト作成: ${shiftUpdatedAt?fmtStamp(shiftUpdatedAt):'—'}　／　版: ${APP_VERSION}</div>
+<div class="warn">※ このPDFは現在表示中の管理カレンダーから作成しています。終日休・有給・除外・手術予定○/ーを反映します。</div>
 <table><thead><tr><th>月</th><th>火</th><th>水</th><th>木</th><th>金</th><th>土</th></tr></thead><tbody>${calHtml}</tbody></table>
 </body></html>`);
     printWin.document.close();injectPrintButton(printWin);
@@ -4582,7 +4597,7 @@ ${bodyHtml}
               {hasAdminPin?(
                 <>
                   <div style={{display:'flex',flexDirection:'column',gap:8}}>
-                    <input type="password" inputMode="numeric" maxLength={4}
+                    <input type="password" inputMode="numeric" maxLength={4} autoComplete="new-password" autoCorrect="off" autoCapitalize="off" spellCheck={false}
                       value={adminPinInput}
                       onChange={e=>{setAdminPinErr('');setAdminPinInput(e.target.value.replace(/[^0-9]/g,'').slice(0,4));}}
                       onKeyDown={e=>{if(e.key==='Enter'&&adminPinInput.length===4){if(adminPinInput===adminPin){setAppMode('admin');setAdminPinInput('');}else setAdminPinErr('PINが違います');}}}
@@ -4600,7 +4615,7 @@ ${bodyHtml}
                 <>
                   <div style={{fontSize:12,color:'#C2410C',marginBottom:8}}>⚠ 管理者PINが未設定です</div>
                   <div style={{display:'flex',flexDirection:'column',gap:8}}>
-                    <input type="password" inputMode="numeric" maxLength={4}
+                    <input type="password" inputMode="numeric" maxLength={4} autoComplete="new-password" autoCorrect="off" autoCapitalize="off" spellCheck={false}
                       value={adminPinInput}
                       onChange={e=>{setAdminPinErr('');setAdminPinInput(e.target.value.replace(/[^0-9]/g,'').slice(0,4));}}
                       placeholder="新しいPIN（4桁）"
@@ -5531,7 +5546,7 @@ ${bodyHtml}
                 <button onClick={()=>setShowAdminPinSetting(false)} style={{border:'none',background:'none',cursor:'pointer',fontSize:18,color:K.textS,lineHeight:1,padding:0}}>×</button>
               </div>
               <div style={{display:'flex',gap:8,alignItems:'center'}}>
-                <input type="password" inputMode="numeric" maxLength={4}
+                <input type="password" inputMode="numeric" maxLength={4} autoComplete="new-password" autoCorrect="off" autoCapitalize="off" spellCheck={false}
                   value={adminPinInput}
                   onChange={e=>{setAdminPinErr('');setAdminPinInput(e.target.value.replace(/[^0-9]/g,'').slice(0,4));}}
                   placeholder="新しい4桁PIN"
