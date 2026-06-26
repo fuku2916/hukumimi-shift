@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v124</title>
+<title>シフト管理 v125</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v124';
+const APP_VERSION = 'v125';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2198,7 +2198,7 @@ function App(){
   const [shiftHistory,setShiftHistory]=useState([]); // [{at,made,data}]（クラウドから取得）
   const [showHistory,setShowHistory]=useState(false);
   function currentShiftPayload(extra){
-    return {y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,...(extra||{})};
+    return {y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,surgeryFlags,surgeryCalSnapshotAt:surgeryCalUpdatedAt,...(extra||{})};
   }
   function publishArchiveName(at){
     const d=at?new Date(at):new Date();
@@ -2346,6 +2346,16 @@ function App(){
     setShiftUpdatedAt(new Date().toISOString()); // 復元＝新しい未公開版
     setShowHistory(false);
     setTimeout(()=>alert('復元しました。内容を確認して「公開」で確定してください。'),50);
+  }
+
+  // 公開時点スナップショットを現在の編集画面へ反映せずに閲覧・印刷する。
+  function viewSnapshot(snap){
+    if(!snap||!snap.data)return;
+    exportPDF(snap.data,{snapshot:snap,mode:'view'});
+  }
+  function printSnapshot(snap){
+    if(!snap||!snap.data)return;
+    exportPDF(snap.data,{snapshot:snap,mode:'print',autoPrint:true});
   }
 
   // Supabase自動保存（requests）※shift_dataとは別タイマーで保存（互いに上書きしないように）
@@ -2588,13 +2598,43 @@ function App(){
   }
 
   // ── シフト表PDF ──
-  function exportPDF(){
-    // v120: 管理カレンダー画面と同じ現在状態から印刷する。
-    // 旧実装は manualExclusions だけを見ており、臨時休み/有給(tmps)・手術予定○/ー・退勤注記が反映されず、
-    // 画面とPDFが違って見えることがあったため、画面側の判定に寄せる。
+  function exportPDF(sourceData,opts){
+    // v125: sourceData が渡された場合は、現在画面のstateではなく保存済みスナップショットだけを使って出力する。
+    // これにより「👁 表示」「🖨 印刷」は現在の編集画面を一切上書きしない。
+    opts=opts||{};
+    const src=sourceData||{};
+    const isSnapshot=!!sourceData;
+    const py=src.y||y, pm=src.m||m;
+    const staffPDF=isSnapshot?(src.staff||[]):staff;
+    const asgnPDF=isSnapshot?(src.asgn||{}):asgn;
+    const tmpsPDF=isSnapshot?(src.tmps||{}):tmps;
+    const weeklyReqPDF=isSnapshot?(src.weeklyReq||{}):weeklyReq;
+    const monthlyReqPDF=isSnapshot?(src.monthlyReq||{}):monthlyReq;
+    const manualExclusionsPDF=isSnapshot?(src.manualExclusions||{}):manualExclusions;
+    const manualClosedDaysPDF=isSnapshot?(src.manualClosedDays||{}):manualClosedDays;
+    const slotsPDF=isSnapshot?(src.slots||{}):slots;
+    const holidaysPDF=isSnapshot?(getJapaneseHolidays(py)||{}):holidays;
+    const surgeryFlagsPDF=isSnapshot?(src.surgeryFlags||{}):surgeryFlags;
+    const hasSurgerySnapshot=isSnapshot?!!src.surgeryFlags:!!surgeryCalUrl;
+    const shiftMade=src.shiftUpdatedAt||shiftUpdatedAt||'';
+    const snap=s=>s||{};
+    function isClosedDayPDF(dk){
+      if(manualClosedDaysPDF[dk]===false)return false;
+      if(manualClosedDaysPDF[dk]===true)return true;
+      return !!holidaysPDF[dk];
+    }
+    function getReqPDF(dk,slotId){
+      const d=new Date(dk),dow=d.getDay();
+      const mr=snap(monthlyReqPDF[dk]);
+      if(mr[slotId]!=null)return Number(mr[slotId])||0;
+      const wr=snap(weeklyReqPDF[dow]);
+      if(wr[slotId]!=null)return Number(wr[slotId])||0;
+      return 1;
+    }
     const printWin=window.open('','_blank','width=900,height=1200');
-    const allDates=getWorkDates(y,m),allWeeks=groupByWeek(allDates);
-    const printTitle=['医療法人 福耳会',CLINIC_LABEL,APP_UNIT_LABEL,'シフト表'].filter(Boolean).join('　');
+    if(!printWin){alert('印刷用ウィンドウを開けませんでした。ポップアップブロックを解除してください。');return;}
+    const allDates=getWorkDates(py,pm),allWeeks=groupByWeek(allDates);
+    const printTitle=['医療法人 福耳会',CLINIC_LABEL,APP_UNIT_LABEL,isSnapshot?'公開時点スナップショット':'シフト表'].filter(Boolean).join('　');
     const dataPlace=[CLINIC_LABEL||'clinic未指定',APP_UNIT_LABEL||APP_UNIT||'unit未指定'].filter(Boolean).join(' / ');
     let calHtml='';
     allWeeks.forEach(wk=>{
@@ -2604,27 +2644,27 @@ function App(){
       calHtml+='<tr>';
       cells.forEach(d=>{
         if(!d){calHtml+='<td class="empty"></td>';return;}
-        const dk=tdk(d),dow=d.getDay(),isSat=dow===6,da=asgn[dk]||{},dExcl=manualExclusions[dk]||{},dt=tmps[dk]||{},sls=slots[dow]||[];
-        const isClosed2=isClosedDay(dk),holName2=holidays[dk],dnColor=holName2?'#991B1B':isSat?'#92400E':'#000';
+        const dk=tdk(d),dow=d.getDay(),isSat=dow===6,da=asgnPDF[dk]||{},dExcl=manualExclusionsPDF[dk]||{},dt=tmpsPDF[dk]||{},sls=slotsPDF[dow]||[];
+        const isClosed2=isClosedDayPDF(dk),holName2=holidaysPDF[dk],dnColor=holName2?'#991B1B':isSat?'#92400E':'#000';
         let sh='';
         if(!isClosed2){
           sls.forEach(slot=>{
             const allIds=da[slot.id]||[];
             const exclIds=dExcl[slot.id]||[];
-            // 管理カレンダー画面と同じく、終日休/全日有給の人は人数カウントから除外する。
             const slotOffIds=Object.entries(dt).filter(([,v])=>['off','paid'].includes(v.type)).map(([sid])=>parseInt(sid));
             const activeIds=allIds.filter(sid=>!exclIds.includes(sid)&&!slotOffIds.includes(sid));
-            const req=getReq(dk,slot.id),met=activeIds.length>=req;
+            const req=getReqPDF(dk,slot.id),met=activeIds.length>=req;
             const lbl2=slot.label||'';
             const slotBg=lbl2.includes('夜')?'#F3F0FF':lbl2.includes('昼')||lbl2.includes('午後')?'#FFF7ED':'#EFF6FF';
             const slotBd=lbl2.includes('夜')?'#7C3AED':lbl2.includes('昼')||lbl2.includes('午後')?'#C05C00':'#1D6FCC';
-            const surgMark=(slot.type==='surg'&&surgeryCalUrl)?surgeryMarkForSlot(surgeryFlags,dk,slot):'';
+            const surgMark=(slot.type==='surg'&&hasSurgerySnapshot)?surgeryMarkForSlot(surgeryFlagsPDF,dk,slot):'';
             const markHtml=surgMark?`<span class="surg-mark ${surgMark==='○'?'on':'off'}">${surgMark}</span>`:'';
             const names=allIds.map(sid=>{
-              const st=staff.find(x=>x.id===sid);if(!st)return '';
+              const st=staffPDF.find(x=>x.id===sid);if(!st)return '';
               const isExcl=exclIds.includes(sid);
               const isOff=slotOffIds.includes(sid);
-              const isOffTmp=['off','paid','paid_am','paid_pm'].includes(tmps[dk]?.[String(sid)]?.type);
+              const tmp=tmpsPDF[dk]?.[String(sid)]||tmpsPDF[dk]?.[sid];
+              const isOffTmp=['off','paid','paid_am','paid_pm'].includes(tmp?.type);
               const leaveNote=(!isOffTmp&&!isExcl)?leaveNoteForSlot(st,slot,dow,da,dExcl):'';
               const muted=isExcl||isOffTmp||isOff;
               const bg=muted?'#94A3B8':st.color;
@@ -2634,7 +2674,7 @@ function App(){
             sh+=`<div class="slot" style="background:${slotBg};border-left:3px solid ${slotBd}"><div class="sl-hd"><span class="sl-lbl" style="color:${slotBd}">${slot.label}${markHtml}</span><span class="sl-cnt ${met?'':'unmet'}">${activeIds.length}/${req}</span></div><div class="sl-names">${names||'<span class="no-staff">--</span>'}</div></div>`;
           });
           const offN=Object.entries(dt).filter(([,v])=>['off','paid','paid_am','paid_pm'].includes(v.type)).map(([sid,v])=>{
-            const nm=(staff.find(st=>String(st.id)===String(sid))||{}).name;if(!nm)return null;
+            const nm=(staffPDF.find(st=>String(st.id)===String(sid))||{}).name;if(!nm)return null;
             const lbl=v.type==='paid'?'有給':v.type==='paid_am'?'有(午前)':v.type==='paid_pm'?'有(午後)':'休';
             return nm+'('+lbl+')';
           }).filter(Boolean);
@@ -2645,20 +2685,24 @@ function App(){
       calHtml+='</tr>';
     });
     const wc=allWeeks.length,scale=wc>=6?0.62:wc===5?0.75:0.88;
-    printWin.document.write(`<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><title>シフト表 ${y}年${m}月</title><style>
+    const snapLine=opts.snapshot?`<div class="snap">公開スナップショット: ${opts.snapshot.archiveName||opts.snapshot.label||''}　／　保存: ${fmtStamp(opts.snapshot.at)}</div>`:'';
+    const warnText=isSnapshot?'※ これは保存済みスナップショットから作成した閲覧専用表示です。現在の編集画面を上書きしていません。':'※ このPDFは現在表示中の管理カレンダーから作成しています。終日休・有給・除外・手術予定○/ーを反映します。';
+    printWin.document.write(`<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><title>${isSnapshot?'公開スナップショット':'シフト表'} ${py}年${pm}月</title><style>
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{width:210mm;background:#fff;color:#000}
 body{font-family:"Helvetica Neue",-apple-system,"Hiragino Sans",sans-serif;padding:6mm;transform-origin:top left;transform:scale(${scale});width:calc(210mm / ${scale});-webkit-print-color-adjust:exact;print-color-adjust:exact}
-h1{font-size:13pt;font-weight:700;margin-bottom:1.5mm}.sub{font-size:8pt;color:#333;margin-bottom:2mm}.warn{font-size:7pt;color:#666;margin-bottom:1.5mm}
+h1{font-size:13pt;font-weight:700;margin-bottom:1.5mm}.sub{font-size:8pt;color:#333;margin-bottom:1mm}.snap{font-size:8pt;color:#166534;font-weight:700;margin-bottom:1mm}.warn{font-size:7pt;color:#666;margin-bottom:1.5mm}
 table{border-collapse:collapse;width:100%;table-layout:fixed}th{background:#fff;color:#000;font-size:10pt;font-weight:700;padding:2px;border:2px solid #000;text-align:center}td{border:1.5px solid #000;padding:2px;vertical-align:top;background:#fff}td.empty{background:#fff}td.sat{background:#FFFBEB}.dn{font-size:11pt;font-weight:700;margin-bottom:1mm;padding-bottom:0.5mm;border-bottom:1px solid #555}.closed{font-size:8pt;color:#991B1B;text-align:center;font-weight:700}.slot{border-radius:2px;padding:1px 2px;margin-bottom:2px}.sl-hd{display:flex;justify-content:space-between;align-items:center}.sl-lbl{font-size:8pt;font-weight:700}.sl-cnt{font-size:7.5pt;font-weight:700;color:#166534;padding:0 1px}.unmet{color:#DC2626!important;font-weight:700}.sl-names{display:flex;flex-wrap:wrap;gap:2px;margin-top:0.5px}.sname{font-size:9pt;font-weight:700;padding:0 2px;border-radius:3px;line-height:1.25}.sname.muted{opacity:.45;text-decoration:line-through}.no-staff{font-size:7pt;color:#999;font-weight:400}.off-list{font-size:7.5pt;color:#BE185D;margin-top:1mm}.surg-mark{font-size:9pt;font-weight:900;margin-left:2px}.surg-mark.on{color:#DC2626}.surg-mark.off{color:#64748B}
 @page{size:A4 portrait;margin:8mm}@media print{body{transform:scale(${scale});transform-origin:top left;width:calc(210mm / ${scale});padding:0}}
 </style></head><body>
-<h1>${printTitle}　${y}年 ${m}月</h1>
-<div class="sub">保存先: ${dataPlace}　／　印刷日: ${new Date().toLocaleDateString('ja-JP')}　／　シフト作成: ${shiftUpdatedAt?fmtStamp(shiftUpdatedAt):'—'}　／　版: ${APP_VERSION}</div>
-<div class="warn">※ このPDFは現在表示中の管理カレンダーから作成しています。終日休・有給・除外・手術予定○/ーを反映します。</div>
+<h1>${printTitle}　${py}年 ${pm}月</h1>
+<div class="sub">保存先: ${dataPlace}　／　印刷日: ${new Date().toLocaleDateString('ja-JP')}　／　シフト作成: ${shiftMade?fmtStamp(shiftMade):'—'}　／　版: ${APP_VERSION}</div>
+${snapLine}
+<div class="warn">${warnText}</div>
 <table><thead><tr><th>月</th><th>火</th><th>水</th><th>木</th><th>金</th><th>土</th></tr></thead><tbody>${calHtml}</tbody></table>
 </body></html>`);
     printWin.document.close();injectPrintButton(printWin);
+    if(opts.autoPrint){setTimeout(()=>{try{printWin.print();}catch(e){}},500);}
   }
 
   // ── 個人別シフト表PDF ──
@@ -5615,13 +5659,13 @@ ${bodyHtml}
           {/* バックアップ履歴パネル */}
           {showHistory&&(
             <div onClick={()=>setShowHistory(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:2000,padding:16}}>
-              <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:14,width:'100%',maxWidth:460,maxHeight:'80vh',display:'flex',flexDirection:'column',boxShadow:'0 8px 32px rgba(0,0,0,0.2)'}}>
+              <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:14,width:'100%',maxWidth:640,maxHeight:'80vh',display:'flex',flexDirection:'column',boxShadow:'0 8px 32px rgba(0,0,0,0.2)'}}>
                 <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 18px',borderBottom:K.bd}}>
                   <div style={{fontWeight:600,fontSize:15}}>🕘 バックアップ履歴</div>
                   <button onClick={()=>setShowHistory(false)} style={{border:'none',background:'none',cursor:'pointer',fontSize:20,color:K.textS,lineHeight:1,padding:0}}>×</button>
                 </div>
                 <div style={{padding:'10px 18px',fontSize:12,color:K.textS,borderBottom:K.bd,lineHeight:1.6}}>
-                  v124以降は「公開」するたびに、その時点のシフト表が「公開時点スナップショット」として固定保存されます（最新{PUBLISH_ARCHIVE_MAX}件）。直前の公開版や手動バックアップも残ります。戻したい版の「この版に戻す」を押し、内容を確認してから「公開」で確定してください。
+                  v125以降は、公開時点スナップショットに「表示」「印刷」「この版に戻す」を分けて表示します。「表示」「印刷」は現在の編集画面を上書きしません。戻したい場合だけ「この版に戻す」を押し、内容を確認してから「公開」で確定してください。
                 </div>
                 <div style={{overflowY:'auto',padding:'10px 18px',display:'flex',flexDirection:'column',gap:8}}>
                   {shiftHistory.length===0?(
@@ -5637,7 +5681,11 @@ ${bodyHtml}
                           <div style={{fontSize:11,color:K.textS}}>種別: {typeLabel}　/　保存: {fmtStamp(h.at)}　/　{dd.y}年{dd.m}月　配置のある日 {days}日</div>
                           {h.archiveName&&<div style={{fontSize:11,color:'#166534',wordBreak:'break-all'}}>保存名: {h.archiveName}</div>}
                         </div>
-                        <button onClick={()=>restoreSnapshot(h)} style={{padding:'5px 12px',border:'1px solid #185FA5',borderRadius:K.rmd,background:'#EBF4FF',color:'#185FA5',cursor:'pointer',fontSize:12,fontWeight:600,whiteSpace:'nowrap'}}>この版に戻す</button>
+                        <div style={{display:'flex',gap:6,flexWrap:'wrap',justifyContent:'flex-end'}}>
+                          <button onClick={()=>viewSnapshot(h)} style={{padding:'5px 10px',border:'1px solid #16A34A',borderRadius:K.rmd,background:'#F0FDF4',color:'#166534',cursor:'pointer',fontSize:12,fontWeight:600,whiteSpace:'nowrap'}}>👁 表示</button>
+                          <button onClick={()=>printSnapshot(h)} style={{padding:'5px 10px',border:'1px solid #16A34A',borderRadius:K.rmd,background:'#FFFFFF',color:'#166534',cursor:'pointer',fontSize:12,fontWeight:600,whiteSpace:'nowrap'}}>🖨 印刷</button>
+                          <button onClick={()=>restoreSnapshot(h)} style={{padding:'5px 10px',border:'1px solid #185FA5',borderRadius:K.rmd,background:'#EBF4FF',color:'#185FA5',cursor:'pointer',fontSize:12,fontWeight:600,whiteSpace:'nowrap'}}>↩ この版に戻す</button>
+                        </div>
                       </div>
                     );
                   })}
