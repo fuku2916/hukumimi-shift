@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v143</title>
+<title>シフト管理 v144</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v143';
+const APP_VERSION = 'v144';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2055,6 +2055,8 @@ function App(){
   // スタッフのアイコン設定（codeごと）と打刻修正の申告（配列）。requests_data の包みに同居。
   const [avatars,setAvatars]=useState({});
   const [corrections,setCorrections]=useState([]);
+  const [requestFilter,setRequestFilter]=useState('active'); // active|month|prev|all
+  const [requestExportYm,setRequestExportYm]=useState(()=>String(y)+'-'+String(m).padStart(2,'0'));
   const avatarsRef=React.useRef({}); const correctionsRef=React.useRef([]);
   useEffect(()=>{avatarsRef.current=avatars;},[avatars]);
   useEffect(()=>{correctionsRef.current=corrections;},[corrections]);
@@ -5640,6 +5642,96 @@ ${bodyHtml}
     setShowTimecardCorrectionPanel(true);
     setOpenMenu(null);
   }
+  function ymOfDk(dk){
+    const s=String(dk||'');
+    return s.length>=7?s.slice(0,7):'';
+  }
+  function currentYm(){return String(y)+'-'+String(m).padStart(2,'0');}
+  function prevYm(){
+    const d=new Date(y,m-2,1);
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+  }
+  function requestFilterLabel(){
+    return requestFilter==='active'?'未処理＋当月':requestFilter==='month'?'当月':requestFilter==='prev'?'前月':'すべて';
+  }
+  function requestVisible(dk,isPending){
+    if(requestFilter==='all')return true;
+    if(requestFilter==='month')return ymOfDk(dk)===currentYm();
+    if(requestFilter==='prev')return ymOfDk(dk)===prevYm();
+    return !!isPending||ymOfDk(dk)===currentYm();
+  }
+  function correctionVisible(c){
+    const st=c.status||'pending';
+    return requestVisible(c.date,st==='pending');
+  }
+  function collectRequestRows(ym){
+    const rows=[];
+    Object.entries(requests||{}).forEach(([dk,dayMap])=>{
+      if(ym&&ymOfDk(dk)!==ym)return;
+      Object.entries(dayMap||{}).forEach(([key,r])=>{
+        if(!r)return;
+        let type='',status='',detail='',name='';
+        const sid=parseInt(key);
+        const st=staff.find(x=>x.id===sid);
+        if(['paid_full','paid_am','paid_pm','off'].includes(r.type)){
+          type=r.type==='off'?'休み申請':'有給申請';
+          const applied=tmps?.[dk]?.[String(sid)]?.type;
+          status=applied?'反映済み':'未反映';
+          detail=(REQ_TYPES[r.type]?.label||r.type);
+          name=st?.name||r.staffName||key;
+        }else if(r.type==='work_wish'){
+          type='出勤希望の挙手';
+          status=r.decision==='approved'?'承認済み':r.decision==='rejected'?'却下済み':'未対応';
+          detail=(r.slotLabels||r.slots||[]).join('・');
+          name=st?.name||r.staffName||key;
+        }else if(r.type==='mistake_report'){
+          type='管理者へのメッセージ';
+          status=r.resolved?'対応済み':'未対応';
+          detail=r.text||'';
+          name=r.staffName||st?.name||key;
+        }else return;
+        rows.push({dk,name,type,status,detail,at:r.appliedAt||r.createdAt||r.decidedAt||''});
+      });
+    });
+    (corrections||[]).forEach(c=>{
+      if(ym&&ymOfDk(c.date)!==ym)return;
+      rows.push({
+        dk:c.date||'',
+        name:c.staffName||staffByCorrection(c)?.name||c.code||'',
+        type:'打刻修正申請',
+        status:correctionStatusLabel(c),
+        detail:'出 '+(c.newIn||'—')+' / 退 '+(c.newOut||'—')+'　理由: '+(c.reason||'—')+(c.note?'　補足: '+c.note:''),
+        at:c.appliedAt||c.decidedAt||''
+      });
+    });
+    rows.sort((a,b)=>String(a.dk).localeCompare(String(b.dk))||String(a.type).localeCompare(String(b.type)));
+    return rows;
+  }
+  function printRequestHistoryPdf(ym){
+    const targetYm=ym||requestExportYm||currentYm();
+    const rows=collectRequestRows(targetYm);
+    const w=window.open('','_blank','width=920,height=1000');
+    if(!w){alert('印刷用画面を開けませんでした。ポップアップブロックを解除してください。');return;}
+    const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    let h='<!doctype html><html><head><meta charset="utf-8"><title>申請履歴 '+esc(targetYm)+'</title>';
+    h+='<style>body{font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif;padding:22px;color:#111}h1{font-size:20px;margin:0 0 4px}.sub{font-size:12px;color:#555;margin-bottom:14px}table{border-collapse:collapse;width:100%;font-size:12px}th,td{border:1px solid #999;padding:6px 7px;vertical-align:top}th{background:#f1f5f9;text-align:left}.status{font-weight:700}.empty{padding:24px;text-align:center;color:#666;border:1px solid #ccc}.note{font-size:11px;color:#666;margin-top:12px;line-height:1.6}@media print{button{display:none}body{padding:10mm}}</style></head><body>';
+    h+='<button onclick="window.print()" style="float:right;padding:6px 12px">PDF保存 / 印刷</button>';
+    h+='<h1>申請履歴 '+esc(targetYm)+'</h1>';
+    h+='<div class="sub">福耳会 シフト管理　'+esc(CLINIC_LABEL||'')+(APP_UNIT_LABEL?' / '+esc(APP_UNIT_LABEL):'')+'　作成: '+esc(fmtStamp(new Date().toISOString()))+'</div>';
+    if(rows.length===0){
+      h+='<div class="empty">この月の申請履歴はありません。</div>';
+    }else{
+      h+='<table><thead><tr><th style="width:90px">日付</th><th style="width:110px">スタッフ</th><th style="width:120px">種別</th><th style="width:90px">状態</th><th>内容</th></tr></thead><tbody>';
+      rows.forEach(r=>{
+        h+='<tr><td>'+esc(r.dk)+'</td><td>'+esc(r.name)+'</td><td>'+esc(r.type)+'</td><td class="status">'+esc(r.status)+'</td><td>'+esc(r.detail).replace(/\n/g,'<br>')+'</td></tr>';
+      });
+      h+='</tbody></table>';
+    }
+    h+='<div class="note">この画面はブラウザの印刷機能からPDF保存できます。Windows/Macでは「印刷」→「PDFとして保存」を選んでください。税理士・社労士へ送る場合は、保存したPDFをメールに添付してください。</div>';
+    h+='</body></html>';
+    w.document.open();w.document.write(h);w.document.close();
+    setTimeout(()=>{try{w.focus();}catch(_){ }},200);
+  }
 
   return(
     <div style={{background:K.bgT,minHeight:'100vh',overflowX:'hidden'}}>
@@ -5731,6 +5823,8 @@ ${bodyHtml}
                     <MenuItem icon="🙋" label="出勤希望の挙手" onClick={()=>openRequestSection('wish')} active={tab==='paid'}/>
                     <MenuItem icon="🚩" label="管理者へのメッセージ" onClick={()=>openRequestSection('msg')} active={tab==='paid'}/>
                     <MenuItem icon="🕒" label={'打刻修正申請'+(pendingTimecardCorrections().length?'（'+pendingTimecardCorrections().length+'件）':'')} onClick={openTimecardCorrectionPanelFromMenu} active={showTimecardCorrectionPanel}/>
+              <MenuItem icon="🖨" label="月次申請履歴PDF" onClick={()=>{printRequestHistoryPdf(requestExportYm);setOpenMenu(null);}}/>
+                    <MenuItem icon="🖨" label="月次申請履歴PDF" onClick={()=>{printRequestHistoryPdf(requestExportYm);setOpenMenu(null);}}/>
                   </>}
 
                   {/* 設定メニュー */}
@@ -5854,14 +5948,14 @@ ${bodyHtml}
           <div style={{background:'#fff',border:'1px solid #CBD5E1',borderRadius:14,boxShadow:'0 8px 24px rgba(0,0,0,.08)',padding:16,marginBottom:16}}>
             <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12}}>
               <div style={{fontSize:18,fontWeight:800,color:'#1E293B'}}>🕒 打刻修正申請</div>
-              <span style={{fontSize:12,color:'#64748B'}}>スタッフスマホ画面から届いた申請です。未処理 {pendingTimecardCorrections().length}件 / 履歴 {Math.max(0,allTimecardCorrectionsForAdmin().length-pendingTimecardCorrections().length)}件</span>
+              <span style={{fontSize:12,color:'#64748B'}}>スタッフスマホ画面から届いた申請です。表示: {requestFilterLabel()} / 未処理 {pendingTimecardCorrections().length}件 / 履歴 {Math.max(0,allTimecardCorrectionsForAdmin().length-pendingTimecardCorrections().length)}件</span>
               <button onClick={()=>setShowTimecardCorrectionPanel(false)} style={{marginLeft:'auto',border:'1px solid #CBD5E1',background:'#fff',borderRadius:8,padding:'6px 10px',cursor:'pointer'}}>閉じる</button>
             </div>
-            {allTimecardCorrectionsForAdmin().length===0?(
-              <div style={{fontSize:13,color:'#64748B',background:'#F8FAFC',border:'1px solid #E2E8F0',borderRadius:10,padding:14}}>打刻修正申請はまだありません。</div>
+            {allTimecardCorrectionsForAdmin().filter(c=>correctionVisible(c)).length===0?(
+              <div style={{fontSize:13,color:'#64748B',background:'#F8FAFC',border:'1px solid #E2E8F0',borderRadius:10,padding:14}}>表示対象の打刻修正申請はありません。</div>
             ):(
               <div style={{display:'flex',flexDirection:'column',gap:10}}>
-                {allTimecardCorrectionsForAdmin().map((c,i)=>{
+                {allTimecardCorrectionsForAdmin().filter(c=>correctionVisible(c)).map((c,i)=>{
                   const st=staffByCorrection(c);
                   const a=correctionAssessment(c);
                   return <div key={i} style={{border:'1px solid #E2E8F0',borderRadius:12,padding:12,background:'#F8FAFC'}}>
@@ -6852,6 +6946,20 @@ ${bodyHtml}
       {/* ================================================================ */}
       {tab==='paid'&&(
         <div style={{padding:16}}>
+          <div style={{background:'#fff',border:'1px solid #CBD5E1',borderRadius:14,padding:14,marginBottom:16,display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+            <div style={{fontWeight:800,fontSize:15,color:'#1E293B'}}>申請表示</div>
+            {['active','month','prev','all'].map(f=>(
+              <button key={f} onClick={()=>setRequestFilter(f)}
+                style={{padding:'5px 11px',border:'1px solid '+(requestFilter===f?'#185FA5':'#CBD5E1'),borderRadius:8,background:requestFilter===f?'#EBF4FF':'#fff',color:requestFilter===f?'#185FA5':'#334155',fontWeight:requestFilter===f?800:600,cursor:'pointer',fontSize:12}}>
+                {f==='active'?'未処理＋当月':f==='month'?'当月':f==='prev'?'前月':'すべて'}
+              </button>
+            ))}
+            <span style={{fontSize:12,color:'#64748B'}}>未処理は月をまたいでも表示します。処理済みは通常、当月分だけ表示します。</span>
+            <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+              <input type="month" value={requestExportYm} onChange={e=>setRequestExportYm(e.target.value)} style={{padding:'5px 8px',border:'1px solid #CBD5E1',borderRadius:8,fontSize:12}}/>
+              <button onClick={()=>printRequestHistoryPdf(requestExportYm)} style={{padding:'6px 12px',border:'none',borderRadius:8,background:'#185FA5',color:'#fff',fontWeight:800,cursor:'pointer',fontSize:12}}>🖨 月次申請履歴PDF</button>
+            </div>
+          </div>
           {/* ── 🌸 休み・有給の申請 ── */}
           <div id="paidsec-paid" style={{scrollMarginTop:60}}>
           {(()=>{
@@ -6867,13 +6975,14 @@ ${bodyHtml}
               });
             });
             pending.sort((a,b)=>a.dk>b.dk?1:-1);
-            const unreflected=pending.filter(p=>!p.alreadyApplied);
+            const visible=pending.filter(p=>requestVisible(p.dk,!p.alreadyApplied));
+            const unreflected=visible.filter(p=>!p.alreadyApplied);
             return(
               <div style={{background:K.bg,border:'1px solid #F9A8D4',borderRadius:K.rlg,padding:16,marginBottom:16}}>
-                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:pending.length?12:0,paddingBottom:pending.length?8:0,borderBottom:pending.length?K.bd:'none'}}>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:visible.length?12:0,paddingBottom:visible.length?8:0,borderBottom:visible.length?K.bd:'none'}}>
                   <div>
                     <div style={{fontWeight:600,fontSize:14,color:'#86198F'}}>🌸 休み・有給の申請</div>
-                    <div style={{fontSize:11,color:K.textS,marginTop:2}}>{pending.length===0?'現在、申請はありません。':(unreflected.length>0?unreflected.length+'件の未反映申請があります':'すべて反映済みです')}</div>
+                    <div style={{fontSize:11,color:K.textS,marginTop:2}}>{visible.length===0?'表示対象の申請はありません。':(unreflected.length>0?unreflected.length+'件の未反映申請があります':'表示対象はすべて反映済みです')}</div>
                   </div>
                   {unreflected.length>0&&(
                     <button onClick={()=>{
@@ -6899,7 +7008,7 @@ ${bodyHtml}
                   )}
                 </div>
                 {pending.length>0&&<div style={{display:'flex',flexDirection:'column',gap:6}}>
-                  {pending.map(({dk,sid,req,staffName,staffColor,alreadyApplied},i)=>{
+                  {visible.map(({dk,sid,req,staffName,staffColor,alreadyApplied},i)=>{
                     const d=new Date(dk);
                     const rt=REQ_TYPES[req.type]||{label:req.type,color:'#64748B',bg:'#F8FAFC',border:'#CBD5E1',icon:'📋'};
                     return(
@@ -6955,17 +7064,18 @@ ${bodyHtml}
               });
             });
             pending.sort((a,b)=>a.dk>b.dk?1:-1);
-            const unreflected=pending.filter(p=>!p.alreadyApplied);
+            const visible=pending.filter(p=>requestVisible(p.dk,!p.alreadyApplied));
+            const unreflected=visible.filter(p=>!p.alreadyApplied);
             return(
               <div style={{background:K.bg,border:'1px solid #6EE7B7',borderRadius:K.rlg,padding:16,marginBottom:16}}>
-                <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:pending.length?12:0,paddingBottom:pending.length?8:0,borderBottom:pending.length?K.bd:'none'}}>
+                <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:visible.length?12:0,paddingBottom:visible.length?8:0,borderBottom:visible.length?K.bd:'none'}}>
                   <div style={{fontWeight:600,fontSize:14,color:'#065F46'}}>🙋 挙手（出勤希望）</div>
                   {unreflected.length>0&&<span style={{fontSize:11,background:'#D1FAE5',color:'#065F46',borderRadius:10,padding:'1px 8px',fontWeight:600}}>未対応 {unreflected.length}件</span>}
                 </div>
-                {pending.length===0
-                  ?<div style={{fontSize:12,color:K.textS}}>現在、挙手はありません。</div>
+                {visible.length===0
+                  ?<div style={{fontSize:12,color:K.textS}}>表示対象の挙手はありません。</div>
                   :<div style={{display:'flex',flexDirection:'column',gap:6}}>
-                  {pending.map(({dk,sid,req,staffName,staffColor,alreadyApplied},i)=>{
+                  {visible.map(({dk,sid,req,staffName,staffColor,alreadyApplied},i)=>{
                     const d=new Date(dk);
                     const rt=REQ_TYPES[req.type]||{label:req.type,color:'#64748B',bg:'#F8FAFC',border:'#CBD5E1',icon:'🙋'};
                     return(
@@ -7015,17 +7125,18 @@ ${bodyHtml}
               Object.entries(dayMap).forEach(([k,r])=>{ if(r&&r.type==='mistake_report')reports.push({dk,key:k,r}); });
             });
             reports.sort((a,b)=>((a.r.createdAt||'')<(b.r.createdAt||'')?1:-1));
-            const unresolved=reports.filter(x=>!x.r.resolved);
+            const visible=reports.filter(x=>requestVisible(x.dk,!x.r.resolved));
+            const unresolved=visible.filter(x=>!x.r.resolved);
             return(
               <div style={{background:K.bg,border:'1px solid #FDBA74',borderRadius:K.rlg,padding:16,marginBottom:16}}>
-                <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:reports.length?12:0,paddingBottom:reports.length?8:0,borderBottom:reports.length?K.bd:'none'}}>
+                <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:visible.length?12:0,paddingBottom:visible.length?8:0,borderBottom:visible.length?K.bd:'none'}}>
                   <div style={{fontWeight:600,fontSize:14,color:'#9A3412'}}>🚩 スタッフからのメッセージ</div>
                   {unresolved.length>0&&<span style={{fontSize:11,background:'#FFEDD5',color:'#9A3412',borderRadius:10,padding:'1px 8px',fontWeight:600}}>未対応 {unresolved.length}件</span>}
                 </div>
-                {reports.length===0
-                  ?<div style={{fontSize:12,color:K.textS}}>現在、スタッフからのメッセージはありません。</div>
+                {visible.length===0
+                  ?<div style={{fontSize:12,color:K.textS}}>表示対象のメッセージはありません。</div>
                   :<div style={{display:'flex',flexDirection:'column',gap:8}}>
-                    {reports.map(({dk,key,r})=>{
+                    {visible.map(({dk,key,r})=>{
                       const d=new Date(dk);
                       return(
                         <div key={key} style={{padding:'10px 12px',borderRadius:K.rmd,background:r.resolved?K.bgS:'#FFF7ED',border:'1px solid '+(r.resolved?'#E2E8F0':'#FDBA74'),opacity:r.resolved?0.7:1}}>
@@ -7089,9 +7200,10 @@ ${bodyHtml}
                 });
               });
               allHistory.sort((a,b)=>a.dk>b.dk?1:a.dk<b.dk?-1:0);
-              if(allHistory.length===0) return(
+              const visibleHistory=allHistory.filter(r=>requestVisible(r.dk,false));
+              if(visibleHistory.length===0) return(
                 <div style={{textAlign:'center',padding:'24px 0',color:K.textS,fontSize:13}}>
-                  申請履歴はまだありません。<br/>
+                  表示対象の申請履歴はありません。<br/>
                   <span style={{fontSize:12}}>シフト表で日付をクリック →「臨時条件」タブから申請できます。</span>
                 </div>
               );
@@ -7108,7 +7220,7 @@ ${bodyHtml}
                       </tr>
                     </thead>
                     <tbody>
-                      {allHistory.map((r,i)=>{
+                      {visibleHistory.map((r,i)=>{
                         const d=new Date(r.dk);
                         const pc=PAID_COLORS[r.unit]||PAID_COLORS.full;
                         const unitLabel=r.unit==='full'?'全日':r.unit==='am'?'午前半日':'午後半日';
@@ -8628,6 +8740,17 @@ CHANGELOG v143
 - 既存の設定メニューから申請関連項目を外し、スタッフ・診療・認証系に整理。
 - スマホのハンバーガーメニューにも同じ「申請」セクションを追加。
 - アプリ表示バージョンを v142 から v143 に更新。
+-->
+<!--
+CHANGELOG v144
+- 申請関連画面に表示フィルターを追加。
+- 初期表示相当は「未処理＋当月」とし、未処理は月をまたいでも表示、処理済みは当月中心に表示。
+- 表示切替として「未処理＋当月」「当月」「前月」「すべて」を追加。
+- 休み・有給申請、出勤希望、管理者へのメッセージ、打刻修正申請に同じ表示方針を適用。
+- 申請履歴を月単位で印刷/PDF保存できる「月次申請履歴PDF」を追加。
+- PDF用の印刷画面には、有給/休み、出勤希望、管理者メッセージ、打刻修正申請を月ごとに集約表示。
+- 管理者がブラウザの印刷機能からPDF保存し、税理士・社労士へメール添付できる運用を想定。
+- アプリ表示バージョンを v143 から v144 に更新。
 -->
 </body>
 </html>
