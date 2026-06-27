@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v129</title>
+<title>シフト管理 v130</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v129';
+const APP_VERSION = 'v130';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -1291,6 +1291,7 @@ function surgeryMarkForSlot(flags,dk,slot){
 // 形: { "YYYY-MM-DD": { "am_out": { "1": false, "2": true } } }
 // true=休診(ー), false/未設定=診察(○)
 const CLINIC_ROOM_NUMS=['','①','②','③','④','⑤','⑥'];
+const CLINIC_ROOM_LABELS=['','１診','２診','３診','４診','５診','６診'];
 function isOutpatientSlot(slot){
   const label=(slot&&slot.label||'').toString();
   return !!slot && slot.type==='out' && label.indexOf('外来')>=0;
@@ -1299,15 +1300,19 @@ function outpatientRoomCount(req){
   const n=parseInt(req,10);
   return Math.max(1,Math.min(6,isNaN(n)?1:n));
 }
-function outpatientMarkForSlot(closures,dk,slot,req){
+function outpatientRoomClosed(closures,dk,slotId,roomIdx,dayClosed){
+  if(dayClosed)return true;
+  return !!(closures&&closures[dk]&&closures[dk][slotId]&&closures[dk][slotId][String(roomIdx)]);
+}
+function outpatientMarkForSlot(closures,dk,slot,req,dayClosed=false){
   if(!isOutpatientSlot(slot))return '';
   const n=outpatientRoomCount(req);
-  const c=(closures&&closures[dk]&&closures[dk][slot.id])||{};
-  let out='';
-  for(let i=1;i<=n;i++)out+=CLINIC_ROOM_NUMS[i]+(c[String(i)]?'ー':'○');
-  return out;
+  const parts=[];
+  for(let i=1;i<=n;i++)parts.push(CLINIC_ROOM_LABELS[i]+'：'+(outpatientRoomClosed(closures,dk,slot.id,i,dayClosed)?'ー':'○'));
+  return parts.join('　');
 }
-function hasOutpatientClosureForSlot(closures,dk,slot){
+function hasOutpatientClosureForSlot(closures,dk,slot,dayClosed=false){
+  if(dayClosed&&isOutpatientSlot(slot))return true;
   const c=(closures&&closures[dk]&&closures[dk][slot.id])||{};
   return Object.values(c).some(Boolean);
 }
@@ -1990,7 +1995,7 @@ function App(){
   const [surgeryFlags,setSurgeryFlags]=useState({});
   const [surgeryCalStatus,setSurgeryCalStatus]=useState('idle'); // idle|loading|ok|error|empty
   const [surgeryCalUpdatedAt,setSurgeryCalUpdatedAt]=useState('');
-  // ── 外来休診（診察室ごとの開閉）── v129
+  // ── 外来休診（診察室ごとの開閉）── v129/v130
   const [outpatientClosures,setOutpatientClosures]=useState(()=>saved?.outpatientClosures||{});
   const [outpatientClosuresUpdatedAt,setOutpatientClosuresUpdatedAt]=useState(()=>saved?.outpatientClosuresUpdatedAt||'');
   const [showOutpatientClosurePanel,setShowOutpatientClosurePanel]=useState(false);
@@ -5087,7 +5092,7 @@ ${bodyHtml}
                                 onClick={short?()=>setHelpTarget({dk,slotId:slot.id,slotLabel:label,mo:d.getMonth()+1,day:d.getDate(),dow}):undefined}
                                 title={short?'タップして「勤務できます」と挙手':''}
                                 style={{height:22,boxSizing:'border-box',borderRight:'1px solid #E2E8F0',borderBottom:'1px solid #E2E8F0',textAlign:'center',fontSize:11,padding:0,position:'sticky',top:topPx,zIndex:5,background:short?'#FDE9D6':(slot?'#FFFDFA':'#EEF1F5'),color:'#C2410C',fontWeight:700,cursor:short?'pointer':'default'}}>
-                                {short&&<span>⚠</span>}{outMark&&<span style={{fontSize:9,fontWeight:900,color:hasOutpatientClosureForSlot(outpatientClosures,dk,slot)?'#B45309':'#166534',whiteSpace:'nowrap'}}>{outMark}</span>}{surgMark&&<span style={staffSurgeryMarkStyle(surgMark)}>{surgMark}</span>}
+                                {short&&<span>⚠</span>}{outMark&&<span style={{fontSize:9,fontWeight:900,color:hasOutpatientClosureForSlot(outpatientClosures,dk,slot,closed)?'#B45309':'#166534',whiteSpace:'nowrap'}}>{outMark}</span>}{surgMark&&<span style={staffSurgeryMarkStyle(surgMark)}>{surgMark}</span>}
                               </td>
                             );
                           })}
@@ -5770,7 +5775,7 @@ ${bodyHtml}
                 <div>
                   <div style={{fontWeight:500,fontSize:14,marginBottom:4}}>🚪 外来休診設定（診察室ごと）</div>
                   <div style={{fontSize:12,color:K.textS,lineHeight:1.6}}>
-                    医師の休診などで、外来の1診・2診を閉じる設定です。同じクリニック内のドクター・ナース・クラークで共有されます。表示は「午前外来①○②ー」のようになります。
+                    医師の休診などで、外来の1診・2診を閉じる設定です。同じクリニック内のドクター・ナース・クラークで共有されます。表示は「午前外来　１診：○　２診：ー」のようになります。休診日全体が閉まっている日は、最初から全診察室を「ー」として扱います。
                   </div>
                 </div>
                 <button onClick={()=>setShowOutpatientClosurePanel(false)} style={{border:'none',background:'none',cursor:'pointer',fontSize:18,color:K.textS,lineHeight:1,padding:0,marginLeft:10}}>×</button>
@@ -5798,21 +5803,21 @@ ${bodyHtml}
                       return outSlots.map(slot=>{
                         const req=getReq(dk,slot.id);
                         const n=outpatientRoomCount(req);
-                        const mark=outpatientMarkForSlot(outpatientClosures,dk,slot,req);
                         const closed=!!isClosedDay(dk);
+                        const mark=outpatientMarkForSlot(outpatientClosures,dk,slot,req,closed);
                         return (
                           <tr key={dk+'_'+slot.id} style={{background:closed?'#FEF2F2':K.bg}}>
                             <td style={{padding:'7px 8px',borderBottom:K.bd,whiteSpace:'nowrap',color:closed?'#991B1B':K.text}}>{d.getMonth()+1}/{d.getDate()}（{DAY_JP[dow]}）{closed?' 休診日':''}</td>
                             <td style={{padding:'7px 8px',borderBottom:K.bd,whiteSpace:'nowrap',fontWeight:600}}>{slot.label}</td>
-                            <td style={{padding:'7px 8px',borderBottom:K.bd,whiteSpace:'nowrap',color:hasOutpatientClosureForSlot(outpatientClosures,dk,slot)?'#B45309':'#166534',fontWeight:700}}>{slot.label}{mark}</td>
+                            <td style={{padding:'7px 8px',borderBottom:K.bd,whiteSpace:'nowrap',color:hasOutpatientClosureForSlot(outpatientClosures,dk,slot,closed)?'#B45309':'#166534',fontWeight:700}}>{slot.label}　{mark}</td>
                             <td style={{padding:'7px 8px',borderBottom:K.bd}}>
                               <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
                                 {Array.from({length:n},(_,i)=>i+1).map(idx=>{
-                                  const isClosed=!!(outpatientClosures?.[dk]?.[slot.id]?.[String(idx)]);
-                                  return <button key={idx} type="button" onClick={()=>setOutpatientRoomState(dk,slot.id,idx,!isClosed)}
-                                    title={isClosed?'クリックして診察ありに戻す':'クリックして休診にする'}
-                                    style={{padding:'4px 8px',borderRadius:K.rmd,border:'1px solid '+(isClosed?'#FDBA74':'#86EFAC'),background:isClosed?'#FFF7ED':'#F0FDF4',color:isClosed?'#9A3412':'#166534',cursor:'pointer',fontSize:12,fontWeight:700,whiteSpace:'nowrap'}}>
-                                    {CLINIC_ROOM_NUMS[idx]}{isClosed?'ー 休':'○ 診'}
+                                  const roomClosed=outpatientRoomClosed(outpatientClosures,dk,slot.id,idx,closed);
+                                  return <button key={idx} type="button" disabled={closed} onClick={()=>{if(!closed)setOutpatientRoomState(dk,slot.id,idx,!roomClosed);}}
+                                    title={closed?'この日は休診日です。開院に変更すると診察室ごとに設定できます。':roomClosed?'クリックして診察ありに戻す':'クリックして休診にする'}
+                                    style={{padding:'4px 8px',borderRadius:K.rmd,border:'1px solid '+(roomClosed?'#FDBA74':'#86EFAC'),background:roomClosed?'#FFF7ED':'#F0FDF4',color:roomClosed?'#9A3412':'#166534',cursor:closed?'not-allowed':'pointer',fontSize:12,fontWeight:700,whiteSpace:'nowrap',opacity:closed?0.72:1}}>
+                                    {CLINIC_ROOM_LABELS[idx]}：{roomClosed?'ー':'○'}
                                   </button>;
                                 })}
                               </div>
