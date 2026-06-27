@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v149</title>
+<title>シフト管理 v150</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v149';
+const APP_VERSION = 'v150';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -5662,6 +5662,14 @@ ${bodyHtml}
     const d=new Date(y,m-2,1);
     return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
   }
+  function setRequestView(f){
+    setRequestFilter(f);
+    if(f==='active'||f==='month')setRequestExportYm(currentYm());
+    else if(f==='prev')setRequestExportYm(prevYm());
+  }
+  function requestPdfTarget(){
+    return requestFilter==='all'?'__ALL__':selectedExportYm();
+  }
   function requestFilterLabel(){
     return requestFilter==='active'?'未処理＋当月':requestFilter==='month'?'当月':requestFilter==='prev'?'前月':'すべて';
   }
@@ -5687,8 +5695,11 @@ ${bodyHtml}
   }
   function collectRequestRows(ym){
     const rows=[];
+    const mark={};
+    const targetOk=dk=>!ym||ymOfDk(dk)===ym;
+    const push=row=>{ rows.push(row); if(row.staffId!=null)mark[String(row.dk)+'|'+String(row.staffId)]=1; };
     Object.entries(requests||{}).forEach(([dk,dayMap])=>{
-      if(ym&&ymOfDk(dk)!==ym)return;
+      if(!targetOk(dk))return;
       Object.entries(dayMap||{}).forEach(([key,r])=>{
         if(!r)return;
         let type='',status='',detail='',name='';
@@ -5711,13 +5722,58 @@ ${bodyHtml}
           detail=r.text||'';
           name=staffFullNameForExport(st,r.staffName||key);
         }else return;
-        rows.push({dk,name,type,status,detail,at:r.appliedAt||r.createdAt||r.decidedAt||''});
+        push({dk,staffId:isNaN(sid)?null:sid,name,type,status,detail,at:r.appliedAt||r.createdAt||r.decidedAt||''});
       });
     });
+
+    // 旧データ・管理者直接反映データの補完: requests 側に残っていない有給履歴もPDFに出す
+    (staff||[]).forEach(s=>{
+      const pl=paidLeave?.[s.id]||{history:[]};
+      (pl.history||[]).forEach(r=>{
+        const dk=r.dk||r.date||'';
+        if(!targetOk(dk))return;
+        const k=String(dk)+'|'+String(s.id);
+        if(mark[k])return;
+        const unit=r.unit==='full'?'全日':r.unit==='am'?'午前半日':r.unit==='pm'?'午後半日':(r.unit||'有給');
+        push({
+          dk,
+          staffId:s.id,
+          name:staffFullNameForExport(s,s.name),
+          type:'有給履歴',
+          status:'反映済み',
+          detail:unit+'（反映済みデータから表示）',
+          at:r.appliedAt||''
+        });
+      });
+    });
+
+    // tmps 側に残っている休み・有給も補完する
+    Object.entries(tmps||{}).forEach(([dk,dayMap])=>{
+      if(!targetOk(dk))return;
+      Object.entries(dayMap||{}).forEach(([sidStr,cond])=>{
+        if(!cond||!['paid','paid_am','paid_pm','off'].includes(cond.type))return;
+        const sid=parseInt(sidStr);
+        const k=String(dk)+'|'+String(sid);
+        if(mark[k])return;
+        const s=staff.find(x=>String(x.id)===String(sidStr));
+        const label=cond.type==='off'?'希望休':cond.type==='paid'?'有給（全日）':cond.type==='paid_am'?'有給（午前半日）':'有給（午後半日）';
+        push({
+          dk,
+          staffId:isNaN(sid)?null:sid,
+          name:staffFullNameForExport(s,sidStr),
+          type:cond.type==='off'?'休み履歴':'有給履歴',
+          status:'反映済み',
+          detail:label+'（シフト反映済みデータから表示）',
+          at:cond.appliedAt||''
+        });
+      });
+    });
+
     (corrections||[]).forEach(c=>{
       if(ym&&ymOfDk(c.date)!==ym)return;
       rows.push({
         dk:c.date||'',
+        staffId:null,
         name:staffFullNameForExport(staffByCorrection(c),c.staffName||c.code||''),
         type:'打刻修正申請',
         status:correctionStatusLabel(c),
@@ -5725,12 +5781,13 @@ ${bodyHtml}
         at:c.appliedAt||c.decidedAt||''
       });
     });
-    rows.sort((a,b)=>String(a.dk).localeCompare(String(b.dk))||String(a.type).localeCompare(String(b.type)));
+    rows.sort((a,b)=>String(a.dk).localeCompare(String(b.dk))||String(a.type).localeCompare(String(b.type))||String(a.name).localeCompare(String(b.name)));
     return rows;
   }
   function printRequestHistoryPdf(ym){
-    const targetYm=ym||selectedExportYm()||currentYm();
-    const rows=collectRequestRows(targetYm);
+    const allMode=ym==='__ALL__';
+    const targetYm=allMode?'全期間':(ym||selectedExportYm()||currentYm());
+    const rows=allMode?collectRequestRows(''):collectRequestRows(targetYm);
     const allRows=collectRequestRows('');
     const w=window.open('','_blank','width=920,height=1000');
     if(!w){alert('印刷用画面を開けませんでした。ポップアップブロックを解除してください。');return;}
@@ -5741,7 +5798,7 @@ ${bodyHtml}
     h+='<h1>申請履歴 '+esc(targetYm)+'</h1>';
     h+='<div class="sub">福耳会 シフト管理　'+esc(CLINIC_LABEL||'')+(APP_UNIT_LABEL?' / '+esc(APP_UNIT_LABEL):'')+'　作成: '+esc(fmtStamp(new Date().toISOString()))+'　対象月件数: '+rows.length+'件</div>';
     if(rows.length===0){
-      h+='<div class="empty">この月の申請履歴はありません。<br><span style="font-size:11px;color:#777">全期間の申請履歴: '+allRows.length+'件。月を変更して再出力してください。</span></div>';
+      h+='<div class="empty">この対象期間の申請履歴はありません。<br><span style="font-size:11px;color:#777">全期間の申請履歴: '+allRows.length+'件。月を変更して再出力してください。</span></div>';
     }else{
       h+='<table><thead><tr><th style="width:90px">申請対象日</th><th style="width:115px">申請日</th><th style="width:130px">スタッフ</th><th style="width:120px">種別</th><th style="width:90px">状態</th><th>内容</th></tr></thead><tbody>';
       rows.forEach(r=>{
@@ -6929,7 +6986,7 @@ ${bodyHtml}
           <div id="request-display-panel" style={{background:'#fff',border:'1px solid #CBD5E1',borderRadius:14,padding:14,marginBottom:16,display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',scrollMarginTop:60}}>
             <div style={{fontWeight:800,fontSize:15,color:'#1E293B'}}>申請表示</div>
             {['active','month','prev','all'].map(f=>(
-              <button key={f} onClick={()=>setRequestFilter(f)}
+              <button key={f} onClick={()=>setRequestView(f)}
                 style={{padding:'5px 11px',border:'1px solid '+(requestFilter===f?'#185FA5':'#CBD5E1'),borderRadius:8,background:requestFilter===f?'#EBF4FF':'#fff',color:requestFilter===f?'#185FA5':'#334155',fontWeight:requestFilter===f?800:600,cursor:'pointer',fontSize:12}}>
                 {f==='active'?'未処理＋当月':f==='month'?'当月':f==='prev'?'前月':'すべて'}
               </button>
@@ -6937,7 +6994,7 @@ ${bodyHtml}
             <span style={{fontSize:12,color:'#64748B'}}>未処理は月をまたいでも表示します。処理済みは通常、当月分だけ表示します。</span>
             <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
               <input type="month" value={requestExportYm} onChange={e=>setRequestExportYm(e.target.value)} style={{padding:'5px 8px',border:'1px solid #CBD5E1',borderRadius:8,fontSize:12}}/>
-              <button onClick={()=>printRequestHistoryPdf(selectedExportYm())} style={{padding:'6px 12px',border:'none',borderRadius:8,background:'#185FA5',color:'#fff',fontWeight:800,cursor:'pointer',fontSize:12}}>🖨 月次申請履歴PDF</button>
+              <button onClick={()=>printRequestHistoryPdf(requestPdfTarget())} style={{padding:'6px 12px',border:'none',borderRadius:8,background:'#185FA5',color:'#fff',fontWeight:800,cursor:'pointer',fontSize:12}}>🖨 月次申請履歴PDF</button>
             </div>
           </div>
       {showTimecardCorrectionPanel&&(
@@ -8652,6 +8709,16 @@ CHANGELOG v149
 - 古い「使い方ガイド」も現在の運用と合わないため削除。
 - 申請画面下部には、月次申請履歴PDFで保管用記録を出力する案内だけを表示。
 - アプリ表示バージョンを v148 から v149 に更新。
+-->
+<!--
+CHANGELOG v150
+- 申請表示の「当月」「前月」ボタンとPDF出力対象月が連動していなかった問題を修正。
+- 当月・未処理＋当月を押すとPDF対象月も現在表示中のシフト月へ更新。
+- 前月を押すとPDF対象月も前月へ更新。
+- すべてを選んだ場合は、PDF出力も全期間を対象にできるようにした。
+- 月次申請履歴PDFの収集ロジックを補強し、requestsだけでなく paidLeave.history と tmps に残る反映済みの有給・休みデータも拾うようにした。
+- 旧データや管理者直接反映データもPDFに出やすくした。
+- アプリ表示バージョンを v149 から v150 に更新。
 -->
 </body>
 </html>
