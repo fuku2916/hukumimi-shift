@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v148</title>
+<title>シフト管理 v149</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v148';
+const APP_VERSION = 'v149';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -7186,175 +7186,8 @@ ${bodyHtml}
           })()}
           </div>
 
-          {/* ── デバッグ: tmps内容確認 ── */}
-          {(()=>{
-            const paidEntries=[];
-            Object.entries(tmps).forEach(([dk,dayMap])=>{
-              Object.entries(dayMap).forEach(([sidStr,cond])=>{
-                if(['paid','paid_am','paid_pm','off'].includes(cond?.type)){
-                  const s=staff.find(x=>String(x.id)===String(sidStr));
-                  paidEntries.push({dk,sidStr,staffName:s?.name||'ID:'+sidStr,type:cond.type});
-                }
-              });
-            });
-            if(paidEntries.length===0)return<div style={{background:'#FEF2F2',border:'1px solid #FCA5A5',borderRadius:K.rlg,padding:12,marginBottom:16,fontSize:12,color:K.textD}}>⚠ tmpsに有給・希望休データがありません。「反映する」を押しましたか？</div>;
-            return(
-              <div style={{background:K.bgG,border:K.bdG,borderRadius:K.rlg,padding:12,marginBottom:16,fontSize:12,color:K.textG}}>
-                <div style={{fontWeight:600,marginBottom:6}}>✓ tmpsに反映済みのデータ（{paidEntries.length}件）</div>
-                {paidEntries.map((e,i)=>(
-                  <div key={i}>{e.dk} {e.staffName} → {e.type}</div>
-                ))}
-              </div>
-            );
-          })()}
-          {/* ── 申請履歴一覧 ── */}
-          <div style={{background:K.bg,border:K.bd,borderRadius:K.rlg,padding:16}}>
-            <div style={{fontWeight:500,fontSize:14,marginBottom:12,paddingBottom:8,borderBottom:K.bd,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-              <span>申請履歴</span>
-              <span style={{fontSize:11,color:K.textS}}>シフト表画面から申請・取消ができます</span>
-            </div>
-            {(()=>{
-              // 全スタッフの履歴をまとめてフラットに
-              const allHistory=[];
-              staff.forEach(s=>{
-                const pl=paidLeave[s.id]||{granted:0,history:[]};
-                (pl.history||[]).forEach(r=>{
-                  allHistory.push({...r,staffId:s.id,staffName:s.name,staffColor:s.color});
-                });
-              });
-              allHistory.sort((a,b)=>a.dk>b.dk?1:a.dk<b.dk?-1:0);
-              const visibleHistory=allHistory.filter(r=>requestVisible(r.dk,false));
-              if(visibleHistory.length===0) return(
-                <div style={{textAlign:'center',padding:'24px 0',color:K.textS,fontSize:13}}>
-                  表示対象の申請履歴はありません。<br/>
-                  <span style={{fontSize:12}}>シフト表で日付をクリック →「臨時条件」タブから申請できます。</span>
-                </div>
-              );
-              return(
-                <div style={{overflowX:'auto'}}>
-                  <table style={{borderCollapse:'collapse',width:'100%',minWidth:400}}>
-                    <thead>
-                      <tr style={{background:K.bgS}}>
-                        <th style={{padding:'6px 10px',border:K.bd,textAlign:'left',fontSize:12,fontWeight:500}}>日付</th>
-                        <th style={{padding:'6px 10px',border:K.bd,textAlign:'left',fontSize:12,fontWeight:500}}>スタッフ</th>
-                        <th style={{padding:'6px 10px',border:K.bd,textAlign:'center',fontSize:12,fontWeight:500}}>種別</th>
-                        <th style={{padding:'6px 10px',border:K.bd,textAlign:'center',fontSize:12,fontWeight:500}}>消化</th>
-                        <th style={{padding:'6px 10px',border:K.bd,textAlign:'center',fontSize:12,fontWeight:500}}>操作</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visibleHistory.map((r,i)=>{
-                        const d=new Date(r.dk);
-                        const pc=PAID_COLORS[r.unit]||PAID_COLORS.full;
-                        const unitLabel=r.unit==='full'?'全日':r.unit==='am'?'午前半日':'午後半日';
-                        const days=r.unit==='full'?1:0.5;
-                        return(
-                          <tr key={i} style={{background:i%2===0?K.bg:K.bgS}}>
-                            <td style={{padding:'6px 10px',border:K.bd,fontSize:13}}>
-                              <button onClick={()=>{setTab('shift');setSelDk(r.dk);setDtab('temp');}} style={{background:'none',border:'none',cursor:'pointer',fontSize:13,color:K.textI,textDecoration:'underline',textDecorationStyle:'dotted',padding:0}}>
-                                {d.getFullYear()}/{String(d.getMonth()+1).padStart(2,'0')}/{String(d.getDate()).padStart(2,'0')}({DAY_JP[d.getDay()]})
-                              </button>
-                            </td>
-                            <td style={{padding:'6px 10px',border:K.bd}}>
-                              <div style={{display:'flex',alignItems:'center',gap:5}}>
-                                <span style={{width:7,height:7,borderRadius:'50%',background:r.staffColor,flexShrink:0}}/>
-                                <span style={{fontSize:13}}>{r.staffName}</span>
-                              </div>
-                            </td>
-                            <td style={{padding:'6px 10px',border:K.bd,textAlign:'center'}}>
-                              <span style={{fontSize:11,fontWeight:600,padding:'2px 8px',borderRadius:10,background:pc.bg,color:pc.text,border:'1px solid '+pc.border}}>{unitLabel}</span>
-                            </td>
-                            <td style={{padding:'6px 10px',border:K.bd,textAlign:'center',fontSize:13,fontWeight:500,color:'#86198F'}}>{days}日</td>
-                            <td style={{padding:'6px 10px',border:K.bd,textAlign:'center'}}>
-                              <button onClick={()=>{if(window.confirm(r.staffName+'の'+d.getMonth()+1+'/'+d.getDate()+' ('+unitLabel+') の有給を取消しますか?')){cancelPaidLeave(r.dk,r.staffId);}}} style={{padding:'2px 8px',fontSize:11,border:K.bdD,borderRadius:4,background:K.bg,color:K.textD,cursor:'pointer'}}>取消</button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              );
-            })()}
-          </div>
-
-          <div style={{fontWeight:500,fontSize:16,marginBottom:4}}>有給休暇管理（参照用）</div>
-          <p style={{fontSize:12,color:K.textS,marginBottom:16,lineHeight:1.6}}>
-            スタッフごとの有給付与日数を設定し、申請履歴を確認できます。
-            有給の申請はシフト表画面で日付を選択→「臨時条件」タブから行えます。
-          </p>
-
-          {/* ── 付与日数設定 ＆ 残日数サマリー ── */}
-          <div style={{background:K.bg,border:K.bd,borderRadius:K.rlg,padding:16,marginBottom:20}}>
-            <div style={{fontWeight:500,fontSize:14,marginBottom:12,paddingBottom:8,borderBottom:K.bd}}>付与日数・残日数</div>
-            <div style={{overflowX:'auto'}}>
-              <table style={{borderCollapse:'collapse',width:'100%',minWidth:500}}>
-                <thead>
-                  <tr style={{background:K.bgS}}>
-                    <th style={{padding:'7px 10px',border:K.bd,textAlign:'left',fontSize:12,fontWeight:500}}>スタッフ</th>
-                    <th style={{padding:'7px 10px',border:K.bd,textAlign:'center',fontSize:12,fontWeight:500}}>付与日数</th>
-                    <th style={{padding:'7px 10px',border:K.bd,textAlign:'center',fontSize:12,fontWeight:500}}>消化日数</th>
-                    <th style={{padding:'7px 10px',border:K.bd,textAlign:'center',fontSize:12,fontWeight:500}}>残日数</th>
-                    <th style={{padding:'7px 10px',border:K.bd,textAlign:'center',fontSize:12,fontWeight:500}}>申請件数</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {staff.map(s=>{
-                    const pl=paidLeave[s.id]||{granted:0,history:[]};
-                    const used=calcUsedDays(pl.history);
-                    const rem=calcRemaining(pl.granted,pl.history);
-                    const cnt=(pl.history||[]).length;
-                    return(
-                      <tr key={s.id}>
-                        <td style={{padding:'6px 10px',border:K.bd}}>
-                          <div style={{display:'flex',alignItems:'center',gap:6}}>
-                            <span style={{width:8,height:8,borderRadius:'50%',background:s.color,flexShrink:0}}/>
-                            <span style={{fontWeight:500,fontSize:13}}>{s.name}</span>
-                          </div>
-                        </td>
-                        <td style={{padding:'6px 10px',border:K.bd,textAlign:'center'}}>
-                          <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:4}}>
-                            <button onClick={()=>setPaidGranted(s.id,(pl.granted||0)-1)} style={{...cntBtn}}>-</button>
-                            <span style={{fontSize:14,fontWeight:500,minWidth:30,textAlign:'center'}}>{pl.granted||0}</span>
-                            <button onClick={()=>setPaidGranted(s.id,(pl.granted||0)+1)} style={{...cntBtn}}>+</button>
-                            <span style={{fontSize:11,color:K.textS}}>日</span>
-                          </div>
-                        </td>
-                        <td style={{padding:'6px 10px',border:K.bd,textAlign:'center',fontSize:13}}>{used}</td>
-                        <td style={{padding:'6px 10px',border:K.bd,textAlign:'center'}}>
-                          <span style={{fontSize:14,fontWeight:600,color:rem<=0?'#D85A30':rem<=3?'#D97706':'#1D9E75'}}>{rem}</span>
-                          <span style={{fontSize:11,color:K.textS,marginLeft:2}}>日</span>
-                          {rem<=0&&used>0&&<span style={{display:'block',fontSize:10,color:'#D85A30'}}>残日数なし</span>}
-                        </td>
-                        <td style={{padding:'6px 10px',border:K.bd,textAlign:'center',fontSize:13,color:K.textS}}>{cnt}件</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* ── 使い方ガイド ── */}
-          <div style={{marginTop:16,display:'flex',gap:12,flexWrap:'wrap'}}>
-            <div style={{flex:'1 1 280px',background:'#FDF2F8',border:'1px solid #F9A8D4',borderRadius:K.rlg,padding:14}}>
-              <div style={{fontWeight:500,fontSize:13,marginBottom:8,color:'#86198F'}}>📋 管理者が直接入力する場合</div>
-              <div style={{fontSize:12,color:'#581C87',lineHeight:2}}>
-                <div>① シフト表タブで日付をクリック</div>
-                <div>② 詳細パネルの「臨時条件」タブを選択</div>
-                <div>③ 対象スタッフの行で有給・希望休を選択</div>
-                <div>④ 残日数が自動で減算されシフトに反映</div>
-              </div>
-            </div>
-            <div style={{flex:'1 1 280px',background:'#FAF5FF',border:'1px solid #A855F7',borderRadius:K.rlg,padding:14}}>
-              <div style={{fontWeight:500,fontSize:13,marginBottom:8,color:'#7E22CE'}}>👥 スタッフポータルを使う場合</div>
-              <div style={{fontSize:12,color:'#4C1D95',lineHeight:2}}>
-                <div>① 上の「👥 スタッフ用出力」で今月データを保存</div>
-                <div>② スタッフがポータルアプリで申請・保存</div>
-                <div>③ 受け取った申請ファイルを「📥 申請取込」で読み込む</div>
-                <div>④ 自動でシフトと有給残日数に反映されます</div>
-              </div>
-            </div>
+          <div style={{background:'#F8FAFC',border:'1px solid #E2E8F0',borderRadius:K.rlg,padding:12,marginTop:4,fontSize:12,color:'#64748B',lineHeight:1.7}}>
+            申請の確認・処理は上の各申請欄で行います。月次の保管用記録は、上部の「申請表示」から対象月を選んで「月次申請履歴PDF」を出力してください。
           </div>
         </div>
       )}
@@ -8809,6 +8642,16 @@ CHANGELOG v148
 - 打刻修正申請セクションを独立表示から申請画面内のセクション表示へ移動し、id="paidsec-timecard" を付与。
 - 上部バッジ・申請メニュー・スマホメニューの打刻修正申請動線を openRequestSection('timecard') に統一。
 - アプリ表示バージョンを v147 から v148 に更新。
+-->
+<!--
+CHANGELOG v149
+- 申請画面下部の旧表示を整理。
+- 「✓ tmpsに反映済みのデータ」は開発確認用のデバッグ表示だったため非表示化。
+- 「申請履歴」は月次申請履歴PDFへ役割を集約したため、申請画面下部の常時表示から削除。
+- 「有給休暇管理（参照用）」および付与日数・残日数サマリーは、スタッフ管理側で管理する方針に合わせて申請画面から削除。
+- 古い「使い方ガイド」も現在の運用と合わないため削除。
+- 申請画面下部には、月次申請履歴PDFで保管用記録を出力する案内だけを表示。
+- アプリ表示バージョンを v148 から v149 に更新。
 -->
 </body>
 </html>
