@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v152</title>
+<title>シフト管理 v153</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v152';
+const APP_VERSION = 'v153';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -6990,19 +6990,21 @@ ${bodyHtml}
       {/* ================================================================ */}
       {tab==='paid'&&(
         <div style={{padding:16}}>
-          <div id="request-display-panel" style={{background:'#fff',border:'1px solid #CBD5E1',borderRadius:14,padding:14,marginBottom:16,display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',scrollMarginTop:60}}>
-            <div style={{fontWeight:800,fontSize:15,color:'#1E293B'}}>📋 申請表示</div>
-            {['active','month','prev','all'].map(f=>(
-              <button key={f} onClick={()=>setRequestView(f)}
-                style={{padding:'5px 11px',border:'1px solid '+(requestFilter===f?'#185FA5':'#CBD5E1'),borderRadius:8,background:requestFilter===f?'#EBF4FF':'#fff',color:requestFilter===f?'#185FA5':'#334155',fontWeight:requestFilter===f?800:600,cursor:'pointer',fontSize:12}}>
-                {f==='active'?'未処理＋当月':f==='month'?'当月':f==='prev'?'前月':'すべて'}
-              </button>
-            ))}
-            <span style={{fontSize:12,color:'#64748B'}}>未処理は月をまたいでも表示します。右の年月を選ぶと、その月の申請を下に表示します。</span>
-            <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
-              {requestFilter==='custom'&&<span style={{fontSize:11,color:'#185FA5',fontWeight:800,background:'#EBF4FF',border:'1px solid #93C5FD',borderRadius:999,padding:'3px 8px'}}>選択月表示中</span>}
-              <input type="month" value={requestExportYm} onChange={e=>setRequestMonthFromPicker(e.target.value)} title="表示したい申請対象月を選択" style={{padding:'5px 8px',border:'1px solid #CBD5E1',borderRadius:8,fontSize:12}}/>
-              <button onClick={()=>printRequestHistoryPdf(requestPdfTarget())} style={{padding:'6px 12px',border:'none',borderRadius:8,background:'#185FA5',color:'#fff',fontWeight:800,cursor:'pointer',fontSize:12}}>🖨 月次申請履歴PDF</button>
+          <div id="request-display-panel" style={{background:'#fff',border:'1px solid #CBD5E1',borderRadius:14,padding:16,marginBottom:16,scrollMarginTop:60}}>
+            <div style={{fontWeight:800,fontSize:18,color:'#1E293B',marginBottom:12}}>📋 申請表示</div>
+            <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+              {['active','month','prev','all'].map(f=>(
+                <button key={f} onClick={()=>setRequestView(f)}
+                  style={{padding:'5px 11px',border:'1px solid '+(requestFilter===f?'#185FA5':'#CBD5E1'),borderRadius:8,background:requestFilter===f?'#EBF4FF':'#fff',color:requestFilter===f?'#185FA5':'#334155',fontWeight:requestFilter===f?800:600,cursor:'pointer',fontSize:12}}>
+                  {f==='active'?'未処理＋当月':f==='month'?'当月':f==='prev'?'前月':'すべて'}
+                </button>
+              ))}
+              <span style={{fontSize:12,color:'#64748B'}}>未処理は月をまたいでも表示します。右の年月を選ぶと、その月の申請を下に表示します。</span>
+              <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                {requestFilter==='custom'&&<span style={{fontSize:11,color:'#185FA5',fontWeight:800,background:'#EBF4FF',border:'1px solid #93C5FD',borderRadius:999,padding:'3px 8px'}}>選択月表示中</span>}
+                <input type="month" value={requestExportYm} onChange={e=>setRequestMonthFromPicker(e.target.value)} title="表示したい申請対象月を選択" style={{padding:'5px 8px',border:'1px solid #CBD5E1',borderRadius:8,fontSize:12}}/>
+                <button onClick={()=>printRequestHistoryPdf(requestPdfTarget())} style={{padding:'6px 12px',border:'none',borderRadius:8,background:'#185FA5',color:'#fff',fontWeight:800,cursor:'pointer',fontSize:12}}>🖨 月次申請履歴PDF</button>
+              </div>
             </div>
           </div>
       {showTimecardCorrectionPanel&&(
@@ -7069,7 +7071,7 @@ ${bodyHtml}
               <div style={{background:K.bg,border:'1px solid #F9A8D4',borderRadius:K.rlg,padding:16,marginBottom:16}}>
                 <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:visible.length?12:0,paddingBottom:visible.length?8:0,borderBottom:visible.length?K.bd:'none'}}>
                   <div>
-                    <div style={{fontWeight:600,fontSize:14,color:'#86198F'}}>🌸 休み・有給の申請</div>
+                    <div style={{fontWeight:800,fontSize:18,color:'#86198F'}}>🌸 休み・有給の申請</div>
                     <div style={{fontSize:11,color:K.textS,marginTop:2}}>{visible.length===0?'表示対象の申請はありません。':(unreflected.length>0?unreflected.length+'件の未反映申請があります':'表示対象はすべて反映済みです')}</div>
                   </div>
                   {unreflected.length>0&&(
@@ -7157,7 +7159,7 @@ ${bodyHtml}
             return(
               <div style={{background:K.bg,border:'1px solid #6EE7B7',borderRadius:K.rlg,padding:16,marginBottom:16}}>
                 <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:visible.length?12:0,paddingBottom:visible.length?8:0,borderBottom:visible.length?K.bd:'none'}}>
-                  <div style={{fontWeight:600,fontSize:14,color:'#065F46'}}>🙋 挙手（出勤希望）</div>
+                  <div style={{fontWeight:800,fontSize:18,color:'#065F46'}}>🙋 挙手（出勤希望）</div>
                   {unreflected.length>0&&<span style={{fontSize:11,background:'#D1FAE5',color:'#065F46',borderRadius:10,padding:'1px 8px',fontWeight:600}}>未対応 {unreflected.length}件</span>}
                 </div>
                 {visible.length===0
@@ -7218,7 +7220,7 @@ ${bodyHtml}
             return(
               <div style={{background:K.bg,border:'1px solid #FDBA74',borderRadius:K.rlg,padding:16,marginBottom:16}}>
                 <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:visible.length?12:0,paddingBottom:visible.length?8:0,borderBottom:visible.length?K.bd:'none'}}>
-                  <div style={{fontWeight:600,fontSize:14,color:'#9A3412'}}>🚩 スタッフからのメッセージ</div>
+                  <div style={{fontWeight:800,fontSize:18,color:'#9A3412'}}>🚩 スタッフからのメッセージ</div>
                   {unresolved.length>0&&<span style={{fontSize:11,background:'#FFEDD5',color:'#9A3412',borderRadius:10,padding:'1px 8px',fontWeight:600}}>未対応 {unresolved.length}件</span>}
                 </div>
                 {visible.length===0
@@ -8743,6 +8745,13 @@ CHANGELOG v152
 - custom 表示時のラベルを「選択月 YYYY-MM」と表示。
 - 申請表示ウインドウ内に「選択月表示中」チップを追加。
 - アプリ表示バージョンを v151 から v152 に更新。
+-->
+<!--
+CHANGELOG v153
+- 申請画面内の各ウインドウ見出しフォントサイズを統一。
+- 「申請表示」「休み・有給の申請」「挙手（出勤希望）」「スタッフからのメッセージ」の見出しを、打刻修正申請と同じ fontSize:18 / fontWeight:800 に変更。
+- 申請表示ウインドウのレイアウトを修正し、1行目はタイトルのみ、操作ボタン・年月選択・PDF出力は2行目以降に配置。
+- アプリ表示バージョンを v152 から v153 に更新。
 -->
 </body>
 </html>
