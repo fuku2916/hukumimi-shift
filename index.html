@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v138</title>
+<title>シフト管理 v139</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v138';
+const APP_VERSION = 'v139';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2032,7 +2032,7 @@ function App(){
   const [helpTarget,setHelpTarget]=useState(null); // ⚠不足コマからの「挙手」対象 {dk,slotId,slotLabel,mo,day,dow}
   const [staffTab,setStaffTab]=useState(()=>{const r=loadResume();return (r&&r.staffTab)?r.staffTab:'shift';});
   const [avDraft,setAvDraft]=useState(null);   // アイコン設定の下書き {color,icon}
-  const [corrDraft,setCorrDraft]=useState({date:'',newIn:'',newOut:'',reason:''}); // 打刻修正の下書き
+  const [corrDraft,setCorrDraft]=useState({date:'',newIn:'',newOut:'',reasonType:'打刻忘れ',note:''}); // 打刻修正の下書き
   const [staffReqDk,setStaffReqDk]=useState(null);
   const [pinTarget,setPinTarget]=useState(null); // {mode:'login'|'request'|'cancel', dk?, type?}
   const [staffY,setStaffY]=useState(()=>{const r=loadResume();return (r&&r.staffY)?r.staffY:new Date().getFullYear();});
@@ -4668,7 +4668,7 @@ ${bodyHtml}
   }
   async function submitCorrection(c){
     const code=staffMe?.code||''; if(!code){alert('給与スタッフコードが未設定です。管理者に登録をご依頼ください。');return false;}
-    const rec={code,date:c.date,newIn:c.newIn||'',newOut:c.newOut||'',reason:c.reason||'',note:'',status:'pending',appliedAt:new Date().toISOString(),staffName:staffMe?.name||''};
+    const rec={code,date:c.date,newIn:c.newIn||'',newOut:c.newOut||'',reason:c.reasonType||c.reason||'打刻忘れ',note:c.note||'',status:'pending',appliedAt:new Date().toISOString(),staffName:staffMe?.name||''};
     setCorrections(prev=>[rec,...prev]);
     if(SB_ENABLED){
       const raw=await SB.get('requests_data'); const u=unwrapReq(raw);
@@ -5067,7 +5067,7 @@ ${bodyHtml}
           <span style={{width:9,height:9,borderRadius:'50%',background:staffMe?.color||'#7C3AED',flexShrink:0,marginRight:6}}/>
           <span style={{fontWeight:700,fontSize:14,marginRight:16,whiteSpace:'nowrap'}}>{staffMe?.name}</span>
           {/* タブ */}
-          {[{id:'shift',label:'📅 シフト表'},{id:'requests',label:'📋 申請一覧'+(staffReqCount>0?' ('+staffReqCount+')':''),unread:staffUnread.count},{id:'timecard',label:'⏱ 勤務状況'},{id:'settings',label:'⚙ 設定'}].map(t=>(
+          {[{id:'shift',label:'📅 シフト表'},{id:'requests',label:'📋 申請一覧'+(staffReqCount>0?' ('+staffReqCount+')':''),unread:staffUnread.count},{id:'timecard',label:'⏱ 勤務状況'},{id:'settings',label:'🛠 打刻修正・設定'}].map(t=>(
             <button key={t.id} onClick={()=>setStaffTab(t.id)}
               style={{position:'relative',padding:'12px 14px',border:'none',background:'none',cursor:'pointer',fontSize:13,flexShrink:0,
                 fontWeight:staffTab===t.id?600:400,color:staffTab===t.id?'#185FA5':'#64748B',
@@ -5512,14 +5512,24 @@ ${bodyHtml}
                     </label>
                   </div>
                   <label style={{fontSize:12,color:'#64748B'}}>理由
-                    <input type="text" value={corrDraft.reason} onChange={e=>setCorrDraft({...corrDraft,reason:e.target.value})} placeholder="例: 退勤の打刻を忘れました" style={{display:'block',marginTop:3,padding:'7px 10px',border:'1px solid #CBD5E1',borderRadius:8,fontSize:14,width:'100%',boxSizing:'border-box'}}/>
+                    <select value={corrDraft.reasonType} onChange={e=>setCorrDraft({...corrDraft,reasonType:e.target.value})} style={{display:'block',marginTop:3,padding:'7px 10px',border:'1px solid #CBD5E1',borderRadius:8,fontSize:14,width:'100%',boxSizing:'border-box',background:'#fff'}}>
+                      <option value="打刻忘れ">打刻忘れ</option>
+                      <option value="iPad不具合">iPad不具合</option>
+                      <option value="出勤時に混雑して打刻できなかった">出勤時に混雑して打刻できなかった</option>
+                      <option value="退勤時に対応中で打刻できなかった">退勤時に対応中で打刻できなかった</option>
+                      <option value="押し間違い">押し間違い</option>
+                      <option value="その他">その他</option>
+                    </select>
+                  </label>
+                  <label style={{fontSize:12,color:'#64748B'}}>補足
+                    <textarea value={corrDraft.note} onChange={e=>setCorrDraft({...corrDraft,note:e.target.value})} rows={3} placeholder="例: 退勤時に押し忘れました。19:35に退勤しました。" style={{display:'block',marginTop:3,padding:'7px 10px',border:'1px solid #CBD5E1',borderRadius:8,fontSize:14,width:'100%',boxSizing:'border-box',fontFamily:'inherit',resize:'vertical'}}/>
                   </label>
                   <div>
                     <button onClick={async()=>{
                       if(!corrDraft.date){alert('日付を選んでください。');return;}
                       if(!corrDraft.newIn&&!corrDraft.newOut){alert('正しい出勤または退勤の時刻を入力してください。');return;}
                       const ok=await submitCorrection(corrDraft);
-                      if(ok){setCorrDraft({date:'',newIn:'',newOut:'',reason:''});alert('打刻修正を申告しました。管理者の確認をお待ちください。');}
+                      if(ok){setCorrDraft({date:'',newIn:'',newOut:'',reasonType:'打刻忘れ',note:''});alert('打刻修正を申告しました。管理者の確認をお待ちください。');}
                     }} style={{padding:'9px 18px',border:'none',borderRadius:8,background:'#185FA5',color:'#fff',fontSize:14,fontWeight:700,cursor:'pointer'}}>申告する</button>
                   </div>
                 </div>
@@ -5531,7 +5541,7 @@ ${bodyHtml}
                       {myCorr.map((c,i)=>(
                         <div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',background:'#F8FAFC',border:'1px solid #E2E8F0',borderRadius:8,fontSize:12}}>
                           <span style={{fontWeight:700,color:'#185FA5'}}>{c.date}</span>
-                          <span style={{color:'#475569'}}>出 {c.newIn||'—'} / 退 {c.newOut||'—'}</span>
+                          <span style={{color:'#475569'}}>出 {c.newIn||'—'} / 退 {c.newOut||'—'}</span><span style={{color:'#64748B'}}>理由: {c.reason||'—'}</span>
                           <span style={{marginLeft:'auto',fontWeight:700,color:stColor[c.status]||'#64748B'}}>{stLabel[c.status]||c.status}</span>
                         </div>
                       ))}
@@ -8431,6 +8441,14 @@ CHANGELOG v138
 - 各スタッフに payrollClinic（給与上の所属クリニック）と workClinics（勤務可能クリニック）を保存できる仕様も維持。
 - シフト保存payloadに clinicId / clinicLabel を含める仕様も維持。
 - アプリ表示バージョンを v137 から v138 に更新。
+-->
+<!--
+CHANGELOG v139
+- スタッフスマホ画面の「設定」を「打刻修正・設定」に変更し、打刻修正申請の入口を明確化。
+- 打刻修正申請の理由を選択式＋補足自由記述に変更。
+- 申請データは requests_data の timecardCorrections に保存し、タイムカードアプリ側で承認・却下できる仕様を維持。
+- 申告一覧に理由を表示。
+- アプリ表示バージョンを v138 から v139 に更新。
 -->
 </body>
 </html>
