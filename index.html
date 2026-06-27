@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v127</title>
+<title>シフト管理 v129</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v127';
+const APP_VERSION = 'v129';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -970,7 +970,7 @@ const APP_CLINIC=(()=>{
 const CLINIC_LABEL=CLINIC_LABELS[APP_CLINIC]||'';
 const CLINIC_MODE=!!APP_CLINIC; // true＝クリニック行モード（shift_dataをid=<clinic>で扱う）
 // data.shared に置く共通キー（クリニック内の全職種で共有）
-const SHARED_KEYS=['clinicName','slots','newSlotCounter','manualClosedDays','surgeryCalUrl','surgeryCalUrlUpdatedAt'];
+const SHARED_KEYS=['clinicName','slots','newSlotCounter','manualClosedDays','surgeryCalUrl','surgeryCalUrlUpdatedAt','outpatientClosures','outpatientClosuresUpdatedAt'];
 try{ document.title='シフト管理'+(APP_UNIT_LABEL?'（'+APP_UNIT_LABEL+'）':'')+' '+APP_VERSION; }catch(e){}
 // ================================================================
 
@@ -1211,7 +1211,7 @@ const SB={
           const cur=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
           if(cur.ok){const j=await cur.json();const ex=j[0]?.data;if(ex&&typeof ex==='object'){
             if(clinic){ all={...ex}; }
-            else { ['clerk','nurse','doctor'].forEach(k=>{if(ex[k]!==undefined)all[k]=ex[k];}); if(ex._drafts!==undefined)all._drafts=ex._drafts; if(ex.drafts!==undefined)all.drafts=ex.drafts; if(ex._adminPin!==undefined)all._adminPin=ex._adminPin; if(ex.adminPin!==undefined)all.adminPin=ex.adminPin; if(ex.surgeryCalUrl!==undefined)all.surgeryCalUrl=ex.surgeryCalUrl; if(ex.surgeryCalUrlUpdatedAt!==undefined)all.surgeryCalUrlUpdatedAt=ex.surgeryCalUrlUpdatedAt; }
+            else { ['clerk','nurse','doctor'].forEach(k=>{if(ex[k]!==undefined)all[k]=ex[k];}); if(ex._drafts!==undefined)all._drafts=ex._drafts; if(ex.drafts!==undefined)all.drafts=ex.drafts; if(ex._adminPin!==undefined)all._adminPin=ex._adminPin; if(ex.adminPin!==undefined)all.adminPin=ex.adminPin; if(ex.surgeryCalUrl!==undefined)all.surgeryCalUrl=ex.surgeryCalUrl; if(ex.surgeryCalUrlUpdatedAt!==undefined)all.surgeryCalUrlUpdatedAt=ex.surgeryCalUrlUpdatedAt; if(ex.outpatientClosures!==undefined)all.outpatientClosures=ex.outpatientClosures; if(ex.outpatientClosuresUpdatedAt!==undefined)all.outpatientClosuresUpdatedAt=ex.outpatientClosuresUpdatedAt; }
           }}
         }catch(_){}
         if(clinic){
@@ -1284,6 +1284,32 @@ function surgeryMarkForSlot(flags,dk,slot){
   const p=surgeryPeriodForSlot(slot); if(!p)return '';
   const v=flags&&flags[dk]; if(!v)return 'ー';
   return v[p]?'○':'ー';
+}
+
+// ── 外来休診（診察室ごとの開閉）──
+// 医師画面で登録し、同一クリニック内のドクター/ナース/クラークで共有する。
+// 形: { "YYYY-MM-DD": { "am_out": { "1": false, "2": true } } }
+// true=休診(ー), false/未設定=診察(○)
+const CLINIC_ROOM_NUMS=['','①','②','③','④','⑤','⑥'];
+function isOutpatientSlot(slot){
+  const label=(slot&&slot.label||'').toString();
+  return !!slot && slot.type==='out' && label.indexOf('外来')>=0;
+}
+function outpatientRoomCount(req){
+  const n=parseInt(req,10);
+  return Math.max(1,Math.min(6,isNaN(n)?1:n));
+}
+function outpatientMarkForSlot(closures,dk,slot,req){
+  if(!isOutpatientSlot(slot))return '';
+  const n=outpatientRoomCount(req);
+  const c=(closures&&closures[dk]&&closures[dk][slot.id])||{};
+  let out='';
+  for(let i=1;i<=n;i++)out+=CLINIC_ROOM_NUMS[i]+(c[String(i)]?'ー':'○');
+  return out;
+}
+function hasOutpatientClosureForSlot(closures,dk,slot){
+  const c=(closures&&closures[dk]&&closures[dk][slot.id])||{};
+  return Object.values(c).some(Boolean);
 }
 function appendParam(url,k,v){
   const sep=url.indexOf('?')>=0?'&':'?';
@@ -1801,6 +1827,8 @@ function App(){
           if(sd.slots)setSlots(sd.slots);
           if(sd.manualClosedDays)setManualClosedDays(sd.manualClosedDays);
           if(sd.newSlotCounter)setNewSlotCounter(sd.newSlotCounter);
+          if(sd.outpatientClosures&&typeof sd.outpatientClosures==='object')setOutpatientClosures(sd.outpatientClosures);
+          if(sd.outpatientClosuresUpdatedAt!==undefined)setOutpatientClosuresUpdatedAt(sd.outpatientClosuresUpdatedAt||'');
         }
         if(sd&&Object.keys(sd).length>0 && cloudWins){
           if(sd.staff)setStaff(sd.staff);
@@ -1811,6 +1839,8 @@ function App(){
           if(sd.monthlyReq)setMonthlyReq(sd.monthlyReq);
           if(sd.manualExclusions)setManualExclusions(sd.manualExclusions);
           if(sd.manualClosedDays)setManualClosedDays(sd.manualClosedDays);
+          if(sd.outpatientClosures&&typeof sd.outpatientClosures==='object')setOutpatientClosures(sd.outpatientClosures);
+          if(sd.outpatientClosuresUpdatedAt!==undefined)setOutpatientClosuresUpdatedAt(sd.outpatientClosuresUpdatedAt||'');
           if(sd.baseShift)setBaseShift(sd.baseShift);
           if(sd.paidLeave)setPaidLeave(sd.paidLeave);
           if(sd.newSlotCounter)setNewSlotCounter(sd.newSlotCounter);
@@ -1855,6 +1885,8 @@ function App(){
           if(sd.asgn)setAsgn(sd.asgn);
           if(sd.tmps)setTmps(sd.tmps);
           if(sd.manualClosedDays)setManualClosedDays(sd.manualClosedDays);
+          if(sd.outpatientClosures&&typeof sd.outpatientClosures==='object')setOutpatientClosures(sd.outpatientClosures);
+          if(sd.outpatientClosuresUpdatedAt!==undefined)setOutpatientClosuresUpdatedAt(sd.outpatientClosuresUpdatedAt||'');
           if(sd.paidLeave)setPaidLeave(sd.paidLeave);
           // 人員不足の表示に必要（必要人数・除外）
           if(sd.weeklyReq)setWeeklyReq(sd.weeklyReq);
@@ -1885,6 +1917,8 @@ function App(){
         setAsgn(sd.asgn);
         setTmps(sd.tmps||{});
         setPaidLeave(sd.paidLeave||{});
+        if(sd.outpatientClosures&&typeof sd.outpatientClosures==='object')setOutpatientClosures(sd.outpatientClosures);
+        if(sd.outpatientClosuresUpdatedAt!==undefined)setOutpatientClosuresUpdatedAt(sd.outpatientClosuresUpdatedAt||'');
         if(Object.prototype.hasOwnProperty.call(sd,'surgeryCalUrl')){
           const cu=(sd.surgeryCalUrl||'').toString();
           setSurgeryCalUrl(cu);saveSurgeryCalUrl(cu);
@@ -1956,6 +1990,11 @@ function App(){
   const [surgeryFlags,setSurgeryFlags]=useState({});
   const [surgeryCalStatus,setSurgeryCalStatus]=useState('idle'); // idle|loading|ok|error|empty
   const [surgeryCalUpdatedAt,setSurgeryCalUpdatedAt]=useState('');
+  // ── 外来休診（診察室ごとの開閉）── v129
+  const [outpatientClosures,setOutpatientClosures]=useState(()=>saved?.outpatientClosures||{});
+  const [outpatientClosuresUpdatedAt,setOutpatientClosuresUpdatedAt]=useState(()=>saved?.outpatientClosuresUpdatedAt||'');
+  const [showOutpatientClosurePanel,setShowOutpatientClosurePanel]=useState(false);
+  const [savingOutpatientClosures,setSavingOutpatientClosures]=useState(false);
   // ── スタッフモード用 state ──（更新リロード後は直前のセッションを復元）
   const [staffMyId,setStaffMyId]=useState(()=>{const r=loadResume();return (r&&r.appMode==='staff')?r.staffMyId:null;});
   const [helpTarget,setHelpTarget]=useState(null); // ⚠不足コマからの「挙手」対象 {dk,slotId,slotLabel,mo,day,dow}
@@ -2204,7 +2243,7 @@ function App(){
     if(appMode!=='admin')return; // 編集できるのは管理者のみ
     setShiftUpdatedAt(new Date().toISOString());
   // eslint-disable-next-line
-  },[asgn,tmps,manualExclusions,slots,weeklyReq,monthlyReq,baseShift,manualClosedDays,paidLeave,staff,newSlotCounter]);
+  },[asgn,tmps,manualExclusions,slots,weeklyReq,monthlyReq,baseShift,manualClosedDays,paidLeave,staff,newSlotCounter,outpatientClosures]);
 
   // shiftUpdatedAt が変わるたび ref を更新（クラウド競合判定が常に最新の手元日時を見るように）
   useEffect(()=>{shiftTsRef.current=shiftUpdatedAt;},[shiftUpdatedAt]);
@@ -2212,8 +2251,8 @@ function App(){
   // ── 自動保存 ──
   // ローカル自動保存
   useEffect(()=>{
-    saveLS({y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths});
-  },[y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths]);
+    saveLS({y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,outpatientClosures,outpatientClosuresUpdatedAt});
+  },[y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,outpatientClosures,outpatientClosuresUpdatedAt]);
 
   // ★ v108: シフト本体は「下書き保存」と「公開」を分離する。
   // 　下書き保存＝管理者用の控え（スタッフには見えない）。公開＝スタッフ画面へ反映。
@@ -2227,8 +2266,36 @@ function App(){
   const [shiftHistory,setShiftHistory]=useState([]); // [{at,made,data}]（クラウドから取得）
   const [showHistory,setShowHistory]=useState(false);
   function currentShiftPayload(extra){
-    return {y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,surgeryFlags,surgeryCalSnapshotAt:surgeryCalUpdatedAt,...(extra||{})};
+    return {y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,surgeryFlags,surgeryCalSnapshotAt:surgeryCalUpdatedAt,outpatientClosures,outpatientClosuresUpdatedAt,...(extra||{})};
   }
+  function setOutpatientRoomState(dk,slotId,roomIdx,closed){
+    setOutpatientClosures(prev=>{
+      const n={...(prev||{})};
+      const day={...(n[dk]||{})};
+      const sl={...(day[slotId]||{})};
+      if(closed)sl[String(roomIdx)]=true; else delete sl[String(roomIdx)];
+      if(Object.keys(sl).length)day[slotId]=sl; else delete day[slotId];
+      if(Object.keys(day).length)n[dk]=day; else delete n[dk];
+      return n;
+    });
+    setOutpatientClosuresUpdatedAt(new Date().toISOString());
+  }
+  async function saveOutpatientClosuresToCloud(){
+    if(!SB_ENABLED){alert('クラウドが設定されていません。');return;}
+    setSavingOutpatientClosures(true);
+    try{
+      const at=new Date().toISOString();
+      const cloud=await SB.getSafe('shift_data');
+      if(!cloud.ok){alert('クラウドに接続できませんでした。');setSavingOutpatientClosures(false);return;}
+      const base=(cloud.data&&typeof cloud.data==='object')?cloud.data:{};
+      const data={...base,outpatientClosures,outpatientClosuresUpdatedAt:at};
+      const ok=await SB.set('shift_data',data);
+      if(ok){setOutpatientClosuresUpdatedAt(at);alert('外来休診設定をクラウド保存しました。ナース・クラーク画面にも同じ設定が反映されます。');}
+      else alert('外来休診設定のクラウド保存に失敗しました。');
+    }catch(e){alert('外来休診設定の保存に失敗しました：'+(e&&e.message||e));}
+    setSavingOutpatientClosures(false);
+  }
+
   function publishArchiveName(at){
     const d=at?new Date(at):new Date();
     const pad=n=>String(n).padStart(2,'0');
@@ -2289,6 +2356,8 @@ function App(){
     if(d.monthlyReq)setMonthlyReq(d.monthlyReq);
     if(d.manualExclusions)setManualExclusions(d.manualExclusions);
     if(d.manualClosedDays)setManualClosedDays(d.manualClosedDays);
+    if(d.outpatientClosures&&typeof d.outpatientClosures==='object')setOutpatientClosures(d.outpatientClosures);
+    if(d.outpatientClosuresUpdatedAt!==undefined)setOutpatientClosuresUpdatedAt(d.outpatientClosuresUpdatedAt||'');
     if(d.baseShift)setBaseShift(d.baseShift);
     if(d.paidLeave)setPaidLeave(d.paidLeave);
     if(d.newSlotCounter)setNewSlotCounter(d.newSlotCounter);
@@ -2368,6 +2437,8 @@ function App(){
     if(d.monthlyReq)setMonthlyReq(d.monthlyReq);
     if(d.manualExclusions)setManualExclusions(d.manualExclusions);
     if(d.manualClosedDays)setManualClosedDays(d.manualClosedDays);
+    if(d.outpatientClosures&&typeof d.outpatientClosures==='object')setOutpatientClosures(d.outpatientClosures);
+    if(d.outpatientClosuresUpdatedAt!==undefined)setOutpatientClosuresUpdatedAt(d.outpatientClosuresUpdatedAt||'');
     if(d.baseShift)setBaseShift(d.baseShift);
     if(d.paidLeave)setPaidLeave(d.paidLeave);
     if(d.newSlotCounter)setNewSlotCounter(d.newSlotCounter);
@@ -2560,6 +2631,8 @@ function App(){
         if(d.tmps)setTmps(d.tmps);
         if(d.manualExclusions)setManualExclusions(d.manualExclusions);
         if(d.manualClosedDays)setManualClosedDays(d.manualClosedDays);
+        if(d.outpatientClosures&&typeof d.outpatientClosures==='object')setOutpatientClosures(d.outpatientClosures);
+        if(d.outpatientClosuresUpdatedAt!==undefined)setOutpatientClosuresUpdatedAt(d.outpatientClosuresUpdatedAt||'');
         if(d.baseShift)setBaseShift(d.baseShift);
         // ── CL-2形式ベースシフトJSON（名前・ラベルベース）の変換取込 ──
         if(d.patterns&&!d.baseShift){
@@ -2644,6 +2717,7 @@ function App(){
     const slotsPDF=isSnapshot?(src.slots||{}):slots;
     const holidaysPDF=isSnapshot?(getJapaneseHolidays(py)||{}):holidays;
     const surgeryFlagsPDF=isSnapshot?(src.surgeryFlags||{}):surgeryFlags;
+    const outpatientClosuresPDF=isSnapshot?(src.outpatientClosures||{}):outpatientClosures;
     const hasSurgerySnapshot=isSnapshot?!!src.surgeryFlags:!!surgeryCalUrl;
     const shiftMade=src.shiftUpdatedAt||shiftUpdatedAt||'';
     const snap=s=>s||{};
@@ -2679,26 +2753,33 @@ function App(){
         if(!isClosed2){
           sls.forEach(slot=>{
             const allIds=da[slot.id]||[];
-            const exclIds=dExcl[slot.id]||[];
-            const slotOffIds=Object.entries(dt).filter(([,v])=>['off','paid'].includes(v.type)).map(([sid])=>parseInt(sid));
-            const activeIds=allIds.filter(sid=>!exclIds.includes(sid)&&!slotOffIds.includes(sid));
+            const exclIds=(dExcl[slot.id]||[]).map(String);
+            const staffExistsPDF=sid=>staffPDF.some(st=>String(st.id)===String(sid));
+            const isSlotOffPDF=sid=>{
+              const tmp=dt[String(sid)]||dt[sid];
+              if(!tmp)return false;
+              if(['off','paid'].includes(tmp.type))return true;
+              const id=slot.id||'', label=slot.label||'';
+              if(tmp.type==='paid_am')return ['am_out','am_surg','surg'].includes(id)||label.includes('午前');
+              if(tmp.type==='paid_pm')return ['pm_surg','pm_out','pm1','pm2'].includes(id)||label.includes('午後')||label.includes('昼')||label.includes('夜');
+              return false;
+            };
+            const activeIds=allIds.filter(sid=>staffExistsPDF(sid)&&!exclIds.includes(String(sid))&&!isSlotOffPDF(sid));
             const req=getReqPDF(dk,slot.id),met=activeIds.length>=req;
             const lbl2=slot.label||'';
             const slotBg=lbl2.includes('夜')?'#F3F0FF':lbl2.includes('昼')||lbl2.includes('午後')?'#FFF7ED':'#EFF6FF';
             const slotBd=lbl2.includes('夜')?'#7C3AED':lbl2.includes('昼')||lbl2.includes('午後')?'#C05C00':'#1D6FCC';
             const surgMark=(slot.type==='surg'&&hasSurgerySnapshot)?surgeryMarkForSlot(surgeryFlagsPDF,dk,slot):'';
-            const markHtml=surgMark?`<span class="surg-mark ${surgMark==='○'?'on':'off'}">${surgMark}</span>`:'';
-            const names=allIds.map(sid=>{
-              const st=staffPDF.find(x=>x.id===sid);if(!st)return '';
-              const isExcl=exclIds.includes(sid);
-              const isOff=slotOffIds.includes(sid);
-              const tmp=tmpsPDF[dk]?.[String(sid)]||tmpsPDF[dk]?.[sid];
-              const isOffTmp=['off','paid','paid_am','paid_pm'].includes(tmp?.type);
-              const leaveNote=(!isOffTmp&&!isExcl)?leaveNoteForSlot(st,slot,dow,da,dExcl):'';
-              const muted=isExcl||isOffTmp||isOff;
-              const bg=muted?'#94A3B8':st.color;
-              const txt=st.name+(isOffTmp?'(休)':(leaveNote?leaveNote:''));
-              return `<span class="sname ${muted?'muted':''}" style="background:${bg};color:#fff">${txt}</span>`;
+            const outMark=isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosuresPDF,dk,slot,req):'';
+            const markHtml=(outMark?`<span class="out-mark ${hasOutpatientClosureForSlot(outpatientClosuresPDF,dk,slot)?'warn':'ok'}">${outMark}</span>`:'')+(surgMark?`<span class="surg-mark ${surgMark==='○'?'on':'off'}">${surgMark}</span>`:'');
+            // v128: 印刷用カレンダーでは「実際に出勤する人」だけを表示する。
+            // 管理画面上では除外・休みを薄く表示して経緯を確認できるが、印刷物にまで
+            // 薄い過去スタッフ名が出ると下書きや旧版が混ざって見えるため、activeIds に限定する。
+            const names=activeIds.map(sid=>{
+              const st=staffPDF.find(x=>String(x.id)===String(sid));if(!st)return '';
+              const leaveNote=leaveNoteForSlot(st,slot,dow,da,dExcl);
+              const txt=st.name+(leaveNote?leaveNote:'');
+              return `<span class="sname" style="background:${st.color};color:#fff">${txt}</span>`;
             }).join('');
             sh+=`<div class="slot" style="background:${slotBg};border-left:3px solid ${slotBd}"><div class="sl-hd"><span class="sl-lbl" style="color:${slotBd}">${slot.label}${markHtml}</span><span class="sl-cnt ${met?'':'unmet'}">${activeIds.length}/${req}</span></div><div class="sl-names">${names||'<span class="no-staff">--</span>'}</div></div>`;
           });
@@ -2721,7 +2802,7 @@ function App(){
 html,body{width:210mm;background:#fff;color:#000}
 body{font-family:"Helvetica Neue",-apple-system,"Hiragino Sans",sans-serif;padding:6mm;transform-origin:top left;transform:scale(${scale});width:calc(210mm / ${scale});-webkit-print-color-adjust:exact;print-color-adjust:exact}
 h1{font-size:13pt;font-weight:700;margin-bottom:1.5mm}.sub{font-size:8pt;color:#333;margin-bottom:1mm}.snap{font-size:8pt;color:#166534;font-weight:700;margin-bottom:1mm}.warn{font-size:7pt;color:#666;margin-bottom:1.5mm}
-table{border-collapse:collapse;width:100%;table-layout:fixed}th{background:#fff;color:#000;font-size:10pt;font-weight:700;padding:2px;border:2px solid #000;text-align:center}td{border:1.5px solid #000;padding:2px;vertical-align:top;background:#fff}td.empty{background:#fff}td.sat{background:#FFFBEB}.dn{font-size:11pt;font-weight:700;margin-bottom:1mm;padding-bottom:0.5mm;border-bottom:1px solid #555}.closed{font-size:8pt;color:#991B1B;text-align:center;font-weight:700}.slot{border-radius:2px;padding:1px 2px;margin-bottom:2px}.sl-hd{display:flex;justify-content:space-between;align-items:center}.sl-lbl{font-size:8pt;font-weight:700}.sl-cnt{font-size:7.5pt;font-weight:700;color:#166534;padding:0 1px}.unmet{color:#DC2626!important;font-weight:700}.sl-names{display:flex;flex-wrap:wrap;gap:2px;margin-top:0.5px}.sname{font-size:9pt;font-weight:700;padding:0 2px;border-radius:3px;line-height:1.25}.sname.muted{opacity:.45;text-decoration:line-through}.no-staff{font-size:7pt;color:#999;font-weight:400}.off-list{font-size:7.5pt;color:#BE185D;margin-top:1mm}.surg-mark{font-size:9pt;font-weight:900;margin-left:2px}.surg-mark.on{color:#DC2626}.surg-mark.off{color:#64748B}
+table{border-collapse:collapse;width:100%;table-layout:fixed}th{background:#fff;color:#000;font-size:10pt;font-weight:700;padding:2px;border:2px solid #000;text-align:center}td{border:1.5px solid #000;padding:2px;vertical-align:top;background:#fff}td.empty{background:#fff}td.sat{background:#FFFBEB}.dn{font-size:11pt;font-weight:700;margin-bottom:1mm;padding-bottom:0.5mm;border-bottom:1px solid #555}.closed{font-size:8pt;color:#991B1B;text-align:center;font-weight:700}.slot{border-radius:2px;padding:1px 2px;margin-bottom:2px}.sl-hd{display:flex;justify-content:space-between;align-items:center}.sl-lbl{font-size:8pt;font-weight:700}.sl-cnt{font-size:7.5pt;font-weight:700;color:#166534;padding:0 1px}.unmet{color:#DC2626!important;font-weight:700}.sl-names{display:flex;flex-wrap:wrap;gap:2px;margin-top:0.5px}.sname{font-size:9pt;font-weight:700;padding:0 2px;border-radius:3px;line-height:1.25}.sname.muted{opacity:.45;text-decoration:line-through}.no-staff{font-size:7pt;color:#999;font-weight:400}.off-list{font-size:7.5pt;color:#BE185D;margin-top:1mm}.out-mark{font-size:7.5pt;font-weight:900;margin-left:2px}.out-mark.ok{color:#166534}.out-mark.warn{color:#B45309}.surg-mark{font-size:9pt;font-weight:900;margin-left:2px}.surg-mark.on{color:#DC2626}.surg-mark.off{color:#64748B}
 @page{size:A4 portrait;margin:8mm}@media print{body{transform:scale(${scale});transform-origin:top left;width:calc(210mm / ${scale});padding:0}}
 </style></head><body>
 <h1>${printTitle}　${py}年 ${pm}月</h1>
@@ -4998,13 +5079,15 @@ ${bodyHtml}
                                 if(active<req)short=true;
                               }
                             }
+                            const reqForMark=slot?getReq(dk,slot.id):0;
                             const surgMark=(slot&&slot.type==='surg')?surgeryMarkForSlot(surgeryFlags,dk,slot):'';
+                            const outMark=(slot&&isOutpatientSlot(slot))?outpatientMarkForSlot(outpatientClosures,dk,slot,reqForMark):'';
                             return(
                               <td key={dk}
                                 onClick={short?()=>setHelpTarget({dk,slotId:slot.id,slotLabel:label,mo:d.getMonth()+1,day:d.getDate(),dow}):undefined}
                                 title={short?'タップして「勤務できます」と挙手':''}
                                 style={{height:22,boxSizing:'border-box',borderRight:'1px solid #E2E8F0',borderBottom:'1px solid #E2E8F0',textAlign:'center',fontSize:11,padding:0,position:'sticky',top:topPx,zIndex:5,background:short?'#FDE9D6':(slot?'#FFFDFA':'#EEF1F5'),color:'#C2410C',fontWeight:700,cursor:short?'pointer':'default'}}>
-                                {short&&<span>⚠</span>}{surgMark&&<span style={staffSurgeryMarkStyle(surgMark)}>{surgMark}</span>}
+                                {short&&<span>⚠</span>}{outMark&&<span style={{fontSize:9,fontWeight:900,color:hasOutpatientClosureForSlot(outpatientClosures,dk,slot)?'#B45309':'#166534',whiteSpace:'nowrap'}}>{outMark}</span>}{surgMark&&<span style={staffSurgeryMarkStyle(surgMark)}>{surgMark}</span>}
                               </td>
                             );
                           })}
@@ -5055,9 +5138,11 @@ ${bodyHtml}
                                   {(()=>{const t=getStaffTimeStr(sSlots,s.notes);return t.startStr?<div style={{fontSize:10,color:'#1D6FCC',fontWeight:700,textAlign:'right',width:'100%',paddingRight:2}}>{t.startStr}</div>:null;})()}
                                   {sSlots.map(slot=>{
                                     const sc=getTimeColor(slot);
+                                    const reqMark=getReq(dk,slot.id);
                                     const surgMark=slot.type==='surg'?surgeryMarkForSlot(surgeryFlags,dk,slot):'';
-                                    return<div key={slot.id} title={slot.label+(surgMark?' '+surgMark:'')} style={{fontSize:10,padding:'2px 4px',borderRadius:3,background:sc.bg,color:sc.text,fontWeight:700,lineHeight:1.25,whiteSpace:'nowrap',maxWidth:68,overflow:'visible',textOverflow:'clip',borderLeft:'3px solid '+sc.border}}>
-                                      {staffCompactSlotLabel(slot)}{surgMark&&<span style={staffSurgeryMarkStyle(surgMark)}>{surgMark}</span>}
+                                    const outMark=isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosures,dk,slot,reqMark):'';
+                                    return<div key={slot.id} title={slot.label+(outMark?' '+outMark:'')+(surgMark?' '+surgMark:'')} style={{fontSize:10,padding:'2px 4px',borderRadius:3,background:sc.bg,color:sc.text,fontWeight:700,lineHeight:1.25,whiteSpace:'nowrap',maxWidth:68,overflow:'visible',textOverflow:'clip',borderLeft:'3px solid '+sc.border}}>
+                                      {staffCompactSlotLabel(slot)}{outMark&&<span style={{marginLeft:2,fontSize:8,fontWeight:900,color:hasOutpatientClosureForSlot(outpatientClosures,dk,slot)?'#B45309':'#166534'}}>{outMark}</span>}{surgMark&&<span style={staffSurgeryMarkStyle(surgMark)}>{surgMark}</span>}
                                     </div>;
                                   })}
                                   {(()=>{const t=getStaffTimeStr(sSlots,s.notes);return t.endStr?<div style={{fontSize:10,color:'#991B1B',fontWeight:700,textAlign:'right',width:'100%',paddingRight:2}}>{t.endStr}</div>:null;})()}
@@ -5126,7 +5211,7 @@ ${bodyHtml}
                                           <div onClick={short?(e=>{e.stopPropagation();setHelpTarget({dk,slotId:slot.id,slotLabel:slot.label,mo:d.getMonth()+1,day:d.getDate(),dow});}):undefined}
                                             title={short?'タップして「勤務できます」と挙手':''}
                                             style={{display:'flex',justifyContent:'space-between',alignItems:'center',lineHeight:1.3,cursor:short?'pointer':'default'}}>
-                                            {(()=>{const surgMark=slot.type==='surg'?surgeryMarkForSlot(surgeryFlags,dk,slot):'';return <span style={{fontSize:9,color:'#64748B',fontWeight:600,whiteSpace:'nowrap'}}>{staffCompactSlotLabel(slot)}{surgMark&&<span style={staffSurgeryMarkStyle(surgMark)}>{surgMark}</span>}</span>;})()}
+                                            {(()=>{const surgMark=slot.type==='surg'?surgeryMarkForSlot(surgeryFlags,dk,slot):'';const outMark=isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosures,dk,slot,req):'';return <span style={{fontSize:9,color:'#64748B',fontWeight:600,whiteSpace:'nowrap'}}>{staffCompactSlotLabel(slot)}{outMark&&<span style={{marginLeft:2,fontSize:8,fontWeight:900,color:hasOutpatientClosureForSlot(outpatientClosures,dk,slot)?'#B45309':'#166534'}}>{outMark}</span>}{surgMark&&<span style={staffSurgeryMarkStyle(surgMark)}>{surgMark}</span>}</span>;})()}
                                             {short&&<span style={{fontSize:9,fontWeight:700,color:'#C2410C',whiteSpace:'nowrap'}}>⚠{activeIds.length}/{req}</span>}
                                           </div>
                                           <div style={{display:'flex',flexWrap:'wrap',gap:2}}>
@@ -5462,6 +5547,7 @@ ${bodyHtml}
                     <MenuLabel text="スタッフ・診療"/>
                     <MenuItem icon="👤" label="スタッフ" onClick={()=>{setTab('staff');setOpenMenu(null);}}  active={tab==='staff'}/>
                     <MenuItem icon="🏥" label="診療枠" onClick={()=>{setTab('ref');setOpenMenu(null);}}     active={tab==='ref'}/>
+                    <MenuItem icon="🚪" label="外来休診設定" onClick={()=>{setTab('shift');setShowOutpatientClosurePanel(p=>!p);setOpenMenu(null);}} active={showOutpatientClosurePanel}/>
                     <MenuItem icon="📊" label="必要人数" onClick={()=>{setTab('req');setOpenMenu(null);}}   active={tab==='req'}/>
                     <MenuDivider/>
                     <MenuLabel text="シフトパターン"/>
@@ -5678,6 +5764,78 @@ ${bodyHtml}
             </div>
           )}
 
+          {showOutpatientClosurePanel&&(
+            <div style={{background:K.bg,border:K.bd,borderRadius:K.rlg,padding:16,marginBottom:14,borderLeft:'4px solid #0F766E'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:10,gap:10}}>
+                <div>
+                  <div style={{fontWeight:500,fontSize:14,marginBottom:4}}>🚪 外来休診設定（診察室ごと）</div>
+                  <div style={{fontSize:12,color:K.textS,lineHeight:1.6}}>
+                    医師の休診などで、外来の1診・2診を閉じる設定です。同じクリニック内のドクター・ナース・クラークで共有されます。表示は「午前外来①○②ー」のようになります。
+                  </div>
+                </div>
+                <button onClick={()=>setShowOutpatientClosurePanel(false)} style={{border:'none',background:'none',cursor:'pointer',fontSize:18,color:K.textS,lineHeight:1,padding:0,marginLeft:10}}>×</button>
+              </div>
+              {APP_UNIT!=='doctor'&&(
+                <div style={{fontSize:12,color:'#92400E',background:'#FFFBEB',border:'1px solid #FDE68A',borderRadius:K.rmd,padding:'7px 10px',marginBottom:10}}>
+                  通常はドクター管理画面で登録してください。この画面でも現在の共有設定は確認できます。
+                </div>
+              )}
+              <div style={{overflow:'auto',maxHeight:360,border:K.bd,borderRadius:K.rmd,background:K.bgS}}>
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,minWidth:620}}>
+                  <thead>
+                    <tr style={{background:'#F8FAFC'}}>
+                      <th style={{textAlign:'left',padding:'7px 8px',borderBottom:K.bd}}>日付</th>
+                      <th style={{textAlign:'left',padding:'7px 8px',borderBottom:K.bd}}>外来枠</th>
+                      <th style={{textAlign:'left',padding:'7px 8px',borderBottom:K.bd}}>表示</th>
+                      <th style={{textAlign:'left',padding:'7px 8px',borderBottom:K.bd}}>診察室</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dates.flatMap(d=>{
+                      const dk=tdk(d), dow=d.getDay();
+                      const outSlots=(slots[dow]||[]).filter(isOutpatientSlot);
+                      if(outSlots.length===0)return [];
+                      return outSlots.map(slot=>{
+                        const req=getReq(dk,slot.id);
+                        const n=outpatientRoomCount(req);
+                        const mark=outpatientMarkForSlot(outpatientClosures,dk,slot,req);
+                        const closed=!!isClosedDay(dk);
+                        return (
+                          <tr key={dk+'_'+slot.id} style={{background:closed?'#FEF2F2':K.bg}}>
+                            <td style={{padding:'7px 8px',borderBottom:K.bd,whiteSpace:'nowrap',color:closed?'#991B1B':K.text}}>{d.getMonth()+1}/{d.getDate()}（{DAY_JP[dow]}）{closed?' 休診日':''}</td>
+                            <td style={{padding:'7px 8px',borderBottom:K.bd,whiteSpace:'nowrap',fontWeight:600}}>{slot.label}</td>
+                            <td style={{padding:'7px 8px',borderBottom:K.bd,whiteSpace:'nowrap',color:hasOutpatientClosureForSlot(outpatientClosures,dk,slot)?'#B45309':'#166534',fontWeight:700}}>{slot.label}{mark}</td>
+                            <td style={{padding:'7px 8px',borderBottom:K.bd}}>
+                              <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+                                {Array.from({length:n},(_,i)=>i+1).map(idx=>{
+                                  const isClosed=!!(outpatientClosures?.[dk]?.[slot.id]?.[String(idx)]);
+                                  return <button key={idx} type="button" onClick={()=>setOutpatientRoomState(dk,slot.id,idx,!isClosed)}
+                                    title={isClosed?'クリックして診察ありに戻す':'クリックして休診にする'}
+                                    style={{padding:'4px 8px',borderRadius:K.rmd,border:'1px solid '+(isClosed?'#FDBA74':'#86EFAC'),background:isClosed?'#FFF7ED':'#F0FDF4',color:isClosed?'#9A3412':'#166534',cursor:'pointer',fontSize:12,fontWeight:700,whiteSpace:'nowrap'}}>
+                                    {CLINIC_ROOM_NUMS[idx]}{isClosed?'ー 休':'○ 診'}
+                                  </button>;
+                                })}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{display:'flex',alignItems:'center',gap:10,marginTop:10,flexWrap:'wrap'}}>
+                <button onClick={saveOutpatientClosuresToCloud} disabled={savingOutpatientClosures}
+                  style={{padding:'7px 16px',background:'#0F766E',color:'#fff',border:'none',borderRadius:K.rmd,cursor:savingOutpatientClosures?'wait':'pointer',fontSize:13,fontWeight:700}}>
+                  {savingOutpatientClosures?'保存中…':'外来休診設定をクラウド保存'}
+                </button>
+                <button onClick={()=>{if(window.confirm(y+'年'+m+'月の外来休診設定をすべて解除しますか？')){setOutpatientClosures(prev=>{const n={...(prev||{})};dates.forEach(d=>{delete n[tdk(d)];});return n;});setOutpatientClosuresUpdatedAt(new Date().toISOString());}}}
+                  style={{padding:'7px 12px',background:K.bg,color:K.textD,border:K.bdD,borderRadius:K.rmd,cursor:'pointer',fontSize:12,fontWeight:600}}>今月分を解除</button>
+                <span style={{fontSize:11,color:K.textS}}>最終更新: {outpatientClosuresUpdatedAt?fmtStamp(outpatientClosuresUpdatedAt):'未保存'}</span>
+              </div>
+            </div>
+          )}
+
           {/* 管理者PIN変更パネル */}
           {showAdminPinSetting&&(
             <div style={{background:K.bg,border:K.bd,borderRadius:K.rlg,padding:16,marginBottom:14,borderLeft:'4px solid #185FA5'}}>
@@ -5858,7 +6016,7 @@ ${bodyHtml}
                                     return(
                                       <div key={slot.id} style={{marginBottom:2,padding:'1px 3px',borderRadius:3,borderLeft:'2px solid '+sc.border,background:sc.bgLight}}>
                                         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                                          <div style={{fontSize:'var(--fs-slot)',color:K.textS}}>{slot.label}{slot.type==='surg'&&surgeryCalUrl&&<span style={{marginLeft:3,fontWeight:700,color:surgeryMarkForSlot(surgeryFlags,dk,slot)==='○'?'#DC2626':'#94A3B8'}}>{surgeryMarkForSlot(surgeryFlags,dk,slot)}</span>}</div>
+                                          <div style={{fontSize:'var(--fs-slot)',color:K.textS}}>{slot.label}{isOutpatientSlot(slot)&&<span style={{marginLeft:3,fontWeight:700,color:hasOutpatientClosureForSlot(outpatientClosures,dk,slot)?'#B45309':'#166534'}}>{outpatientMarkForSlot(outpatientClosures,dk,slot,req)}</span>}{slot.type==='surg'&&surgeryCalUrl&&<span style={{marginLeft:3,fontWeight:700,color:surgeryMarkForSlot(surgeryFlags,dk,slot)==='○'?'#DC2626':'#94A3B8'}}>{surgeryMarkForSlot(surgeryFlags,dk,slot)}</span>}</div>
                                           <div style={{fontSize:'var(--fs-cell)',fontWeight:600,color:coverColor}}>{activeIds.length}/{req}</div>
                                         </div>
                                         <div style={{display:'flex',flexWrap:'wrap',gap:2}}>
