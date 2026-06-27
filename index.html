@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v150</title>
+<title>シフト管理 v151</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v150';
+const APP_VERSION = 'v151';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -6984,7 +6984,7 @@ ${bodyHtml}
       {tab==='paid'&&(
         <div style={{padding:16}}>
           <div id="request-display-panel" style={{background:'#fff',border:'1px solid #CBD5E1',borderRadius:14,padding:14,marginBottom:16,display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',scrollMarginTop:60}}>
-            <div style={{fontWeight:800,fontSize:15,color:'#1E293B'}}>申請表示</div>
+            <div style={{fontWeight:800,fontSize:15,color:'#1E293B'}}>📋 申請表示</div>
             {['active','month','prev','all'].map(f=>(
               <button key={f} onClick={()=>setRequestView(f)}
                 style={{padding:'5px 11px',border:'1px solid '+(requestFilter===f?'#185FA5':'#CBD5E1'),borderRadius:8,background:requestFilter===f?'#EBF4FF':'#fff',color:requestFilter===f?'#185FA5':'#334155',fontWeight:requestFilter===f?800:600,cursor:'pointer',fontSize:12}}>
@@ -8719,6 +8719,12 @@ CHANGELOG v150
 - 月次申請履歴PDFの収集ロジックを補強し、requestsだけでなく paidLeave.history と tmps に残る反映済みの有給・休みデータも拾うようにした。
 - 旧データや管理者直接反映データもPDFに出やすくした。
 - アプリ表示バージョンを v149 から v150 に更新。
+-->
+<!--
+CHANGELOG v151
+- 申請画面上部の「申請表示」ウインドウ見出しに 📋 アイコンを追加。
+- 他の申請セクション（🌸 休み・有給、🙋 挙手、🚩 メッセージ、🕒 打刻修正）と見た目の統一感を持たせた。
+- アプリ表示バージョンを v150 から v151 に更新。
 -->
 </body>
 </html>
