@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v153</title>
+<title>シフト管理 v154</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v153';
+const APP_VERSION = 'v154';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2111,6 +2111,21 @@ function App(){
     },3000);
     return()=>clearInterval(id);
   },[appMode]);
+
+  // 管理者モード：申請・メッセージの処理結果もSupabaseへ即保存する。
+  // v154: これがないと「対応済み」「削除」が端末内だけに残り、数秒後のクラウド同期で未処理メッセージが復活して、🚩バッジ件数だけ残る。
+  React.useEffect(()=>{
+    if(appMode!=='admin'||!SB_ENABLED||!sbReadyRef.current)return;
+    (async()=>{
+      const cloud=await SB.get('requests_data');
+      const _c=unwrapReq(cloud);
+      await SB.set('requests_data',wrapReq(
+        mergeRequests(requests,_c.requests,reqTomb.current),
+        mergeAvatars(avatarsRef.current,_c.avatars),
+        mergeCorrections(correctionsRef.current,_c.corrections)
+      ));
+    })();
+  },[requests,appMode]);
 
   // requestsが変わったらtmpsに自動反映（管理者モード）
   React.useEffect(()=>{
@@ -5690,6 +5705,26 @@ ${bodyHtml}
     const st=c.status||'pending';
     return requestVisible(c.date,st==='pending');
   }
+  function isReqTombed(dk,key){
+    const exp=reqTomb.current[String(dk)+'|'+String(key)];
+    return !!(exp&&exp>Date.now());
+  }
+  function collectStaffMessageReports(visibleOnly){
+    const reports=[];
+    Object.entries(requests||{}).forEach(([dk,dayMap])=>{
+      Object.entries(dayMap||{}).forEach(([key,r])=>{
+        if(!r||r.type!=='mistake_report')return;
+        if(isReqTombed(dk,key))return;
+        if(visibleOnly&&!requestVisible(dk,!r.resolved))return;
+        reports.push({dk,key,r});
+      });
+    });
+    reports.sort((a,b)=>((a.r.createdAt||'')<(b.r.createdAt||'')?1:-1));
+    return reports;
+  }
+  function pendingStaffMessageCount(){
+    return collectStaffMessageReports(false).filter(x=>!x.r.resolved&&String(x.r.text||'').trim()).length;
+  }
   function staffFullNameForExport(st,fallback){
     if(st){
       const full=String(st.fullName||'').trim();
@@ -5857,7 +5892,7 @@ ${bodyHtml}
           {/* スタッフ申請バッジ */}
           {(()=>{let n=0;const typeToTmp={paid_full:'paid',paid_am:'paid_am',paid_pm:'paid_pm',off:'off'};Object.entries(requests||{}).forEach(([dk,dayMap])=>{Object.entries(dayMap||{}).forEach(([sidStr,r])=>{if(!r||!typeToTmp[r.type])return;const sid=parseInt(sidStr);if(!staff.find(x=>x.id===sid))return;const appliedType=tmps?.[dk]?.[String(sid)]?.type;if(appliedType!==typeToTmp[r.type])n++;});});return n>0?<span onClick={()=>{setTab('paid');setOpenMenu(null);setTimeout(()=>{const el=document.getElementById('paidsec-paid');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},120);}} title="クリックで未反映の休み・有給申請へ" style={{fontSize:13,background:'#FDF2F8',color:'#86198F',border:'1px solid #F9A8D4',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🌸 {n}件</span>:null;})()}
           {(()=>{let nw=0;Object.values(requests).forEach(d=>Object.values(d).forEach(r=>{if(r&&r.type==='work_wish'&&!r.decision)nw++;}));return nw>0?<span onClick={()=>{setTab('paid');setOpenMenu(null);setTimeout(()=>{const el=document.getElementById('paidsec-wish');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},120);}} title="クリックで挙手欄へ" style={{fontSize:13,background:'#ECFDF5',color:'#065F46',border:'1px solid #6EE7B7',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🙋 {nw}件</span>:null;})()}
-          {(()=>{let nr=0;Object.values(requests).forEach(d=>Object.values(d).forEach(r=>{if(r&&r.type==='mistake_report'&&!r.resolved)nr++;}));return nr>0?<span onClick={()=>{setTab('paid');setOpenMenu(null);setTimeout(()=>{const el=document.getElementById('paidsec-msg');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},120);}} title="クリックでメッセージ欄へ" style={{fontSize:13,background:'#FFF7ED',color:'#9A3412',border:'1px solid #FDBA74',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🚩 {nr}件</span>:null;})()}
+          {(()=>{const nr=pendingStaffMessageCount();return nr>0?<span onClick={()=>{setTab('paid');setRequestFilter('active');setOpenMenu(null);setTimeout(()=>{const el=document.getElementById('paidsec-msg');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},120);}} title="クリックで未対応のメッセージ欄へ" style={{fontSize:13,background:'#FFF7ED',color:'#9A3412',border:'1px solid #FDBA74',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🚩 {nr}件</span>:null;})()}
           {(()=>{const nc=pendingTimecardCorrections().length;return nc>0?<span onClick={()=>openTimecardCorrectionPanelFromMenu()} title="クリックで打刻修正申請へ" style={{fontSize:13,background:'#EEF2FF',color:'#3730A3',border:'1px solid #A5B4FC',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🕒 {nc}件</span>:null;})()}
 
           {/* PC：メニュー項目 / スマホ：ハンバーガー */}
@@ -7210,12 +7245,7 @@ ${bodyHtml}
           {/* ── 🚩 メッセージ ── */}
           <div id="paidsec-msg" style={{scrollMarginTop:60}}>
           {(()=>{
-            const reports=[];
-            Object.entries(requests).forEach(([dk,dayMap])=>{
-              Object.entries(dayMap).forEach(([k,r])=>{ if(r&&r.type==='mistake_report')reports.push({dk,key:k,r}); });
-            });
-            reports.sort((a,b)=>((a.r.createdAt||'')<(b.r.createdAt||'')?1:-1));
-            const visible=reports.filter(x=>requestVisible(x.dk,!x.r.resolved));
+            const visible=collectStaffMessageReports(true);
             const unresolved=visible.filter(x=>!x.r.resolved);
             return(
               <div style={{background:K.bg,border:'1px solid #FDBA74',borderRadius:K.rlg,padding:16,marginBottom:16}}>
@@ -8752,6 +8782,15 @@ CHANGELOG v153
 - 「申請表示」「休み・有給の申請」「挙手（出勤希望）」「スタッフからのメッセージ」の見出しを、打刻修正申請と同じ fontSize:18 / fontWeight:800 に変更。
 - 申請表示ウインドウのレイアウトを修正し、1行目はタイトルのみ、操作ボタン・年月選択・PDF出力は2行目以降に配置。
 - アプリ表示バージョンを v152 から v153 に更新。
+-->
+<!--
+CHANGELOG v154
+- 管理画面でスタッフメッセージを「対応済み」または「削除」した結果が、Supabase の requests_data に保存されていなかった問題を修正。
+- 端末内では処理済みになっても、数秒後のクラウド同期で未処理メッセージが復活し、上部の 🚩 バッジ件数だけが残る原因を解消。
+- 管理者モードでも requests の変更をクラウドへ即時マージ保存するように変更。
+- 🚩 バッジ件数の集計を共通関数化し、削除直後の墓標データや空メッセージを件数に含めないよう補強。
+- 🚩 バッジクリック時は「未処理＋当月」表示に戻してからメッセージ欄へ移動するようにした。
+- アプリ表示バージョンを v153 から v154 に更新。
 -->
 </body>
 </html>
