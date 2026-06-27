@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v142</title>
+<title>シフト管理 v143</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v142';
+const APP_VERSION = 'v143';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -5629,6 +5629,17 @@ ${bodyHtml}
       }
     },180);
   }
+  function openRequestSection(sec){
+    setTab('paid');
+    setOpenMenu(null);
+    setShowTimecardCorrectionPanel(false);
+    const id=sec==='paid'?'paidsec-paid':sec==='wish'?'paidsec-wish':'paidsec-msg';
+    setTimeout(()=>{const el=document.getElementById(id);if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},120);
+  }
+  function openTimecardCorrectionPanelFromMenu(){
+    setShowTimecardCorrectionPanel(true);
+    setOpenMenu(null);
+  }
 
   return(
     <div style={{background:K.bgT,minHeight:'100vh',overflowX:'hidden'}}>
@@ -5675,6 +5686,7 @@ ${bodyHtml}
           <div className="pc-menu" style={{display:'flex',alignItems:'center',flex:1}}>
             {[
               {id:'file',    label:'ファイル'},
+              {id:'requests',label:'申請'},
               {id:'settings',label:'設定'},
               {id:'design',  label:'シフト設計'},
               {id:'output',  label:'出力'},
@@ -5713,6 +5725,14 @@ ${bodyHtml}
                     {CLINIC_MODE&&APP_CLINIC==='ekimae'&&<><MenuDivider/><MenuLabel text="クリニック移行"/><MenuItem icon="🔁" label="駅前データを移行(初回のみ)" onClick={()=>{setOpenMenu(null);migrateEkimaeFromMain();}}/></>}
                   </>}
 
+                  {/* 申請メニュー */}
+                  {menu.id==='requests'&&<>
+                    <MenuItem icon="🌸" label="有給の申請" onClick={()=>openRequestSection('paid')} active={tab==='paid'}/>
+                    <MenuItem icon="🙋" label="出勤希望の挙手" onClick={()=>openRequestSection('wish')} active={tab==='paid'}/>
+                    <MenuItem icon="🚩" label="管理者へのメッセージ" onClick={()=>openRequestSection('msg')} active={tab==='paid'}/>
+                    <MenuItem icon="🕒" label={'打刻修正申請'+(pendingTimecardCorrections().length?'（'+pendingTimecardCorrections().length+'件）':'')} onClick={openTimecardCorrectionPanelFromMenu} active={showTimecardCorrectionPanel}/>
+                  </>}
+
                   {/* 設定メニュー */}
                   {menu.id==='settings'&&<>
                     <MenuLabel text="スタッフ・診療"/>
@@ -5723,8 +5743,6 @@ ${bodyHtml}
                     <MenuDivider/>
                     <MenuLabel text="シフトパターン"/>
                     <MenuItem icon="📅" label="ベースシフト" onClick={()=>{setTab('base');setOpenMenu(null);}} active={tab==='base'}/>
-                    <MenuItem icon="🌸" label="申請・メッセージ" onClick={()=>{setTab('paid');setOpenMenu(null);}} active={tab==='paid'}/>
-              <MenuItem icon="🕒" label={'打刻修正申請'+(pendingTimecardCorrections().length?'（'+pendingTimecardCorrections().length+'件）':'')} onClick={()=>{setShowTimecardCorrectionPanel(true);setOpenMenu(null);}}/>
 
                     <MenuDivider/>
                     <MenuLabel text="認証"/>
@@ -5788,6 +5806,12 @@ ${bodyHtml}
               {SB_ENABLED&&<MenuItem icon="🕘" label={'履歴'+(shiftHistory.length>0?'('+shiftHistory.length+')':'')} onClick={()=>{openHistoryPanel();setOpenMenu(null);}}/>}
               <MenuItem icon="⚠️" label="初期化..." danger onClick={()=>{setOpenMenu(null);const choice=window.prompt('1→今月 2→全月 3→完全リセット');if(choice==='1'){if(window.confirm('今月をリセット？')){setAsgn(p=>{const n={...p};dates.forEach(d=>{delete n[tdk(d)];});return n;});setTmps(p=>{const n={...p};dates.forEach(d=>{delete n[tdk(d)];});return n;});}}else if(choice==='2'){if(window.confirm('全月リセット？')){setAsgn({});setTmps({});}}else if(choice==='3'){if(window.confirm('完全リセット？')){localStorage.removeItem(LS_KEY);window.location.reload();}}}}/>
               {CLINIC_MODE&&APP_CLINIC==='ekimae'&&<MenuItem icon="🔁" label="駅前データを移行(初回のみ)" onClick={()=>{setOpenMenu(null);migrateEkimaeFromMain();}}/>}
+              <MenuDivider/>
+              <MenuLabel text="申請"/>
+              <MenuItem icon="🌸" label="有給の申請" onClick={()=>openRequestSection('paid')} active={tab==='paid'}/>
+              <MenuItem icon="🙋" label="出勤希望の挙手" onClick={()=>openRequestSection('wish')} active={tab==='paid'}/>
+              <MenuItem icon="🚩" label="管理者へのメッセージ" onClick={()=>openRequestSection('msg')} active={tab==='paid'}/>
+              <MenuItem icon="🕒" label={'打刻修正申請'+(pendingTimecardCorrections().length?'（'+pendingTimecardCorrections().length+'件）':'')} onClick={openTimecardCorrectionPanelFromMenu} active={showTimecardCorrectionPanel}/>
               <MenuDivider/>
               <MenuLabel text="設定"/>
               <MenuItem icon="👤" label="スタッフ" onClick={()=>{setTab('staff');setOpenMenu(null);}} active={tab==='staff'}/>
@@ -8593,6 +8617,17 @@ CHANGELOG v142
 - 各申請カードに「未処理」「承認済み」「却下済み」の状態バッジを追加。
 - タイムカード側で承認・却下された後も、シフト管理アプリの管理者画面で処理履歴を確認できるようにした。
 - アプリ表示バージョンを v141 から v142 に更新。
+-->
+<!--
+CHANGELOG v143
+- 管理画面上部のPCメニューに「申請」タグを追加。
+- 「申請」は「ファイル」と「設定」の間に配置。
+- 申請メニュー内に、上部バッジの順番どおり「有給の申請」「出勤希望の挙手」「管理者へのメッセージ」「打刻修正申請」を配置。
+- 「有給の申請」「出勤希望の挙手」「管理者へのメッセージ」は、既存の申請・メッセージ画面の該当セクションへスクロールする。
+- 「打刻修正申請」は、既存の打刻修正申請ウインドウを開く。
+- 既存の設定メニューから申請関連項目を外し、スタッフ・診療・認証系に整理。
+- スマホのハンバーガーメニューにも同じ「申請」セクションを追加。
+- アプリ表示バージョンを v142 から v143 に更新。
 -->
 </body>
 </html>
