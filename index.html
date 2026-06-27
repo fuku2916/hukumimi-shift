@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v136';
+const APP_VERSION = 'v137';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -951,8 +951,9 @@ const ROW_ID=APP_UNIT||'main'; // Supabaseの保存行ID（clerk / nurse / docto
 // ── マルチクリニック対応（2026-06-22）──
 // クリニックを指定すると shift_data を行 id=<clinic> で扱い、診療枠/休診日を data.shared に一本化する。
 // クリニック未指定（従来URL）は legacy モード＝今までどおり id=main の {clerk,nurse,doctor} を使う（後方互換）。
-const CLINIC_KEYS=['ekimae','iguchi','karasuma']; // 駅前 / いぐち / みずたに（烏丸今出川）。demachiは対象外
-const CLINIC_LABELS={ekimae:'駅前',iguchi:'いぐち',karasuma:'みずたに'};
+const CLINIC_KEYS=['ekimae','iguchi','karasuma','demachi']; // 駅前 / いぐち / みずたに / こども
+const CLINIC_LABELS={ekimae:'駅前',iguchi:'いぐち',karasuma:'みずたに',demachi:'こども'};
+const CLINIC_FULL_LABELS={ekimae:'駅前クリニック',iguchi:'いぐちクリニック',karasuma:'みずたにクリニック',demachi:'こどもクリニック'};
 const APP_CLINIC=(()=>{
   try{
     const qs=new URLSearchParams(location.search);
@@ -969,6 +970,10 @@ const APP_CLINIC=(()=>{
 })();
 const CLINIC_LABEL=CLINIC_LABELS[APP_CLINIC]||'';
 const CLINIC_MODE=!!APP_CLINIC; // true＝クリニック行モード（shift_dataをid=<clinic>で扱う）
+function defaultPayrollClinic(){return APP_CLINIC||'iguchi';}
+function defaultWorkClinics(){return APP_CLINIC?[APP_CLINIC]:['ekimae','iguchi','karasuma','demachi'];}
+function normalizeWorkClinics(v){const a=Array.isArray(v)?v:[];const out=a.filter(x=>CLINIC_KEYS.includes(x));return out.length?out:defaultWorkClinics();}
+function clinicFullLabel(k){return CLINIC_FULL_LABELS[k]||CLINIC_LABELS[k]||k;}
 // data.shared に置く共通キー（クリニック内の全職種で共有）
 const SHARED_KEYS=['clinicName','slots','newSlotCounter','manualClosedDays','surgeryCalUrl','surgeryCalUrlUpdatedAt','outpatientClosures','outpatientClosuresUpdatedAt'];
 try{ document.title='シフト管理'+(APP_UNIT_LABEL?'（'+APP_UNIT_LABEL+'）':'')+' '+APP_VERSION; }catch(e){}
@@ -2200,7 +2205,7 @@ function App(){
   const [eid,setEid]=useState(null);
   const [ef,setEf]=useState({});
   const [showAdd,setShowAdd]=useState(false);
-  const [addF,setAddF]=useState({name:'',cond:defaultCond(),memo:'',color:COLORS[0],pin:'',workType:'normal',code:'',fullName:'',email:''});
+  const [addF,setAddF]=useState({name:'',cond:defaultCond(),memo:'',color:COLORS[0],pin:'',workType:'normal',code:'',fullName:'',email:'',payrollClinic:defaultPayrollClinic(),workClinics:defaultWorkClinics()});
   const [nid,setNid]=useState(()=>saved?.staff?Math.max(...saved.staff.map(s=>s.id),9)+1:10);
   const [aLoad,setALoad]=useState(false);
   const [aRes,setARes]=useState(null);
@@ -2294,7 +2299,7 @@ function App(){
   const [showHistory,setShowHistory]=useState(false);
   const [historyLoading,setHistoryLoading]=useState(false);
   function currentShiftPayload(extra){
-    return {y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,surgeryFlags,surgeryCalSnapshotAt:surgeryCalUpdatedAt,outpatientClosures,outpatientClosuresUpdatedAt,...(extra||{})};
+    return {y,m,clinicId:APP_CLINIC||'',clinicLabel:CLINIC_LABEL||'',staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,surgeryFlags,surgeryCalSnapshotAt:surgeryCalUpdatedAt,outpatientClosures,outpatientClosuresUpdatedAt,...(extra||{})};
   }
   function setOutpatientRoomState(dk,slotId,roomIdx,closed){
     setOutpatientClosures(prev=>{
@@ -2857,6 +2862,15 @@ table{border-collapse:collapse;width:100%;table-layout:fixed}th{background:#fff;
 ${snapLine}
 <div class="warn">${warnText}</div>
 <table><thead><tr><th>月</th><th>火</th><th>水</th><th>木</th><th>金</th><th>土</th></tr></thead><tbody>${calHtml}</tbody></table>
+<!--
+CHANGELOG v137
+- スタッフ設定に「複数クリニック勤務・給与集約」を追加。
+- 各スタッフに payrollClinic（給与上の所属クリニック）と workClinics（勤務可能クリニック）を保存できるようにした。
+- クリニック選択にこどもクリニック(demachi)も追加し、駅前/いぐち/みずたに/こどもの4院を構造化データとして扱う。
+- シフト保存payloadに clinicId / clinicLabel を追加し、タイムカード側が実勤務クリニックを判定できるようにした。
+- スタッフ追加・編集・クラウド保存に上記項目を含める。
+- アプリ表示バージョンを v136 から v137 に更新。
+-->
 </body></html>`);
     printWin.document.close();injectPrintButton(printWin);
     if(opts.autoPrint){setTimeout(()=>{try{printWin.print();}catch(e){}},500);}
@@ -2944,6 +2958,15 @@ td.cell-off{background:#fff}
 <h1>医療法人　福耳会　個人別シフト表　${y}年 ${m}月</h1>
 <div class="sub">印刷日: ${new Date().toLocaleDateString('ja-JP')}　／　シフト作成: ${shiftUpdatedAt?fmtStamp(shiftUpdatedAt):'—'}</div>
 <table><thead><tr><th class="name-h">スタッフ</th>${thHtml}</tr></thead><tbody>${rowsHtml}</tbody></table>
+<!--
+CHANGELOG v137
+- スタッフ設定に「複数クリニック勤務・給与集約」を追加。
+- 各スタッフに payrollClinic（給与上の所属クリニック）と workClinics（勤務可能クリニック）を保存できるようにした。
+- クリニック選択にこどもクリニック(demachi)も追加し、駅前/いぐち/みずたに/こどもの4院を構造化データとして扱う。
+- シフト保存payloadに clinicId / clinicLabel を追加し、タイムカード側が実勤務クリニックを判定できるようにした。
+- スタッフ追加・編集・クラウド保存に上記項目を含める。
+- アプリ表示バージョンを v136 から v137 に更新。
+-->
 </body></html>`);
     printWin.document.close();injectPrintButton(printWin);
   }
@@ -3162,6 +3185,15 @@ h1{font-size:16pt;font-weight:700;margin-bottom:3mm}
 <h1>医療法人　福耳会　達成レポート　${y}年 ${m}月</h1>
 <div class="sub">印刷日: ${new Date().toLocaleDateString('ja-JP')}　／　シフト作成: ${shiftUpdatedAt?fmtStamp(shiftUpdatedAt):'—'}</div>
 ${bodyHtml}
+<!--
+CHANGELOG v137
+- スタッフ設定に「複数クリニック勤務・給与集約」を追加。
+- 各スタッフに payrollClinic（給与上の所属クリニック）と workClinics（勤務可能クリニック）を保存できるようにした。
+- クリニック選択にこどもクリニック(demachi)も追加し、駅前/いぐち/みずたに/こどもの4院を構造化データとして扱う。
+- シフト保存payloadに clinicId / clinicLabel を追加し、タイムカード側が実勤務クリニックを判定できるようにした。
+- スタッフ追加・編集・クラウド保存に上記項目を含める。
+- アプリ表示バージョンを v136 から v137 に更新。
+-->
 </body></html>`);
     printWin.document.close();injectPrintButton(printWin);
   }
@@ -3487,19 +3519,53 @@ ${bodyHtml}
   function setPaidGranted(sid,val){
     setPaidLeave(prev=>{const cur=prev[sid]||{granted:0,history:[]};return{...prev,[sid]:{...cur,granted:Math.max(0,Number(val)||0)}};});
   }
+
+  function ClinicScopeFields({form,setForm}){
+    const payroll=form.payrollClinic||defaultPayrollClinic();
+    const works=normalizeWorkClinics(form.workClinics);
+    const setPayroll=v=>setForm({...form,payrollClinic:v,workClinics:works.includes(v)?works:[...works,v]});
+    const toggleWork=v=>{
+      let next=works.includes(v)?works.filter(x=>x!==v):[...works,v];
+      if(next.length===0)next=[payroll||defaultPayrollClinic()];
+      if(!next.includes(payroll))next=[...next,payroll];
+      setForm({...form,workClinics:next});
+    };
+    return (
+      <div style={{marginTop:10,padding:'8px 10px',background:'#ECFDF5',border:'1px solid #A7F3D0',borderRadius:K.rmd}}>
+        <div style={{fontSize:11,fontWeight:700,color:'#0F766E',marginBottom:6}}>🏥 複数クリニック勤務・給与集約</div>
+        <label style={{fontSize:11,color:K.textS,display:'block',marginBottom:4}}>給与上の所属クリニック（全表示・給与計算で合算する先）</label>
+        <select value={payroll} onChange={e=>setPayroll(e.target.value)} style={{padding:'5px 9px',border:K.bd2,borderRadius:K.rmd,fontSize:13,background:K.bg,color:K.text,marginBottom:8}}>
+          {CLINIC_KEYS.map(k=><option key={k} value={k}>{clinicFullLabel(k)}</option>)}
+        </select>
+        <div style={{fontSize:11,color:K.textS,marginBottom:4}}>勤務可能クリニック（このスタッフを配置できる院）</div>
+        <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
+          {CLINIC_KEYS.map(k=>(
+            <label key={k} style={{fontSize:12,display:'inline-flex',alignItems:'center',gap:4,background:works.includes(k)?'#DCFCE7':'#F8FAFC',border:works.includes(k)?'1px solid #86EFAC':K.bd,borderRadius:999,padding:'3px 9px'}}>
+              <input type="checkbox" checked={works.includes(k)} onChange={()=>toggleWork(k)}/>
+              {clinicFullLabel(k)}
+            </label>
+          ))}
+        </div>
+        <div style={{fontSize:11,color:'#0F766E',marginTop:6,lineHeight:1.5}}>
+          例：駅前でも勤務するが給与上はいぐちへ合算する場合は「給与上の所属＝いぐち」「勤務可能＝駅前＋いぐち」にします。
+        </div>
+      </div>
+    );
+  }
+
   async function doAdd(){
     if(!addF.name.trim())return;
     const newId=nid;
     const cond=addF.cond||defaultCond();
     const notes=condToNotes(cond);
     const _ac=(addF.code||'').replace(/\D/g,'');
-    const newStaff={id:newId,name:addF.name.trim(),color:addF.color,notes,cond,memo:addF.memo||'',pin:addF.pin||'',workType:addF.workType||'normal',code:_ac?_ac.padStart(7,'0'):'',fullName:(addF.fullName||'').trim(),email:(addF.email||'').trim()};
+    const newStaff={id:newId,name:addF.name.trim(),color:addF.color,notes,cond,memo:addF.memo||'',pin:addF.pin||'',workType:addF.workType||'normal',code:_ac?_ac.padStart(7,'0'):'',fullName:(addF.fullName||'').trim(),email:(addF.email||'').trim(),payrollClinic:addF.payrollClinic||defaultPayrollClinic(),workClinics:normalizeWorkClinics(addF.workClinics)};
     const nextStaff=[...staff,newStaff];
     const nextPaidLeave={...paidLeave,[newId]:{granted:0,history:[]}};
     setStaff(nextStaff);
     setPaidLeave(nextPaidLeave);
     setNid(n=>n+1);
-    setAddF({name:'',cond:defaultCond(),memo:'',color:COLORS[nid%COLORS.length],pin:'',workType:'normal',code:'',fullName:'',email:''});
+    setAddF({name:'',cond:defaultCond(),memo:'',color:COLORS[nid%COLORS.length],pin:'',workType:'normal',code:'',fullName:'',email:'',payrollClinic:defaultPayrollClinic(),workClinics:defaultWorkClinics()});
     setShowAdd(false);
     const r=await saveStaffMasterToCloud(nextStaff,nextPaidLeave);
     if(!r.ok)alert('スタッフを追加しましたが、クラウド保存に失敗しました。\n'+(r.error||''));
@@ -3508,7 +3574,7 @@ ${bodyHtml}
     let cond,memo;
     if(s.cond){cond=s.cond;memo=s.memo||'';}
     else{const m=notesToCond(s.notes);cond=m.cond;memo=m.memo;}
-    setEid(s.id);setEf({name:s.name,cond,memo,color:s.color,pin:s.pin||'',workType:s.workType||'normal',code:s.code||'',fullName:s.fullName||'',email:s.email||''});
+    setEid(s.id);setEf({name:s.name,cond,memo,color:s.color,pin:s.pin||'',workType:s.workType||'normal',code:s.code||'',fullName:s.fullName||'',email:s.email||'',payrollClinic:s.payrollClinic||defaultPayrollClinic(),workClinics:normalizeWorkClinics(s.workClinics)});
   }
   async function svEdit(){
     const nextStaff=staff.map(s=>{
@@ -3517,7 +3583,7 @@ ${bodyHtml}
       const notes=condToNotes(cond); // 入力式から“決まった書式”の条件文を生成
       const codeDigits=(ef.code||'').replace(/\D/g,'');
       const code=codeDigits?codeDigits.padStart(7,'0'):'';
-      return {...s,name:ef.name,color:ef.color,pin:ef.pin,workType:ef.workType,cond,memo:ef.memo||'',notes,code,fullName:(ef.fullName||'').trim(),email:(ef.email||'').trim()};
+      return {...s,name:ef.name,color:ef.color,pin:ef.pin,workType:ef.workType,cond,memo:ef.memo||'',notes,code,fullName:(ef.fullName||'').trim(),email:(ef.email||'').trim(),payrollClinic:ef.payrollClinic||defaultPayrollClinic(),workClinics:normalizeWorkClinics(ef.workClinics)};
     });
     setStaff(nextStaff);
     setEid(null);
@@ -6538,6 +6604,7 @@ ${bodyHtml}
                 <input type="text" inputMode="numeric" maxLength={7} value={addF.code||''} onChange={e=>setAddF({...addF,code:e.target.value.replace(/[^0-9]/g,'').slice(0,7)})} placeholder="例: 0001234" style={{padding:'5px 9px',border:K.bd2,borderRadius:K.rmd,fontSize:14,width:140,background:K.bg,color:K.text,letterSpacing:'0.12em',fontWeight:600,marginBottom:8}}/>
                 <label style={{fontSize:11,color:K.textS,display:'block',marginBottom:4}}>氏名フルネーム（照合用・名簿と完全一致）</label>
                 <input type="text" value={addF.fullName||''} onChange={e=>setAddF({...addF,fullName:e.target.value})} placeholder="例: 小島 太郎" style={{padding:'5px 9px',border:K.bd2,borderRadius:K.rmd,fontSize:13,width:'100%',boxSizing:'border-box',background:K.bg,color:K.text}}/>
+                <ClinicScopeFields form={addF} setForm={setAddF}/>
               </div>
               <div style={{marginBottom:10}}><label style={{fontSize:11,color:K.textS,display:'block',marginBottom:3}}>✉ メールアドレス（URL送付・連絡用）</label><input type="email" value={addF.email||''} onChange={e=>setAddF({...addF,email:e.target.value})} placeholder="例: tanaka@example.com" style={{padding:'5px 9px',border:K.bd2,borderRadius:K.rmd,fontSize:13,width:'100%',boxSizing:'border-box',background:K.bg,color:K.text}}/></div>
               <button onClick={doAdd} style={{padding:'6px 18px',background:K.bgI,color:K.textI,border:K.bdI,borderRadius:K.rmd,cursor:'pointer',fontSize:13,fontWeight:500}}>追加する</button>
@@ -6588,6 +6655,7 @@ ${bodyHtml}
                       <input type="text" value={ef.fullName||''} onChange={e=>setEf({...ef,fullName:e.target.value})}
                         placeholder="例: 松枝 太郎"
                         style={{padding:'5px 9px',border:K.bd2,borderRadius:K.rmd,fontSize:13,width:'100%',boxSizing:'border-box',background:K.bg,color:K.text}}/>
+                      <ClinicScopeFields form={ef} setForm={setEf}/>
                     </div>
                     <div style={{marginBottom:10}}>
                       <label style={{fontSize:11,color:K.textS,display:'block',marginBottom:4}}>✉ メールアドレス（URL送付・連絡用）</label>
@@ -7901,7 +7969,16 @@ function StaffCheckPanel({staff,dates,asgn,manualExclusions,tmps,slots,weeks,y,m
       if(r.days.length===0)h+='<tr><td colspan=7>この月の勤務はありません</td></tr>';
       h+='</table>';
     });
-    h+='</body></html>'; w.document.write(h); w.document.close();
+    h+='<!--
+CHANGELOG v137
+- スタッフ設定に「複数クリニック勤務・給与集約」を追加。
+- 各スタッフに payrollClinic（給与上の所属クリニック）と workClinics（勤務可能クリニック）を保存できるようにした。
+- クリニック選択にこどもクリニック(demachi)も追加し、駅前/いぐち/みずたに/こどもの4院を構造化データとして扱う。
+- シフト保存payloadに clinicId / clinicLabel を追加し、タイムカード側が実勤務クリニックを判定できるようにした。
+- スタッフ追加・編集・クラウド保存に上記項目を含める。
+- アプリ表示バージョンを v136 から v137 に更新。
+-->
+</body></html>'; w.document.write(h); w.document.close();
   }
   const td={border:'1px solid #E2E8F0',padding:'3px 6px'};
   return(
@@ -8381,5 +8458,14 @@ function UnitPicker(){
 const _rootView=(!APP_CLINIC&&!APP_UNIT)?<ClinicPicker />:(!APP_UNIT?<UnitPicker />:<App />);
 ReactDOM.createRoot(document.getElementById('root')).render(_rootView);
 </script>
+<!--
+CHANGELOG v137
+- スタッフ設定に「複数クリニック勤務・給与集約」を追加。
+- 各スタッフに payrollClinic（給与上の所属クリニック）と workClinics（勤務可能クリニック）を保存できるようにした。
+- クリニック選択にこどもクリニック(demachi)も追加し、駅前/いぐち/みずたに/こどもの4院を構造化データとして扱う。
+- シフト保存payloadに clinicId / clinicLabel を追加し、タイムカード側が実勤務クリニックを判定できるようにした。
+- スタッフ追加・編集・クラウド保存に上記項目を含める。
+- アプリ表示バージョンを v136 から v137 に更新。
+-->
 </body>
 </html>
