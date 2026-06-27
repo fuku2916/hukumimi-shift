@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v136</title>
+<title>シフト管理 v138</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v137';
+const APP_VERSION = 'v138';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2862,15 +2862,6 @@ table{border-collapse:collapse;width:100%;table-layout:fixed}th{background:#fff;
 ${snapLine}
 <div class="warn">${warnText}</div>
 <table><thead><tr><th>月</th><th>火</th><th>水</th><th>木</th><th>金</th><th>土</th></tr></thead><tbody>${calHtml}</tbody></table>
-<!--
-CHANGELOG v137
-- スタッフ設定に「複数クリニック勤務・給与集約」を追加。
-- 各スタッフに payrollClinic（給与上の所属クリニック）と workClinics（勤務可能クリニック）を保存できるようにした。
-- クリニック選択にこどもクリニック(demachi)も追加し、駅前/いぐち/みずたに/こどもの4院を構造化データとして扱う。
-- シフト保存payloadに clinicId / clinicLabel を追加し、タイムカード側が実勤務クリニックを判定できるようにした。
-- スタッフ追加・編集・クラウド保存に上記項目を含める。
-- アプリ表示バージョンを v136 から v137 に更新。
--->
 </body></html>`);
     printWin.document.close();injectPrintButton(printWin);
     if(opts.autoPrint){setTimeout(()=>{try{printWin.print();}catch(e){}},500);}
@@ -2958,15 +2949,6 @@ td.cell-off{background:#fff}
 <h1>医療法人　福耳会　個人別シフト表　${y}年 ${m}月</h1>
 <div class="sub">印刷日: ${new Date().toLocaleDateString('ja-JP')}　／　シフト作成: ${shiftUpdatedAt?fmtStamp(shiftUpdatedAt):'—'}</div>
 <table><thead><tr><th class="name-h">スタッフ</th>${thHtml}</tr></thead><tbody>${rowsHtml}</tbody></table>
-<!--
-CHANGELOG v137
-- スタッフ設定に「複数クリニック勤務・給与集約」を追加。
-- 各スタッフに payrollClinic（給与上の所属クリニック）と workClinics（勤務可能クリニック）を保存できるようにした。
-- クリニック選択にこどもクリニック(demachi)も追加し、駅前/いぐち/みずたに/こどもの4院を構造化データとして扱う。
-- シフト保存payloadに clinicId / clinicLabel を追加し、タイムカード側が実勤務クリニックを判定できるようにした。
-- スタッフ追加・編集・クラウド保存に上記項目を含める。
-- アプリ表示バージョンを v136 から v137 に更新。
--->
 </body></html>`);
     printWin.document.close();injectPrintButton(printWin);
   }
@@ -3185,15 +3167,6 @@ h1{font-size:16pt;font-weight:700;margin-bottom:3mm}
 <h1>医療法人　福耳会　達成レポート　${y}年 ${m}月</h1>
 <div class="sub">印刷日: ${new Date().toLocaleDateString('ja-JP')}　／　シフト作成: ${shiftUpdatedAt?fmtStamp(shiftUpdatedAt):'—'}</div>
 ${bodyHtml}
-<!--
-CHANGELOG v137
-- スタッフ設定に「複数クリニック勤務・給与集約」を追加。
-- 各スタッフに payrollClinic（給与上の所属クリニック）と workClinics（勤務可能クリニック）を保存できるようにした。
-- クリニック選択にこどもクリニック(demachi)も追加し、駅前/いぐち/みずたに/こどもの4院を構造化データとして扱う。
-- シフト保存payloadに clinicId / clinicLabel を追加し、タイムカード側が実勤務クリニックを判定できるようにした。
-- スタッフ追加・編集・クラウド保存に上記項目を含める。
-- アプリ表示バージョンを v136 から v137 に更新。
--->
 </body></html>`);
     printWin.document.close();injectPrintButton(printWin);
   }
@@ -7969,16 +7942,7 @@ function StaffCheckPanel({staff,dates,asgn,manualExclusions,tmps,slots,weeks,y,m
       if(r.days.length===0)h+='<tr><td colspan=7>この月の勤務はありません</td></tr>';
       h+='</table>';
     });
-    h+='<!--
-CHANGELOG v137
-- スタッフ設定に「複数クリニック勤務・給与集約」を追加。
-- 各スタッフに payrollClinic（給与上の所属クリニック）と workClinics（勤務可能クリニック）を保存できるようにした。
-- クリニック選択にこどもクリニック(demachi)も追加し、駅前/いぐち/みずたに/こどもの4院を構造化データとして扱う。
-- シフト保存payloadに clinicId / clinicLabel を追加し、タイムカード側が実勤務クリニックを判定できるようにした。
-- スタッフ追加・編集・クラウド保存に上記項目を含める。
-- アプリ表示バージョンを v136 から v137 に更新。
--->
-</body></html>'; w.document.write(h); w.document.close();
+    h+='</body></html>'; w.document.write(h); w.document.close();
   }
   const td={border:'1px solid #E2E8F0',padding:'3px 6px'};
   return(
@@ -8459,13 +8423,14 @@ const _rootView=(!APP_CLINIC&&!APP_UNIT)?<ClinicPicker />:(!APP_UNIT?<UnitPicker
 ReactDOM.createRoot(document.getElementById('root')).render(_rootView);
 </script>
 <!--
-CHANGELOG v137
-- スタッフ設定に「複数クリニック勤務・給与集約」を追加。
-- 各スタッフに payrollClinic（給与上の所属クリニック）と workClinics（勤務可能クリニック）を保存できるようにした。
-- クリニック選択にこどもクリニック(demachi)も追加し、駅前/いぐち/みずたに/こどもの4院を構造化データとして扱う。
-- シフト保存payloadに clinicId / clinicLabel を追加し、タイムカード側が実勤務クリニックを判定できるようにした。
-- スタッフ追加・編集・クラウド保存に上記項目を含める。
-- アプリ表示バージョンを v136 から v137 に更新。
+CHANGELOG v138
+- v137でアプリが真っ白になる不具合を修正。
+- 原因: 変更履歴コメントが、印刷用HTMLを生成するJavaScript文字列の中にも挿入され、JavaScript構文エラーを起こしていたため。
+- CHANGELOGコメントを全て一旦除去し、HTML末尾のトップレベルにだけ安全に追加。
+- v137で追加したスタッフ設定の「複数クリニック勤務・給与集約」機能は維持。
+- 各スタッフに payrollClinic（給与上の所属クリニック）と workClinics（勤務可能クリニック）を保存できる仕様も維持。
+- シフト保存payloadに clinicId / clinicLabel を含める仕様も維持。
+- アプリ表示バージョンを v137 から v138 に更新。
 -->
 </body>
 </html>
