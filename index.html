@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v132</title>
+<title>シフト管理 v133</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v132';
+const APP_VERSION = 'v133';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2306,9 +2306,9 @@ function App(){
       const base=(cloud.data&&typeof cloud.data==='object')?cloud.data:{};
       const data={...base,outpatientClosures,outpatientClosuresUpdatedAt:at};
       const ok=await SB.set('shift_data',data);
-      if(ok){setOutpatientClosuresUpdatedAt(at);alert('外来休診設定をクラウド保存しました。ナース・クラーク画面にも同じ設定が反映されます。');}
-      else alert('外来休診設定のクラウド保存に失敗しました。');
-    }catch(e){alert('外来休診設定の保存に失敗しました：'+(e&&e.message||e));}
+      if(ok){setOutpatientClosuresUpdatedAt(at);alert('医師休診・外来枠設定をクラウド保存しました。ドクター・ナース・クラーク画面に同じ設定が反映されます。');}
+      else alert('医師休診・外来枠設定のクラウド保存に失敗しました。');
+    }catch(e){alert('医師休診・外来枠設定の保存に失敗しました：'+(e&&e.message||e));}
     setSavingOutpatientClosures(false);
   }
 
@@ -5563,7 +5563,7 @@ ${bodyHtml}
                     <MenuLabel text="スタッフ・診療"/>
                     <MenuItem icon="👤" label="スタッフ" onClick={()=>{setTab('staff');setOpenMenu(null);}}  active={tab==='staff'}/>
                     <MenuItem icon="🏥" label="診療枠" onClick={()=>{setTab('ref');setOpenMenu(null);}}     active={tab==='ref'}/>
-                    <MenuItem icon="🚪" label="外来休診設定" onClick={()=>{setTab('shift');setShowOutpatientClosurePanel(p=>!p);setOpenMenu(null);}} active={showOutpatientClosurePanel}/>
+                    <MenuItem icon="🚪" label="医師休診・外来枠設定" onClick={()=>{setTab('shift');setShowOutpatientClosurePanel(p=>!p);setOpenMenu(null);}} active={showOutpatientClosurePanel}/>
                     <MenuItem icon="📊" label="必要人数" onClick={()=>{setTab('req');setOpenMenu(null);}}   active={tab==='req'}/>
                     <MenuDivider/>
                     <MenuLabel text="シフトパターン"/>
@@ -5784,18 +5784,16 @@ ${bodyHtml}
             <div style={{background:K.bg,border:K.bd,borderRadius:K.rlg,padding:16,marginBottom:14,borderLeft:'4px solid #0F766E'}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:10,gap:10}}>
                 <div>
-                  <div style={{fontWeight:500,fontSize:14,marginBottom:4}}>🚪 外来休診設定（診察室ごと）</div>
+                  <div style={{fontWeight:500,fontSize:14,marginBottom:4}}>🚪 医師休診・外来枠設定</div>
                   <div style={{fontSize:12,color:K.textS,lineHeight:1.6}}>
-                    医師の休診などで、外来の1診・2診を閉じる設定です。同じクリニック内のドクター・ナース・クラークで共有されます。カレンダー上は「午前外来 ⑴○⑵ー」のように短く表示します。設定ボタンは「１診：○」「２診：ー」と表示します。祝日・休診日は初期状態では全診察室を「ー」として扱いますが、必要に応じてボタンを押すと「○」に変更できます。
+                    医師の休診希望をもとに、クラークがドクター管理画面から登録する設定です。登録内容は同じクリニック内のドクター・ナース・クラークで共有され、各シフト表に反映されます。カレンダー上は「午前外来 ⑴○⑵ー」のように短く表示します。設定ボタンは「１診：○」「２診：ー」と表示します。祝日・休診日は初期状態では全診察室を「ー」として扱いますが、必要に応じてボタンを押すと「○」に変更できます。
                   </div>
                 </div>
                 <button onClick={()=>setShowOutpatientClosurePanel(false)} style={{border:'none',background:'none',cursor:'pointer',fontSize:18,color:K.textS,lineHeight:1,padding:0,marginLeft:10}}>×</button>
               </div>
-              {APP_UNIT!=='doctor'&&(
-                <div style={{fontSize:12,color:'#92400E',background:'#FFFBEB',border:'1px solid #FDE68A',borderRadius:K.rmd,padding:'7px 10px',marginBottom:10}}>
-                  通常はドクター管理画面で登録してください。この画面でも現在の共有設定は確認できます。
-                </div>
-              )}
+              <div style={{fontSize:12,color:'#0F766E',background:'#ECFDF5',border:'1px solid #A7F3D0',borderRadius:K.rmd,padding:'7px 10px',marginBottom:10}}>
+                この設定はクリニック内の共通設定です。どの職種の管理画面から変更しても、ドクター・ナース・クラークすべての画面に反映されます。
+              </div>
               <div style={{overflow:'auto',maxHeight:360,border:K.bd,borderRadius:K.rmd,background:K.bgS}}>
                 <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,minWidth:620}}>
                   <thead>
@@ -5843,9 +5841,9 @@ ${bodyHtml}
               <div style={{display:'flex',alignItems:'center',gap:10,marginTop:10,flexWrap:'wrap'}}>
                 <button onClick={saveOutpatientClosuresToCloud} disabled={savingOutpatientClosures}
                   style={{padding:'7px 16px',background:'#0F766E',color:'#fff',border:'none',borderRadius:K.rmd,cursor:savingOutpatientClosures?'wait':'pointer',fontSize:13,fontWeight:700}}>
-                  {savingOutpatientClosures?'保存中…':'外来休診設定をクラウド保存'}
+                  {savingOutpatientClosures?'保存中…':'医師休診・外来枠設定をクラウド保存'}
                 </button>
-                <button onClick={()=>{if(window.confirm(y+'年'+m+'月の外来休診設定をすべて解除しますか？')){setOutpatientClosures(prev=>{const n={...(prev||{})};dates.forEach(d=>{delete n[tdk(d)];});return n;});setOutpatientClosuresUpdatedAt(new Date().toISOString());}}}
+                <button onClick={()=>{if(window.confirm(y+'年'+m+'月の医師休診・外来枠設定をすべて解除しますか？')){setOutpatientClosures(prev=>{const n={...(prev||{})};dates.forEach(d=>{delete n[tdk(d)];});return n;});setOutpatientClosuresUpdatedAt(new Date().toISOString());}}}
                   style={{padding:'7px 12px',background:K.bg,color:K.textD,border:K.bdD,borderRadius:K.rmd,cursor:'pointer',fontSize:12,fontWeight:600}}>今月分を解除</button>
                 <span style={{fontSize:11,color:K.textS}}>最終更新: {outpatientClosuresUpdatedAt?fmtStamp(outpatientClosuresUpdatedAt):'未保存'}</span>
               </div>
