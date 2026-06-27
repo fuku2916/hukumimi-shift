@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v134</title>
+<title>シフト管理 v135</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v134';
+const APP_VERSION = 'v135';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -1854,6 +1854,9 @@ function App(){
           if(sd.outpatientClosures&&typeof sd.outpatientClosures==='object')setOutpatientClosures(sd.outpatientClosures);
           if(sd.outpatientClosuresUpdatedAt!==undefined)setOutpatientClosuresUpdatedAt(sd.outpatientClosuresUpdatedAt||'');
         }
+        // v135: 履歴は現在の編集中シフトとは別物なので、cloudWins判定に関係なく常にクラウドから読む。
+        // これにより、外来枠設定などを変更した直後でも「公開」しなくても履歴一覧が見える。
+        if(sd&&Array.isArray(sd.history))setShiftHistory(sd.history);
         if(sd&&Object.keys(sd).length>0 && cloudWins){
           if(sd.staff)setStaff(sd.staff);
           if(sd.slots)setSlots(sd.slots);
@@ -2289,6 +2292,7 @@ function App(){
   const PUBLISH_ARCHIVE_MAX=5; // v124: 公開時点スナップショット（正本）は最新5件だけ保持
   const [shiftHistory,setShiftHistory]=useState([]); // [{at,made,data}]（クラウドから取得）
   const [showHistory,setShowHistory]=useState(false);
+  const [historyLoading,setHistoryLoading]=useState(false);
   function currentShiftPayload(extra){
     return {y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,surgeryFlags,surgeryCalSnapshotAt:surgeryCalUpdatedAt,outpatientClosures,outpatientClosuresUpdatedAt,...(extra||{})};
   }
@@ -2357,6 +2361,22 @@ function App(){
     const ok=await SB.set('shift_data',{...base,history:nextHist});
     if(ok)setShiftHistory(nextHist);
     return ok?{ok:true,history:nextHist}:{ok:false,error:'履歴のクラウド保存に失敗しました。'};
+  }
+  async function refreshShiftHistoryFromCloud(){
+    if(!SB_ENABLED)return;
+    setHistoryLoading(true);
+    try{
+      const cloud=await SB.getSafe('shift_data');
+      if(cloud.ok){
+        const base=(cloud.data&&typeof cloud.data==='object')?cloud.data:{};
+        setShiftHistory(Array.isArray(base.history)?base.history:[]);
+      }
+    }catch(e){}
+    setHistoryLoading(false);
+  }
+  function openHistoryPanel(){
+    setShowHistory(true);
+    refreshShiftHistoryFromCloud();
   }
   // ★ v109: スタッフ設定はシフト表の下書き/公開とは独立した「クラウド共通マスタ」として即時保存する。
   // 各スタッフ欄の「保存」を押したら、Supabase上の公開データのうち staff/paidLeave だけを差し替える。
@@ -5556,7 +5576,7 @@ ${bodyHtml}
                     <MenuLabel text="クラウド下書き・履歴"/>
                     {SB_ENABLED&&<MenuItem icon="💾" label={draftSaving?'下書き保存中…':'下書き保存'} onClick={()=>{saveDraftToCloud();setOpenMenu(null);}}/>}
                     {SB_ENABLED&&<MenuItem icon="📂" label={'下書き読込'+(draftSavedAt?'（'+fmtStamp(draftSavedAt)+'）':'')} onClick={()=>{loadDraftFromCloud();setOpenMenu(null);}}/>}
-                    {SB_ENABLED&&<MenuItem icon="🕘" label={'履歴'+(shiftHistory.length>0?'('+shiftHistory.length+')':'')} onClick={()=>{setShowHistory(true);setOpenMenu(null);}}/>}
+                    {SB_ENABLED&&<MenuItem icon="🕘" label={'履歴'+(shiftHistory.length>0?'('+shiftHistory.length+')':'')} onClick={()=>{openHistoryPanel();setOpenMenu(null);}}/>}
                     <MenuDivider/>
                     <MenuLabel text="危険操作"/>
                     <MenuItem icon="⚠️" label="初期化..." danger onClick={()=>{
@@ -5640,7 +5660,7 @@ ${bodyHtml}
               <MenuItem icon="📂" label="全データ読み込み" isFile accept=".json" onChange={e=>{loadData(e);setOpenMenu(null);}}/>
               {SB_ENABLED&&<MenuItem icon="💾" label={draftSaving?'下書き保存中…':'下書き保存'} onClick={()=>{saveDraftToCloud();setOpenMenu(null);}}/>}
               {SB_ENABLED&&<MenuItem icon="📂" label={'下書き読込'+(draftSavedAt?'（'+fmtStamp(draftSavedAt)+'）':'')} onClick={()=>{loadDraftFromCloud();setOpenMenu(null);}}/>}
-              {SB_ENABLED&&<MenuItem icon="🕘" label={'履歴'+(shiftHistory.length>0?'('+shiftHistory.length+')':'')} onClick={()=>{setShowHistory(true);setOpenMenu(null);}}/>}
+              {SB_ENABLED&&<MenuItem icon="🕘" label={'履歴'+(shiftHistory.length>0?'('+shiftHistory.length+')':'')} onClick={()=>{openHistoryPanel();setOpenMenu(null);}}/>}
               <MenuItem icon="⚠️" label="初期化..." danger onClick={()=>{setOpenMenu(null);const choice=window.prompt('1→今月 2→全月 3→完全リセット');if(choice==='1'){if(window.confirm('今月をリセット？')){setAsgn(p=>{const n={...p};dates.forEach(d=>{delete n[tdk(d)];});return n;});setTmps(p=>{const n={...p};dates.forEach(d=>{delete n[tdk(d)];});return n;});}}else if(choice==='2'){if(window.confirm('全月リセット？')){setAsgn({});setTmps({});}}else if(choice==='3'){if(window.confirm('完全リセット？')){localStorage.removeItem(LS_KEY);window.location.reload();}}}}/>
               {CLINIC_MODE&&APP_CLINIC==='ekimae'&&<MenuItem icon="🔁" label="駅前データを移行(初回のみ)" onClick={()=>{setOpenMenu(null);migrateEkimaeFromMain();}}/>}
               <MenuDivider/>
@@ -5902,8 +5922,10 @@ ${bodyHtml}
                   v125以降は、公開時点スナップショットに「表示」「印刷」「この版に戻す」を分けて表示します。「表示」「印刷」は現在の編集画面を上書きしません。戻したい場合だけ「この版に戻す」を押し、内容を確認してから「公開」で確定してください。
                 </div>
                 <div style={{overflowY:'auto',padding:'10px 18px',display:'flex',flexDirection:'column',gap:8}}>
-                  {shiftHistory.length===0?(
-                    <div style={{fontSize:13,color:K.textS,padding:'16px 0',textAlign:'center'}}>まだ履歴はありません。<br/>一度「公開」すると、次回からここに残ります。</div>
+                  {historyLoading?(
+                    <div style={{fontSize:13,color:K.textS,padding:'16px 0',textAlign:'center'}}>クラウド履歴を読み込み中です...</div>
+                  ):shiftHistory.length===0?(
+                    <div style={{fontSize:13,color:K.textS,padding:'16px 0',textAlign:'center'}}>まだ履歴はありません。<br/>公開時スナップショットや全データ保存を行うと、ここに残ります。</div>
                   ):shiftHistory.map((h,i)=>{
                     const dd=h.data||{};
                     const days=Object.values(dd.asgn||{}).filter(day=>Object.values(day||{}).some(ids=>(ids||[]).length>0)).length;
