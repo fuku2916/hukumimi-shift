@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v144</title>
+<title>シフト管理 v145</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v144';
+const APP_VERSION = 'v145';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -5824,7 +5824,6 @@ ${bodyHtml}
                     <MenuItem icon="🚩" label="管理者へのメッセージ" onClick={()=>openRequestSection('msg')} active={tab==='paid'}/>
                     <MenuItem icon="🕒" label={'打刻修正申請'+(pendingTimecardCorrections().length?'（'+pendingTimecardCorrections().length+'件）':'')} onClick={openTimecardCorrectionPanelFromMenu} active={showTimecardCorrectionPanel}/>
               <MenuItem icon="🖨" label="月次申請履歴PDF" onClick={()=>{printRequestHistoryPdf(requestExportYm);setOpenMenu(null);}}/>
-                    <MenuItem icon="🖨" label="月次申請履歴PDF" onClick={()=>{printRequestHistoryPdf(requestExportYm);setOpenMenu(null);}}/>
                   </>}
 
                   {/* 設定メニュー */}
@@ -5906,13 +5905,13 @@ ${bodyHtml}
               <MenuItem icon="🙋" label="出勤希望の挙手" onClick={()=>openRequestSection('wish')} active={tab==='paid'}/>
               <MenuItem icon="🚩" label="管理者へのメッセージ" onClick={()=>openRequestSection('msg')} active={tab==='paid'}/>
               <MenuItem icon="🕒" label={'打刻修正申請'+(pendingTimecardCorrections().length?'（'+pendingTimecardCorrections().length+'件）':'')} onClick={openTimecardCorrectionPanelFromMenu} active={showTimecardCorrectionPanel}/>
+              <MenuItem icon="🖨" label="月次申請履歴PDF" onClick={()=>{printRequestHistoryPdf(requestExportYm);setOpenMenu(null);}}/>
               <MenuDivider/>
               <MenuLabel text="設定"/>
               <MenuItem icon="👤" label="スタッフ" onClick={()=>{setTab('staff');setOpenMenu(null);}} active={tab==='staff'}/>
               <MenuItem icon="🏥" label="診療枠" onClick={()=>{setTab('ref');setOpenMenu(null);}} active={tab==='ref'}/>
               <MenuItem icon="📊" label="必要人数" onClick={()=>{setTab('req');setOpenMenu(null);}} active={tab==='req'}/>
               <MenuItem icon="📅" label="ベースシフト" onClick={()=>{setTab('base');setOpenMenu(null);}} active={tab==='base'}/>
-              <MenuItem icon="🌸" label="申請・メッセージ" onClick={()=>{setTab('paid');setOpenMenu(null);}} active={tab==='paid'}/>
               <MenuItem icon="🔑" label={apiKey?'APIキー設定済':'APIキー未設定'} onClick={()=>{setTab('shift');setShowKeyPanel(p=>!p);setOpenMenu(null);}}/>
               <MenuItem icon="🗓" label={surgeryCalUrl?'手術カレンダー連携済':'手術カレンダー未設定'} onClick={()=>{setTab('shift');setShowSurgeryCalPanel(p=>!p);setSurgeryCalInput(surgeryCalUrl);setOpenMenu(null);}}/>
               <MenuItem icon="🔐" label="管理者PIN変更" onClick={()=>{setTab('shift');setShowAdminPinSetting(p=>!p);setOpenMenu(null);}}/>
@@ -8751,6 +8750,14 @@ CHANGELOG v144
 - PDF用の印刷画面には、有給/休み、出勤希望、管理者メッセージ、打刻修正申請を月ごとに集約表示。
 - 管理者がブラウザの印刷機能からPDF保存し、税理士・社労士へメール添付できる運用を想定。
 - アプリ表示バージョンを v143 から v144 に更新。
+-->
+<!--
+CHANGELOG v145
+- 申請メニュー内の「月次申請履歴PDF」が2つ表示される重複を修正。
+- PCメニューでは「月次申請履歴PDF」を1つだけ表示。
+- スマホメニューにも「月次申請履歴PDF」を1つだけ表示。
+- スマホメニューの設定欄に残っていた旧「申請・メッセージ」項目も削除。
+- アプリ表示バージョンを v144 から v145 に更新。
 -->
 </body>
 </html>
