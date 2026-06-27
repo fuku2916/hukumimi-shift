@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v151</title>
+<title>シフト管理 v152</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v151';
+const APP_VERSION = 'v152';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2055,7 +2055,7 @@ function App(){
   // スタッフのアイコン設定（codeごと）と打刻修正の申告（配列）。requests_data の包みに同居。
   const [avatars,setAvatars]=useState({});
   const [corrections,setCorrections]=useState([]);
-  const [requestFilter,setRequestFilter]=useState('active'); // active|month|prev|all
+  const [requestFilter,setRequestFilter]=useState('active'); // active|month|prev|custom|all
   const [requestExportYm,setRequestExportYm]=useState(()=>String(y)+'-'+String(m).padStart(2,'0'));
   const avatarsRef=React.useRef({}); const correctionsRef=React.useRef([]);
   useEffect(()=>{avatarsRef.current=avatars;},[avatars]);
@@ -5667,16 +5667,23 @@ ${bodyHtml}
     if(f==='active'||f==='month')setRequestExportYm(currentYm());
     else if(f==='prev')setRequestExportYm(prevYm());
   }
+  function setRequestMonthFromPicker(v){
+    const ym=String(v||'').trim();
+    if(!ym)return;
+    setRequestExportYm(ym);
+    setRequestFilter('custom');
+  }
   function requestPdfTarget(){
     return requestFilter==='all'?'__ALL__':selectedExportYm();
   }
   function requestFilterLabel(){
-    return requestFilter==='active'?'未処理＋当月':requestFilter==='month'?'当月':requestFilter==='prev'?'前月':'すべて';
+    return requestFilter==='active'?'未処理＋当月':requestFilter==='month'?'当月':requestFilter==='prev'?'前月':requestFilter==='custom'?'選択月 '+selectedExportYm():'すべて';
   }
   function requestVisible(dk,isPending){
     if(requestFilter==='all')return true;
     if(requestFilter==='month')return ymOfDk(dk)===currentYm();
     if(requestFilter==='prev')return ymOfDk(dk)===prevYm();
+    if(requestFilter==='custom')return ymOfDk(dk)===selectedExportYm();
     return !!isPending||ymOfDk(dk)===currentYm();
   }
   function correctionVisible(c){
@@ -6991,9 +6998,10 @@ ${bodyHtml}
                 {f==='active'?'未処理＋当月':f==='month'?'当月':f==='prev'?'前月':'すべて'}
               </button>
             ))}
-            <span style={{fontSize:12,color:'#64748B'}}>未処理は月をまたいでも表示します。処理済みは通常、当月分だけ表示します。</span>
+            <span style={{fontSize:12,color:'#64748B'}}>未処理は月をまたいでも表示します。右の年月を選ぶと、その月の申請を下に表示します。</span>
             <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
-              <input type="month" value={requestExportYm} onChange={e=>setRequestExportYm(e.target.value)} style={{padding:'5px 8px',border:'1px solid #CBD5E1',borderRadius:8,fontSize:12}}/>
+              {requestFilter==='custom'&&<span style={{fontSize:11,color:'#185FA5',fontWeight:800,background:'#EBF4FF',border:'1px solid #93C5FD',borderRadius:999,padding:'3px 8px'}}>選択月表示中</span>}
+              <input type="month" value={requestExportYm} onChange={e=>setRequestMonthFromPicker(e.target.value)} title="表示したい申請対象月を選択" style={{padding:'5px 8px',border:'1px solid #CBD5E1',borderRadius:8,fontSize:12}}/>
               <button onClick={()=>printRequestHistoryPdf(requestPdfTarget())} style={{padding:'6px 12px',border:'none',borderRadius:8,background:'#185FA5',color:'#fff',fontWeight:800,cursor:'pointer',fontSize:12}}>🖨 月次申請履歴PDF</button>
             </div>
           </div>
@@ -8725,6 +8733,16 @@ CHANGELOG v151
 - 申請画面上部の「申請表示」ウインドウ見出しに 📋 アイコンを追加。
 - 他の申請セクション（🌸 休み・有給、🙋 挙手、🚩 メッセージ、🕒 打刻修正）と見た目の統一感を持たせた。
 - アプリ表示バージョンを v150 から v151 に更新。
+-->
+<!--
+CHANGELOG v152
+- 申請表示ウインドウ右側の年月カレンダーを選んだとき、下の申請一覧にもその選択月が反映されるように修正。
+- requestFilter に custom を追加。
+- 年月カレンダー変更時は requestExportYm を更新し、requestFilter を custom に切り替える。
+- custom 表示時は、休み・有給申請、挙手、管理者メッセージ、打刻修正申請を選択月で絞り込む。
+- custom 表示時のラベルを「選択月 YYYY-MM」と表示。
+- 申請表示ウインドウ内に「選択月表示中」チップを追加。
+- アプリ表示バージョンを v151 から v152 に更新。
 -->
 </body>
 </html>
