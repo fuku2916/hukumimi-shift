@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v145</title>
+<title>シフト管理 v146</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v145';
+const APP_VERSION = 'v146';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -5643,10 +5643,15 @@ ${bodyHtml}
     setOpenMenu(null);
   }
   function ymOfDk(dk){
-    const s=String(dk||'');
-    return s.length>=7?s.slice(0,7):'';
+    const s=String(dk||'').trim();
+    if(/^\d{4}-\d{2}/.test(s))return s.slice(0,7);
+    if(/^\d{4}\/\d{1,2}/.test(s)){const p=s.split('/');return p[0]+'-'+String(p[1]).padStart(2,'0');}
+    const d=new Date(s);
+    if(!isNaN(d))return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+    return '';
   }
   function currentYm(){return String(y)+'-'+String(m).padStart(2,'0');}
+  function selectedExportYm(){return requestExportYm||currentYm();}
   function prevYm(){
     const d=new Date(y,m-2,1);
     return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
@@ -5708,8 +5713,9 @@ ${bodyHtml}
     return rows;
   }
   function printRequestHistoryPdf(ym){
-    const targetYm=ym||requestExportYm||currentYm();
+    const targetYm=ym||selectedExportYm()||currentYm();
     const rows=collectRequestRows(targetYm);
+    const allRows=collectRequestRows('');
     const w=window.open('','_blank','width=920,height=1000');
     if(!w){alert('印刷用画面を開けませんでした。ポップアップブロックを解除してください。');return;}
     const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
@@ -5717,9 +5723,9 @@ ${bodyHtml}
     h+='<style>body{font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif;padding:22px;color:#111}h1{font-size:20px;margin:0 0 4px}.sub{font-size:12px;color:#555;margin-bottom:14px}table{border-collapse:collapse;width:100%;font-size:12px}th,td{border:1px solid #999;padding:6px 7px;vertical-align:top}th{background:#f1f5f9;text-align:left}.status{font-weight:700}.empty{padding:24px;text-align:center;color:#666;border:1px solid #ccc}.note{font-size:11px;color:#666;margin-top:12px;line-height:1.6}@media print{button{display:none}body{padding:10mm}}</style></head><body>';
     h+='<button onclick="window.print()" style="float:right;padding:6px 12px">PDF保存 / 印刷</button>';
     h+='<h1>申請履歴 '+esc(targetYm)+'</h1>';
-    h+='<div class="sub">福耳会 シフト管理　'+esc(CLINIC_LABEL||'')+(APP_UNIT_LABEL?' / '+esc(APP_UNIT_LABEL):'')+'　作成: '+esc(fmtStamp(new Date().toISOString()))+'</div>';
+    h+='<div class="sub">福耳会 シフト管理　'+esc(CLINIC_LABEL||'')+(APP_UNIT_LABEL?' / '+esc(APP_UNIT_LABEL):'')+'　作成: '+esc(fmtStamp(new Date().toISOString()))+'　対象月件数: '+rows.length+'件</div>';
     if(rows.length===0){
-      h+='<div class="empty">この月の申請履歴はありません。</div>';
+      h+='<div class="empty">この月の申請履歴はありません。<br><span style="font-size:11px;color:#777">全期間の申請履歴: '+allRows.length+'件。月を変更して再出力してください。</span></div>';
     }else{
       h+='<table><thead><tr><th style="width:90px">日付</th><th style="width:110px">スタッフ</th><th style="width:120px">種別</th><th style="width:90px">状態</th><th>内容</th></tr></thead><tbody>';
       rows.forEach(r=>{
@@ -5823,7 +5829,7 @@ ${bodyHtml}
                     <MenuItem icon="🙋" label="出勤希望の挙手" onClick={()=>openRequestSection('wish')} active={tab==='paid'}/>
                     <MenuItem icon="🚩" label="管理者へのメッセージ" onClick={()=>openRequestSection('msg')} active={tab==='paid'}/>
                     <MenuItem icon="🕒" label={'打刻修正申請'+(pendingTimecardCorrections().length?'（'+pendingTimecardCorrections().length+'件）':'')} onClick={openTimecardCorrectionPanelFromMenu} active={showTimecardCorrectionPanel}/>
-              <MenuItem icon="🖨" label="月次申請履歴PDF" onClick={()=>{printRequestHistoryPdf(requestExportYm);setOpenMenu(null);}}/>
+              <MenuItem icon="🖨" label="月次申請履歴PDF" onClick={()=>{printRequestHistoryPdf(currentYm());setOpenMenu(null);}}/>
                   </>}
 
                   {/* 設定メニュー */}
@@ -5905,7 +5911,7 @@ ${bodyHtml}
               <MenuItem icon="🙋" label="出勤希望の挙手" onClick={()=>openRequestSection('wish')} active={tab==='paid'}/>
               <MenuItem icon="🚩" label="管理者へのメッセージ" onClick={()=>openRequestSection('msg')} active={tab==='paid'}/>
               <MenuItem icon="🕒" label={'打刻修正申請'+(pendingTimecardCorrections().length?'（'+pendingTimecardCorrections().length+'件）':'')} onClick={openTimecardCorrectionPanelFromMenu} active={showTimecardCorrectionPanel}/>
-              <MenuItem icon="🖨" label="月次申請履歴PDF" onClick={()=>{printRequestHistoryPdf(requestExportYm);setOpenMenu(null);}}/>
+              <MenuItem icon="🖨" label="月次申請履歴PDF" onClick={()=>{printRequestHistoryPdf(currentYm());setOpenMenu(null);}}/>
               <MenuDivider/>
               <MenuLabel text="設定"/>
               <MenuItem icon="👤" label="スタッフ" onClick={()=>{setTab('staff');setOpenMenu(null);}} active={tab==='staff'}/>
@@ -6956,7 +6962,7 @@ ${bodyHtml}
             <span style={{fontSize:12,color:'#64748B'}}>未処理は月をまたいでも表示します。処理済みは通常、当月分だけ表示します。</span>
             <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
               <input type="month" value={requestExportYm} onChange={e=>setRequestExportYm(e.target.value)} style={{padding:'5px 8px',border:'1px solid #CBD5E1',borderRadius:8,fontSize:12}}/>
-              <button onClick={()=>printRequestHistoryPdf(requestExportYm)} style={{padding:'6px 12px',border:'none',borderRadius:8,background:'#185FA5',color:'#fff',fontWeight:800,cursor:'pointer',fontSize:12}}>🖨 月次申請履歴PDF</button>
+              <button onClick={()=>printRequestHistoryPdf(selectedExportYm())} style={{padding:'6px 12px',border:'none',borderRadius:8,background:'#185FA5',color:'#fff',fontWeight:800,cursor:'pointer',fontSize:12}}>🖨 月次申請履歴PDF</button>
             </div>
           </div>
           {/* ── 🌸 休み・有給の申請 ── */}
@@ -8758,6 +8764,15 @@ CHANGELOG v145
 - スマホメニューにも「月次申請履歴PDF」を1つだけ表示。
 - スマホメニューの設定欄に残っていた旧「申請・メッセージ」項目も削除。
 - アプリ表示バージョンを v144 から v145 に更新。
+-->
+<!--
+CHANGELOG v146
+- 月次申請履歴PDFを開いても中身が空になる問題を修正。
+- 申請メニューから直接「月次申請履歴PDF」を押した場合は、現在表示中のシフト年月を対象にして出力するように変更。
+- 申請画面上部の月指定からPDF出力する場合は、指定された年月を対象にする。
+- 日付の年月判定 ymOfDk() を補強し、YYYY-MM-DD / YYYY/M/D / Date変換可能な値を扱えるようにした。
+- PDFが空の場合も、全期間に何件履歴があるかを表示し、月違いであることが分かるようにした。
+- アプリ表示バージョンを v145 から v146 に更新。
 -->
 </body>
 </html>
