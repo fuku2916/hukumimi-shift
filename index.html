@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v133</title>
+<title>シフト管理 v134</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v133';
+const APP_VERSION = 'v134';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -1325,6 +1325,15 @@ function hasOutpatientClosureForSlot(closures,dk,slot,dayClosed=false){
   if(dayClosed&&isOutpatientSlot(slot))return true;
   const c=(closures&&closures[dk]&&closures[dk][slot.id])||{};
   return Object.entries(c).some(([idx,v])=>v && Number(idx)<=outpatientRoomCountForSlot(slot));
+}
+// v134: 祝日・休診日でも、診察室ごとの設定で「○」にした外来枠はカレンダー上に表示する。
+function hasOutpatientOpenOverrideForSlot(closures,dk,slot){
+  if(!isOutpatientSlot(slot))return false;
+  const c=(closures&&closures[dk]&&closures[dk][slot.id])||{};
+  return Object.entries(c).some(([idx,v])=>v===false && Number(idx)<=outpatientRoomCountForSlot(slot));
+}
+function hasOutpatientOpenOverrideForDay(closures,dk,slotsForDay){
+  return (slotsForDay||[]).some(slot=>hasOutpatientOpenOverrideForSlot(closures,dk,slot));
 }
 function appendParam(url,k,v){
   const sep=url.indexOf('?')>=0?'&':'?';
@@ -2765,8 +2774,10 @@ function App(){
         if(!d){calHtml+='<td class="empty"></td>';return;}
         const dk=tdk(d),dow=d.getDay(),isSat=dow===6,da=asgnPDF[dk]||{},dExcl=manualExclusionsPDF[dk]||{},dt=tmpsPDF[dk]||{},sls=slotsPDF[dow]||[];
         const isClosed2=isClosedDayPDF(dk),holName2=holidaysPDF[dk],dnColor=holName2?'#991B1B':isSat?'#92400E':'#000';
+        const hasOpenOutpatient2=hasOutpatientOpenOverrideForDay(outpatientClosuresPDF,dk,sls);
+        const showClosedOnly2=isClosed2&&!hasOpenOutpatient2;
         let sh='';
-        if(!isClosed2){
+        if(!showClosedOnly2){
           sls.forEach(slot=>{
             const allIds=da[slot.id]||[];
             const exclIds=(dExcl[slot.id]||[]).map(String);
@@ -2786,8 +2797,8 @@ function App(){
             const slotBg=lbl2.includes('夜')?'#F3F0FF':lbl2.includes('昼')||lbl2.includes('午後')?'#FFF7ED':'#EFF6FF';
             const slotBd=lbl2.includes('夜')?'#7C3AED':lbl2.includes('昼')||lbl2.includes('午後')?'#C05C00':'#1D6FCC';
             const surgMark=(slot.type==='surg'&&hasSurgerySnapshot)?surgeryMarkForSlot(surgeryFlagsPDF,dk,slot):'';
-            const outMark=isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosuresPDF,dk,slot,req,!!closed):'';
-            const markHtml=(outMark?`<span class="out-mark ${hasOutpatientClosureForSlot(outpatientClosuresPDF,dk,slot)?'warn':'ok'}">${outMark}</span>`:'')+(surgMark?`<span class="surg-mark ${surgMark==='○'?'on':'off'}">${surgMark}</span>`:'');
+            const outMark=isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosuresPDF,dk,slot,req,!!isClosed2):'';
+            const markHtml=(outMark?`<span class="out-mark ok">${outMark}</span>`:'')+(surgMark?`<span class="surg-mark ${surgMark==='○'?'on':'off'}">${surgMark}</span>`:'');
             // v128: 印刷用カレンダーでは「実際に出勤する人」だけを表示する。
             // 管理画面上では除外・休みを薄く表示して経緯を確認できるが、印刷物にまで
             // 薄い過去スタッフ名が出ると下書きや旧版が混ざって見えるため、activeIds に限定する。
@@ -2806,7 +2817,7 @@ function App(){
           }).filter(Boolean);
           if(offN.length)sh+=`<div class="off-list">🌸 ${offN.join('　')}</div>`;
         }
-        calHtml+=`<td class="${isSat?'sat':''}" style="${isClosed2?'background:#FEF2F2':''}"><div class="dn" style="color:${dnColor}">${d.getDate()}${holName2?'<span style="font-size:6pt;margin-left:2px">'+holName2.slice(0,4)+'</span>':''}</div>${isClosed2?'<div class="closed">'+(holName2||'休診')+'</div>':sh}</td>`;
+        calHtml+=`<td class="${isSat?'sat':''}" style="${isClosed2?'background:#FEF2F2':''}"><div class="dn" style="color:${dnColor}">${d.getDate()}${holName2?'<span style="font-size:6pt;margin-left:2px">'+holName2.slice(0,4)+'</span>':''}</div>${showClosedOnly2?'<div class="closed">'+(holName2||'休診')+'</div>':sh}</td>`;
       });
       calHtml+='</tr>';
     });
@@ -5103,7 +5114,7 @@ ${bodyHtml}
                                 onClick={short?()=>setHelpTarget({dk,slotId:slot.id,slotLabel:label,mo:d.getMonth()+1,day:d.getDate(),dow}):undefined}
                                 title={short?'タップして「勤務できます」と挙手':''}
                                 style={{height:22,boxSizing:'border-box',borderRight:'1px solid #E2E8F0',borderBottom:'1px solid #E2E8F0',textAlign:'center',fontSize:11,padding:0,position:'sticky',top:topPx,zIndex:5,background:short?'#FDE9D6':(slot?'#FFFDFA':'#EEF1F5'),color:'#C2410C',fontWeight:700,cursor:short?'pointer':'default'}}>
-                                {short&&<span>⚠</span>}{outMark&&<span style={{fontSize:9,fontWeight:900,color:hasOutpatientClosureForSlot(outpatientClosures,dk,slot,staffIsClosedDay(dk))?'#B45309':'#166534',whiteSpace:'nowrap'}}>{outMark}</span>}{surgMark&&<span style={staffSurgeryMarkStyle(surgMark)}>{surgMark}</span>}
+                                {short&&<span>⚠</span>}{outMark&&<span style={{fontSize:9,fontWeight:900,color:'#166534',whiteSpace:'nowrap'}}>{outMark}</span>}{surgMark&&<span style={staffSurgeryMarkStyle(surgMark)}>{surgMark}</span>}
                               </td>
                             );
                           })}
@@ -5158,7 +5169,7 @@ ${bodyHtml}
                                     const surgMark=slot.type==='surg'?surgeryMarkForSlot(surgeryFlags,dk,slot):'';
                                     const outMark=isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosures,dk,slot,reqMark,staffIsClosedDay(dk)):'';
                                     return<div key={slot.id} title={slot.label+(outMark?' '+outMark:'')+(surgMark?' '+surgMark:'')} style={{fontSize:10,padding:'2px 4px',borderRadius:3,background:sc.bg,color:sc.text,fontWeight:700,lineHeight:1.25,whiteSpace:'nowrap',maxWidth:68,overflow:'visible',textOverflow:'clip',borderLeft:'3px solid '+sc.border}}>
-                                      {staffCompactSlotLabel(slot)}{outMark&&<span style={{marginLeft:2,fontSize:8,fontWeight:900,color:hasOutpatientClosureForSlot(outpatientClosures,dk,slot,staffIsClosedDay(dk))?'#B45309':'#166534'}}>{outMark}</span>}{surgMark&&<span style={staffSurgeryMarkStyle(surgMark)}>{surgMark}</span>}
+                                      {staffCompactSlotLabel(slot)}{outMark&&<span style={{marginLeft:2,fontSize:8,fontWeight:900,color:'#166534'}}>{outMark}</span>}{surgMark&&<span style={staffSurgeryMarkStyle(surgMark)}>{surgMark}</span>}
                                     </div>;
                                   })}
                                   {(()=>{const t=getStaffTimeStr(sSlots,s.notes);return t.endStr?<div style={{fontSize:10,color:'#991B1B',fontWeight:700,textAlign:'right',width:'100%',paddingRight:2}}>{t.endStr}</div>:null;})()}
@@ -5227,7 +5238,7 @@ ${bodyHtml}
                                           <div onClick={short?(e=>{e.stopPropagation();setHelpTarget({dk,slotId:slot.id,slotLabel:slot.label,mo:d.getMonth()+1,day:d.getDate(),dow});}):undefined}
                                             title={short?'タップして「勤務できます」と挙手':''}
                                             style={{display:'flex',justifyContent:'space-between',alignItems:'center',lineHeight:1.3,cursor:short?'pointer':'default'}}>
-                                            {(()=>{const surgMark=slot.type==='surg'?surgeryMarkForSlot(surgeryFlags,dk,slot):'';const outMark=isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosures,dk,slot,req,staffIsClosedDay(dk)):'';return <span style={{fontSize:9,color:'#64748B',fontWeight:600,whiteSpace:'nowrap'}}>{staffCompactSlotLabel(slot)}{outMark&&<span style={{marginLeft:2,fontSize:8,fontWeight:900,color:hasOutpatientClosureForSlot(outpatientClosures,dk,slot,staffIsClosedDay(dk))?'#B45309':'#166534'}}>{outMark}</span>}{surgMark&&<span style={staffSurgeryMarkStyle(surgMark)}>{surgMark}</span>}</span>;})()}
+                                            {(()=>{const surgMark=slot.type==='surg'?surgeryMarkForSlot(surgeryFlags,dk,slot):'';const outMark=isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosures,dk,slot,req,staffIsClosedDay(dk)):'';return <span style={{fontSize:9,color:'#64748B',fontWeight:600,whiteSpace:'nowrap'}}>{staffCompactSlotLabel(slot)}{outMark&&<span style={{marginLeft:2,fontSize:8,fontWeight:900,color:'#166534'}}>{outMark}</span>}{surgMark&&<span style={staffSurgeryMarkStyle(surgMark)}>{surgMark}</span>}</span>;})()}
                                             {short&&<span style={{fontSize:9,fontWeight:700,color:'#C2410C',whiteSpace:'nowrap'}}>⚠{activeIds.length}/{req}</span>}
                                           </div>
                                           <div style={{display:'flex',flexWrap:'wrap',gap:2}}>
@@ -5818,7 +5829,7 @@ ${bodyHtml}
                           <tr key={dk+'_'+slot.id} style={{background:closed?'#FEF2F2':K.bg}}>
                             <td style={{padding:'7px 8px',borderBottom:K.bd,whiteSpace:'nowrap',color:closed?'#991B1B':K.text}}>{d.getMonth()+1}/{d.getDate()}（{DAY_JP[dow]}）{closed?' 休診日':''}</td>
                             <td style={{padding:'7px 8px',borderBottom:K.bd,whiteSpace:'nowrap',fontWeight:600}}>{slot.label}</td>
-                            <td style={{padding:'7px 8px',borderBottom:K.bd,whiteSpace:'nowrap',color:hasOutpatientClosureForSlot(outpatientClosures,dk,slot,closed)?'#B45309':'#166534',fontWeight:700}}>{slot.label}　{mark}</td>
+                            <td style={{padding:'7px 8px',borderBottom:K.bd,whiteSpace:'nowrap',color:'#166534',fontWeight:700}}>{slot.label}　{mark}</td>
                             <td style={{padding:'7px 8px',borderBottom:K.bd}}>
                               <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
                                 {Array.from({length:n},(_,i)=>i+1).map(idx=>{
@@ -5982,17 +5993,19 @@ ${bodyHtml}
                           const dExcl=manualExclusions[dk]||{};
                           const offN=Object.entries(dt).filter(([,v])=>['off','paid','paid_am','paid_pm'].includes(v.type)).map(([sid,v])=>{const nm=(staff.find(s=>String(s.id)===String(sid))||{}).name;if(!nm)return null;const lbl=v.type==='paid'?'有給':v.type==='paid_am'?'有(午前)':v.type==='paid_pm'?'有(午後)':'休';return nm+'('+lbl+')';}).filter(Boolean);
                           const sls=slots[d.getDay()]||[];
+                          const hasOpenOutpatient=hasOutpatientOpenOverrideForDay(outpatientClosures,dk,sls);
+                          const showClosedOnly=isClosed&&!hasOpenOutpatient;
                           const offIds=Object.entries(dt).filter(([,v])=>['off','paid'].includes(v.type)).map(([sid])=>parseInt(sid));
                           const overStaff=staff.filter(s=>!offIds.includes(s.id)&&dayHours(dk,s.id,asgn,manualExclusions,slots)>DAILY_LIMIT);
-                          const shortageSlots=hasAnyAssignment&&!isClosed?sls.filter(slot=>{
+                          const shortageSlots=hasAnyAssignment&&!showClosedOnly?sls.filter(slot=>{
                             const actIds=(da[slot.id]||[]).filter(sid=>!(dExcl[slot.id]||[]).includes(sid)&&!offIds.includes(sid));
                             return actIds.length===0&&getReq(dk,slot.id)>0;
                           }):[];
                           // 休診日の背景色
                           const cellBg=isSel?'#EBF4FF':isClosed?(holidayName?'#FEE2E2':'#F1F5F9'):isSat?'#FFFBEB':K.bg;
                           return(
-                            <td key={ci} onClick={()=>{if(!isClosed){setSelDk(dk);setDtab('assign');}}}
-                              style={{border:isSel?'2px solid '+K.textI:K.bd,background:cellBg,padding:5,cursor:isClosed?'default':'pointer',verticalAlign:'top'}}>
+                            <td key={ci} onClick={()=>{if(!showClosedOnly){setSelDk(dk);setDtab('assign');}}}
+                              style={{border:isSel?'2px solid '+K.textI:K.bd,background:cellBg,padding:5,cursor:showClosedOnly?'default':'pointer',verticalAlign:'top'}}>
                               {/* 日付行 + 休診トグル */}
                               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:2}}>
                                 <div style={{fontSize:'var(--fs-date)',fontWeight:700,color:isClosed&&holidayName?'#991B1B':isSat?'#92400E':K.text}}>
@@ -6006,8 +6019,8 @@ ${bodyHtml}
                                   {isClosed?'休診':'開院'}
                                 </button>
                               </div>
-                              {/* 休診日は「休診」表示のみ */}
-                              {isClosed?(
+                              {/* 休診日は通常は「休診」表示のみ。ただし外来枠を個別に○へ戻した日は枠を表示する */}
+                              {showClosedOnly?(
                                 <div style={{textAlign:'center',padding:'4px 0',color:'#991B1B',fontSize:'var(--fs-cell)',fontWeight:600}}>
                                   {holidayName||'休診'}
                                 </div>
@@ -6030,7 +6043,7 @@ ${bodyHtml}
                                     return(
                                       <div key={slot.id} style={{marginBottom:2,padding:'1px 3px',borderRadius:3,borderLeft:'2px solid '+sc.border,background:sc.bgLight}}>
                                         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                                          <div style={{fontSize:'var(--fs-slot)',color:K.textS}}>{slot.label}{isOutpatientSlot(slot)&&<span style={{marginLeft:3,fontWeight:700,color:hasOutpatientClosureForSlot(outpatientClosures,dk,slot,!!isClosedDay(dk))?'#B45309':'#166534'}}>{outpatientMarkForSlot(outpatientClosures,dk,slot,req,!!isClosedDay(dk))}</span>}{slot.type==='surg'&&surgeryCalUrl&&<span style={{marginLeft:3,fontWeight:700,color:surgeryMarkForSlot(surgeryFlags,dk,slot)==='○'?'#DC2626':'#94A3B8'}}>{surgeryMarkForSlot(surgeryFlags,dk,slot)}</span>}</div>
+                                          <div style={{fontSize:'var(--fs-slot)',color:K.textS}}>{slot.label}{isOutpatientSlot(slot)&&<span style={{marginLeft:3,fontWeight:700,color:'#166534'}}>{outpatientMarkForSlot(outpatientClosures,dk,slot,req,!!isClosedDay(dk))}</span>}{slot.type==='surg'&&surgeryCalUrl&&<span style={{marginLeft:3,fontWeight:700,color:surgeryMarkForSlot(surgeryFlags,dk,slot)==='○'?'#DC2626':'#94A3B8'}}>{surgeryMarkForSlot(surgeryFlags,dk,slot)}</span>}</div>
                                           <div style={{fontSize:'var(--fs-cell)',fontWeight:600,color:coverColor}}>{activeIds.length}/{req}</div>
                                         </div>
                                         <div style={{display:'flex',flexWrap:'wrap',gap:2}}>
