@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v146</title>
+<title>シフト管理 v147</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v146';
+const APP_VERSION = 'v147';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -5669,6 +5669,16 @@ ${bodyHtml}
     const st=c.status||'pending';
     return requestVisible(c.date,st==='pending');
   }
+  function staffFullNameForExport(st,fallback){
+    if(st){
+      const full=String(st.fullName||'').trim();
+      if(full)return full;
+      const nm=String(st.name||'').trim();
+      const code=String(st.code||'').trim();
+      return code?nm+'（ID:'+code+'）':nm;
+    }
+    return String(fallback||'');
+  }
   function collectRequestRows(ym){
     const rows=[];
     Object.entries(requests||{}).forEach(([dk,dayMap])=>{
@@ -5683,17 +5693,17 @@ ${bodyHtml}
           const applied=tmps?.[dk]?.[String(sid)]?.type;
           status=applied?'反映済み':'未反映';
           detail=(REQ_TYPES[r.type]?.label||r.type);
-          name=st?.name||r.staffName||key;
+          name=staffFullNameForExport(st,r.staffName||key);
         }else if(r.type==='work_wish'){
           type='出勤希望の挙手';
           status=r.decision==='approved'?'承認済み':r.decision==='rejected'?'却下済み':'未対応';
           detail=(r.slotLabels||r.slots||[]).join('・');
-          name=st?.name||r.staffName||key;
+          name=staffFullNameForExport(st,r.staffName||key);
         }else if(r.type==='mistake_report'){
           type='管理者へのメッセージ';
           status=r.resolved?'対応済み':'未対応';
           detail=r.text||'';
-          name=r.staffName||st?.name||key;
+          name=staffFullNameForExport(st,r.staffName||key);
         }else return;
         rows.push({dk,name,type,status,detail,at:r.appliedAt||r.createdAt||r.decidedAt||''});
       });
@@ -5702,7 +5712,7 @@ ${bodyHtml}
       if(ym&&ymOfDk(c.date)!==ym)return;
       rows.push({
         dk:c.date||'',
-        name:c.staffName||staffByCorrection(c)?.name||c.code||'',
+        name:staffFullNameForExport(staffByCorrection(c),c.staffName||c.code||''),
         type:'打刻修正申請',
         status:correctionStatusLabel(c),
         detail:'出 '+(c.newIn||'—')+' / 退 '+(c.newOut||'—')+'　理由: '+(c.reason||'—')+(c.note?'　補足: '+c.note:''),
@@ -5727,13 +5737,13 @@ ${bodyHtml}
     if(rows.length===0){
       h+='<div class="empty">この月の申請履歴はありません。<br><span style="font-size:11px;color:#777">全期間の申請履歴: '+allRows.length+'件。月を変更して再出力してください。</span></div>';
     }else{
-      h+='<table><thead><tr><th style="width:90px">日付</th><th style="width:110px">スタッフ</th><th style="width:120px">種別</th><th style="width:90px">状態</th><th>内容</th></tr></thead><tbody>';
+      h+='<table><thead><tr><th style="width:90px">申請対象日</th><th style="width:115px">申請日</th><th style="width:130px">スタッフ</th><th style="width:120px">種別</th><th style="width:90px">状態</th><th>内容</th></tr></thead><tbody>';
       rows.forEach(r=>{
-        h+='<tr><td>'+esc(r.dk)+'</td><td>'+esc(r.name)+'</td><td>'+esc(r.type)+'</td><td class="status">'+esc(r.status)+'</td><td>'+esc(r.detail).replace(/\n/g,'<br>')+'</td></tr>';
+        h+='<tr><td>'+esc(r.dk)+'</td><td>'+esc(r.at?fmtStamp(r.at):'—')+'</td><td>'+esc(r.name)+'</td><td>'+esc(r.type)+'</td><td class="status">'+esc(r.status)+'</td><td>'+esc(r.detail).replace(/\n/g,'<br>')+'</td></tr>';
       });
       h+='</tbody></table>';
     }
-    h+='<div class="note">この画面はブラウザの印刷機能からPDF保存できます。Windows/Macでは「印刷」→「PDFとして保存」を選んでください。税理士・社労士へ送る場合は、保存したPDFをメールに添付してください。</div>';
+    h+='<div class="note">「申請対象日」は休み・有給・出勤希望・打刻修正などの対象日です。「申請日」はスタッフが申請した日時または管理者が処理した日時です。<br>この画面はブラウザの印刷機能からPDF保存できます。Windows/Macでは「印刷」→「PDFとして保存」を選んでください。税理士・社労士へ送る場合は、保存したPDFをメールに添付してください。</div>';
     h+='</body></html>';
     w.document.open();w.document.write(h);w.document.close();
     setTimeout(()=>{try{w.focus();}catch(_){ }},200);
@@ -8773,6 +8783,15 @@ CHANGELOG v146
 - 日付の年月判定 ymOfDk() を補強し、YYYY-MM-DD / YYYY/M/D / Date変換可能な値を扱えるようにした。
 - PDFが空の場合も、全期間に何件履歴があるかを表示し、月違いであることが分かるようにした。
 - アプリ表示バージョンを v145 から v146 に更新。
+-->
+<!--
+CHANGELOG v147
+- 月次申請履歴PDFの左端列名を「日付」から「申請対象日」に変更。
+- 「申請日」列を追加し、申請/処理日時がある場合は表示するようにした。
+- PDF出力時のスタッフ名は、スタッフマスターの fullName を優先して表示するようにした。
+- fullName が未登録の場合は name を表示し、スタッフコードがあれば「名前（ID:コード）」として同姓識別しやすくした。
+- PDF末尾の注記に「申請対象日」と「申請日」の違いを明記。
+- アプリ表示バージョンを v146 から v147 に更新。
 -->
 </body>
 </html>
