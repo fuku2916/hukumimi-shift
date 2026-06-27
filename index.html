@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v139</title>
+<title>シフト管理 v140</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v139';
+const APP_VERSION = 'v140';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2027,6 +2027,7 @@ function App(){
   const [outpatientClosuresUpdatedAt,setOutpatientClosuresUpdatedAt]=useState(()=>saved?.outpatientClosuresUpdatedAt||'');
   const [showOutpatientClosurePanel,setShowOutpatientClosurePanel]=useState(false);
   const [savingOutpatientClosures,setSavingOutpatientClosures]=useState(false);
+  const [showTimecardCorrectionPanel,setShowTimecardCorrectionPanel]=useState(false); // 管理画面上部の打刻修正マーク
   // ── スタッフモード用 state ──（更新リロード後は直前のセッションを復元）
   const [staffMyId,setStaffMyId]=useState(()=>{const r=loadResume();return (r&&r.appMode==='staff')?r.staffMyId:null;});
   const [helpTarget,setHelpTarget]=useState(null); // ⚠不足コマからの「挙手」対象 {dk,slotId,slotLabel,mo,day,dow}
@@ -5556,6 +5557,45 @@ ${bodyHtml}
     );
   }
 
+
+  function pendingTimecardCorrections(){
+    return (corrections||[]).filter(c=>(c.status||'pending')==='pending');
+  }
+  function staffByCorrection(c){
+    const code=String(c&&c.code||'');
+    return staff.find(x=>String(x.code||'')===code)||staff.find(x=>String(x.id||'')===code)||staff.find(x=>String(x.name||'')===String(c&&c.staffName||''));
+  }
+  function correctionAssessment(c){
+    const st=staffByCorrection(c);
+    if(!st)return {cls:'ng',label:'NG候補',msg:'スタッフID/コードを特定できません'};
+    const dk=c.date;
+    const d=new Date(dk);
+    if(!dk||isNaN(d))return {cls:'ng',label:'NG候補',msg:'対象日が不明です'};
+    const dow=d.getDay();
+    const dayAsgn=asgn[dk]||{};
+    const daySlots=slots[dow]||[];
+    const assigned=daySlots.filter(sl=>((dayAsgn[sl.id]||[]).map(String)).includes(String(st.id)));
+    if(!assigned.length)return {cls:'ng',label:'NG候補',msg:'この日の予定シフトが見つかりません'};
+    let minS=99999,maxE=-1;
+    assigned.forEach(sl=>{const r=slotRangeMin(sl);if(r&&r.s!=null&&r.e!=null){if(r.s<minS)minS=r.s;if(r.e>maxE)maxE=r.e;}});
+    if(maxE<0)return {cls:'warn',label:'要確認',msg:'予定シフトの時間帯を判定できません'};
+    const vals=[];
+    if(c.newIn)vals.push({kind:'出勤',v:hmToMin(c.newIn)});
+    if(c.newOut)vals.push({kind:'退勤',v:hmToMin(c.newOut)});
+    const bad=vals.filter(x=>x.v==null||x.v<minS-30||x.v>maxE+60);
+    if(bad.length)return {cls:'warn',label:'要確認',msg:`申請時刻が予定勤務帯 ${fmtHM(minS)}〜${fmtHM(maxE)} から外れています`};
+    return {cls:'ok',label:'OK',msg:`予定勤務帯 ${fmtHM(minS)}〜${fmtHM(maxE)} の範囲内です`};
+  }
+  function correctionBadgeStyle(cls){
+    if(cls==='ok')return {background:'#DCFCE7',color:'#166534',border:'1px solid #86EFAC'};
+    if(cls==='warn')return {background:'#FEF3C7',color:'#92400E',border:'1px solid #FCD34D'};
+    return {background:'#FEE2E2',color:'#991B1B',border:'1px solid #FCA5A5'};
+  }
+  function openTimecardApproval(){
+    const url='https://fuku2916.github.io/fukumimi-timecard/?admin=1&tab=appr';
+    window.open(url,'_blank','noopener,noreferrer');
+  }
+
   return(
     <div style={{background:K.bgT,minHeight:'100vh',overflowX:'hidden'}}>
       {/* ── メニューバー ── */}
@@ -5595,6 +5635,7 @@ ${bodyHtml}
           {(()=>{let n=0;const typeToTmp={paid_full:'paid',paid_am:'paid_am',paid_pm:'paid_pm',off:'off'};Object.entries(requests||{}).forEach(([dk,dayMap])=>{Object.entries(dayMap||{}).forEach(([sidStr,r])=>{if(!r||!typeToTmp[r.type])return;const sid=parseInt(sidStr);if(!staff.find(x=>x.id===sid))return;const appliedType=tmps?.[dk]?.[String(sid)]?.type;if(appliedType!==typeToTmp[r.type])n++;});});return n>0?<span onClick={()=>{setTab('paid');setOpenMenu(null);setTimeout(()=>{const el=document.getElementById('paidsec-paid');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},120);}} title="クリックで未反映の休み・有給申請へ" style={{fontSize:13,background:'#FDF2F8',color:'#86198F',border:'1px solid #F9A8D4',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🌸 {n}件</span>:null;})()}
           {(()=>{let nw=0;Object.values(requests).forEach(d=>Object.values(d).forEach(r=>{if(r&&r.type==='work_wish'&&!r.decision)nw++;}));return nw>0?<span onClick={()=>{setTab('paid');setOpenMenu(null);setTimeout(()=>{const el=document.getElementById('paidsec-wish');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},120);}} title="クリックで挙手欄へ" style={{fontSize:13,background:'#ECFDF5',color:'#065F46',border:'1px solid #6EE7B7',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🙋 {nw}件</span>:null;})()}
           {(()=>{let nr=0;Object.values(requests).forEach(d=>Object.values(d).forEach(r=>{if(r&&r.type==='mistake_report'&&!r.resolved)nr++;}));return nr>0?<span onClick={()=>{setTab('paid');setOpenMenu(null);setTimeout(()=>{const el=document.getElementById('paidsec-msg');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},120);}} title="クリックでメッセージ欄へ" style={{fontSize:13,background:'#FFF7ED',color:'#9A3412',border:'1px solid #FDBA74',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🚩 {nr}件</span>:null;})()}
+          {(()=>{const nc=pendingTimecardCorrections().length;return nc>0?<span onClick={()=>{setShowTimecardCorrectionPanel(true);setOpenMenu(null);}} title="クリックで打刻修正申請へ" style={{fontSize:13,background:'#EEF2FF',color:'#3730A3',border:'1px solid #A5B4FC',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🕒 {nc}件</span>:null;})()}
 
           {/* PC：メニュー項目 / スマホ：ハンバーガー */}
           <div className="pc-menu" style={{display:'flex',alignItems:'center',flex:1}}>
@@ -5649,6 +5690,7 @@ ${bodyHtml}
                     <MenuLabel text="シフトパターン"/>
                     <MenuItem icon="📅" label="ベースシフト" onClick={()=>{setTab('base');setOpenMenu(null);}} active={tab==='base'}/>
                     <MenuItem icon="🌸" label="申請・メッセージ" onClick={()=>{setTab('paid');setOpenMenu(null);}} active={tab==='paid'}/>
+              <MenuItem icon="🕒" label={'打刻修正申請'+(pendingTimecardCorrections().length?'（'+pendingTimecardCorrections().length+'件）':'')} onClick={()=>{setShowTimecardCorrectionPanel(true);setOpenMenu(null);}}/>
 
                     <MenuDivider/>
                     <MenuLabel text="認証"/>
@@ -5749,6 +5791,45 @@ ${bodyHtml}
 
       {/* メニュー外クリックで閉じる */}
       {openMenu&&<div onClick={()=>setOpenMenu(null)} style={{position:'fixed',inset:0,zIndex:998}}/>}
+      {showTimecardCorrectionPanel&&(
+        <div style={{padding:16}}>
+          <div style={{background:'#fff',border:'1px solid #CBD5E1',borderRadius:14,boxShadow:'0 8px 24px rgba(0,0,0,.08)',padding:16,marginBottom:16}}>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12}}>
+              <div style={{fontSize:18,fontWeight:800,color:'#1E293B'}}>🕒 打刻修正申請</div>
+              <span style={{fontSize:12,color:'#64748B'}}>スタッフスマホ画面から届いた申請です</span>
+              <button onClick={()=>setShowTimecardCorrectionPanel(false)} style={{marginLeft:'auto',border:'1px solid #CBD5E1',background:'#fff',borderRadius:8,padding:'6px 10px',cursor:'pointer'}}>閉じる</button>
+            </div>
+            {pendingTimecardCorrections().length===0?(
+              <div style={{fontSize:13,color:'#64748B',background:'#F8FAFC',border:'1px solid #E2E8F0',borderRadius:10,padding:14}}>未処理の打刻修正申請はありません。</div>
+            ):(
+              <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                {pendingTimecardCorrections().map((c,i)=>{
+                  const st=staffByCorrection(c);
+                  const a=correctionAssessment(c);
+                  return <div key={i} style={{border:'1px solid #E2E8F0',borderRadius:12,padding:12,background:'#F8FAFC'}}>
+                    <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',marginBottom:8}}>
+                      <span style={{fontWeight:800,fontSize:15,color:'#0F172A'}}>{c.staffName||(st&&st.name)||c.code||'—'}</span>
+                      <span style={{fontSize:12,color:'#64748B'}}>対象日: <b>{c.date||'—'}</b></span>
+                      <span style={{fontSize:12,color:'#64748B'}}>申請: 出 {c.newIn||'—'} / 退 {c.newOut||'—'}</span>
+                      <span style={{fontSize:11,fontWeight:800,borderRadius:999,padding:'3px 9px',...correctionBadgeStyle(a.cls)}}>{a.label}</span>
+                    </div>
+                    <div style={{fontSize:12,color:'#475569',lineHeight:1.7}}>
+                      <div>理由: <b>{c.reason||'—'}</b>{c.note?'　補足: '+c.note:''}</div>
+                      <div>自動判定: {a.msg}</div>
+                      <div style={{color:'#64748B'}}>※ 他スタッフ退勤中央値±20分の判定は次段階でタイムカード実績を読み込んで追加します。現時点では自動却下せず、管理者判断の補助として表示します。</div>
+                    </div>
+                    <div style={{display:'flex',gap:8,marginTop:10,flexWrap:'wrap'}}>
+                      <button onClick={openTimecardApproval} style={{border:'none',background:'#185FA5',color:'#fff',borderRadius:8,padding:'7px 12px',fontWeight:700,cursor:'pointer'}}>タイムカードで確認・反映</button>
+                      <button onClick={()=>{setTab('shift');setShowTimecardCorrectionPanel(false);}} style={{border:'1px solid #CBD5E1',background:'#fff',color:'#334155',borderRadius:8,padding:'7px 12px',fontWeight:700,cursor:'pointer'}}>シフト表を見る</button>
+                    </div>
+                  </div>;
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ================================================================ */}
       {/* シフト表                                                          */}
       {/* ================================================================ */}
@@ -8449,6 +8530,16 @@ CHANGELOG v139
 - 申請データは requests_data の timecardCorrections に保存し、タイムカードアプリ側で承認・却下できる仕様を維持。
 - 申告一覧に理由を表示。
 - アプリ表示バージョンを v138 から v139 に更新。
+-->
+<!--
+CHANGELOG v140
+- 管理画面上部に「🕒 打刻修正」マークを追加。
+- 未処理の timecardCorrections 件数をバッジ表示。
+- マークをクリックすると、スタッフスマホ画面から届いた打刻修正申請一覧をシフト管理アプリ内で確認できるようにした。
+- 各申請に、対象日・申請時刻・理由・補足・簡易自動判定を表示。
+- 簡易自動判定では、予定シフトがあるか、申請時刻が予定勤務帯から大きく外れていないかを確認。
+- 「タイムカードで確認・反映」ボタンを追加し、タイムカードアプリ管理画面の申請承認タブを開けるようにした。
+- アプリ表示バージョンを v139 から v140 に更新。
 -->
 </body>
 </html>
