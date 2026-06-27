@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v140</title>
+<title>シフト管理 v141</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v140';
+const APP_VERSION = 'v141';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -5595,6 +5595,25 @@ ${bodyHtml}
     const url='https://fuku2916.github.io/fukumimi-timecard/?admin=1&tab=appr';
     window.open(url,'_blank','noopener,noreferrer');
   }
+  function jumpToCorrectionShiftDate(c){
+    const dk=String(c&&c.date||'');
+    const d=new Date(dk+'T00:00');
+    if(!dk||isNaN(d)){alert('対象日が不明なため、シフト表へ移動できません。');return;}
+    setY(d.getFullYear());
+    setM(d.getMonth()+1);
+    setSelDk(dk);
+    setDtab('assign');
+    setTab('shift');
+    setShowTimecardCorrectionPanel(false);
+    setOpenMenu(null);
+    setTimeout(()=>{
+      const el=document.getElementById('shift-day-'+dk);
+      if(el){
+        el.scrollIntoView({behavior:'smooth',block:'center',inline:'center'});
+        try{el.animate([{boxShadow:'0 0 0 0 rgba(0,0,0,.35)'},{boxShadow:'0 0 0 6px rgba(0,0,0,.20)'},{boxShadow:'0 0 0 0 rgba(0,0,0,.0)'}],{duration:1200,iterations:2});}catch(_){}
+      }
+    },180);
+  }
 
   return(
     <div style={{background:K.bgT,minHeight:'100vh',overflowX:'hidden'}}>
@@ -5820,7 +5839,7 @@ ${bodyHtml}
                     </div>
                     <div style={{display:'flex',gap:8,marginTop:10,flexWrap:'wrap'}}>
                       <button onClick={openTimecardApproval} style={{border:'none',background:'#185FA5',color:'#fff',borderRadius:8,padding:'7px 12px',fontWeight:700,cursor:'pointer'}}>タイムカードで確認・反映</button>
-                      <button onClick={()=>{setTab('shift');setShowTimecardCorrectionPanel(false);}} style={{border:'1px solid #CBD5E1',background:'#fff',color:'#334155',borderRadius:8,padding:'7px 12px',fontWeight:700,cursor:'pointer'}}>シフト表を見る</button>
+                      <button onClick={()=>jumpToCorrectionShiftDate(c)} style={{border:'1px solid #CBD5E1',background:'#fff',color:'#334155',borderRadius:8,padding:'7px 12px',fontWeight:700,cursor:'pointer'}}>シフト表を見る</button>
                     </div>
                   </div>;
                 })}
@@ -6156,8 +6175,8 @@ ${bodyHtml}
                           // 休診日の背景色
                           const cellBg=isSel?'#EBF4FF':isClosed?(holidayName?'#FEE2E2':'#F1F5F9'):isSat?'#FFFBEB':K.bg;
                           return(
-                            <td key={ci} onClick={()=>{if(!showClosedOnly){setSelDk(dk);setDtab('assign');}}}
-                              style={{border:isSel?'2px solid '+K.textI:K.bd,background:cellBg,padding:5,cursor:showClosedOnly?'default':'pointer',verticalAlign:'top'}}>
+                            <td id={'shift-day-'+dk} key={ci} onClick={()=>{if(!showClosedOnly){setSelDk(dk);setDtab('assign');}}}
+                              style={{border:isSel?'3px solid #000':K.bd,boxShadow:isSel?'inset 0 0 0 1px #000':'none',background:cellBg,padding:5,cursor:showClosedOnly?'default':'pointer',verticalAlign:'top'}}>
                               {/* 日付行 + 休診トグル */}
                               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:2}}>
                                 <div style={{fontSize:'var(--fs-date)',fontWeight:700,color:isClosed&&holidayName?'#991B1B':isSat?'#92400E':K.text}}>
@@ -8540,6 +8559,14 @@ CHANGELOG v140
 - 簡易自動判定では、予定シフトがあるか、申請時刻が予定勤務帯から大きく外れていないかを確認。
 - 「タイムカードで確認・反映」ボタンを追加し、タイムカードアプリ管理画面の申請承認タブを開けるようにした。
 - アプリ表示バージョンを v139 から v140 に更新。
+-->
+<!--
+CHANGELOG v141
+- 打刻修正申請パネル内の「シフト表を見る」ボタンを修正。
+- ボタン押下時に、申請対象日の年月へ移動し、その日を選択状態にするように変更。
+- 対象日のカレンダーセルに id="shift-day-YYYY-MM-DD" を付与し、移動後に scrollIntoView で中央表示するようにした。
+- 選択中の日付セルは黒い太枠で強調表示するように変更。
+- アプリ表示バージョンを v140 から v141 に更新。
 -->
 </body>
 </html>
