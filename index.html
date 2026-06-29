@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v157';
+const APP_VERSION = 'v158';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -3386,17 +3386,22 @@ ${bodyHtml}
       const pattern=getABPatternForDate(d);
       const baseForDay=baseShift[pattern]?.[dow];
       if(!baseForDay) return;
-      // 既存の割り当てがある日はスキップ（上書きしない）
-      const hasExisting=newAsgn[dk]&&Object.values(newAsgn[dk]).some(ids=>(ids||[]).length>0);
-      if(hasExisting) return;
-      newAsgn[dk]={};
+      let appliedThisDay=false;
+      if(!newAsgn[dk]) newAsgn[dk]={};
       Object.entries(baseForDay).forEach(([slotId,ids])=>{
-        if(ids&&ids.length>0){
-          // 存在するスタッフのみ
-          newAsgn[dk][slotId]=ids.filter(sid=>staff.some(s=>s.id===sid));
+        if(!ids||ids.length===0) return;
+        // 既にその枠に割当がある場合は上書きしない。
+        // v158: 日単位でスキップせず、枠単位で空いているところだけ補完する。
+        // これにより、外来だけ既存割当がある日でも、午前手術など空欄のベースシフトが反映される。
+        const hasSlotExisting=(newAsgn[dk][slotId]||[]).length>0;
+        if(hasSlotExisting) return;
+        const validIds=ids.filter(sid=>staff.some(s=>s.id===sid));
+        if(validIds.length>0){
+          newAsgn[dk][slotId]=validIds;
+          appliedThisDay=true;
         }
       });
-      appliedCount++;
+      if(appliedThisDay) appliedCount++;
     });
     setAsgn(newAsgn);
     return appliedCount;
@@ -3432,12 +3437,8 @@ ${bodyHtml}
     // ベースシフトが空ならスキップ
     const hasBase=['A','B'].some(p=>Object.keys(baseShift[p]||{}).length>0);
     if(!hasBase) return;
-    // 当月にすでに割り当てがあるかチェック
-    const hasAsgnForMonth=dates.some(d=>{
-      const dk=tdk(d);
-      return asgn[dk]&&Object.values(asgn[dk]).some(ids=>(ids||[]).length>0);
-    });
-    if(hasAsgnForMonth) return; // 既にデータがあれば自動展開しない
+    // v158: 当月に一部割当があっても、空いている枠だけベースシフトを補完する。
+    // 既存割当は applyBaseShiftToMonth 側で枠単位に保護する。
     applyBaseShiftToMonth();
   // eslint-disable-next-line
   },[y,m,baseShift]);
@@ -7952,9 +7953,9 @@ function BaseShiftTab({staff,slots,baseShift,setBaseShift,setBaseSlotStaff,toggl
   }
 
   function handleApply(){
-    if(window.confirm(`ベースシフトを ${y}年${m}月 に展開します。\nすでに割り当てられている日はスキップされ、空いている日のみベースシフトが適用されます。よろしいですか？`)){
+    if(window.confirm(`ベースシフトを ${y}年${m}月 に展開します。\nすでに割り当てられている枠は上書きせず、空いている枠だけにベースシフトを適用します。よろしいですか？`)){
       const count=applyBaseShiftToMonth();
-      alert(`${count}日にベースシフトを適用しました。`);
+      alert(`${count}日にベースシフトを適用しました。\n※既存の割当がある枠は上書きしていません。`);
     }
   }
 
