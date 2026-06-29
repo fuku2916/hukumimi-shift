@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v162';
+const APP_VERSION = 'v163';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -1504,9 +1504,12 @@ function outpatientAutoMarkForCalendar(closures,dk,group,dayClosed,da,dExcl,dt){
   if(!group||group.kind!=='outRooms')return '';
   return (group.slots||[]).map(slot=>{
     const rn=slot.roomNo||1;
+    const activeDoctorAssigned=(APP_UNIT==='doctor' && slotActiveIdsForCalendar(slot,da,dExcl,dt).length>0);
+    // v163: ドクター画面の外来(1)/(2)表示は、配属中の医師がいる診は必ず「○」にする。
+    // 旧休診フラグが残っていても、実際に医師名が表示されているのに見出しだけ「ー」になる矛盾を防ぐ。
+    if(APP_UNIT==='doctor')return '('+rn+')'+(activeDoctorAssigned?'○':'ー');
     const manualClosed=outpatientRoomClosed(closures,dk,slot.id,1,dayClosed);
-    const noDoctorAssigned=(APP_UNIT==='doctor' && slotActiveIdsForCalendar(slot,da,dExcl,dt).length===0);
-    return '('+rn+')'+((manualClosed||noDoctorAssigned)?'ー':'○');
+    return '('+rn+')'+(manualClosed?'ー':'○');
   }).join('');
 }
 
