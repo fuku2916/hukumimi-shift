@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v155</title>
+<title>シフト管理 v156</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v155';
+const APP_VERSION = 'v156';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -209,6 +209,8 @@ function daySlotsForDow(dow){
 }
 function bothSurgeryCap(da,sid,dow,excl){
   if(!da||sid==null)return null;
+  var _bs=STAFF_OBJ_LOOKUP&&STAFF_OBJ_LOOKUP[sid];
+  if(isDoctorStaff(_bs))return null;
   var daySlots=daySlotsForDow(dow);
   // 本人が入っている「現在の手術コマ」だけを集める（存在しない古いコマIDは無視）。
   // 除外（手動で外した）コマは通し判定に含めない。
@@ -235,6 +237,7 @@ function bothSurgeryCap(da,sid,dow,excl){
 // その日の実効退勤時刻（分）。通し手術なら15:30で打ち切る。excl=その日の除外マップ(manualExclusions[dk])
 function effEndMin(s,dow,da,excl){
   var lim=staffEndMin(s,dow);
+  if(isDoctorStaff(s))return lim;
   var cap=bothSurgeryCap(da,s&&s.id,dow,excl);
   if(cap!=null)lim=(lim==null)?cap:Math.min(lim,cap);
   return lim;
@@ -263,6 +266,8 @@ function canCoverSlot(s,slot,dow){
 }
 // 「ベースシフト固定」スタッフか（自動配置で追加・移動の対象外。ベースシフト通りにだけ配置）
 function isBaseOnly(s){ return !!(s && s.cond && s.cond.baseOnly); }
+// ドクターは労基シフト調整用の自動退勤キャップ（通し手術15:30・1日8h/週40h調整）の対象外
+function isDoctorStaff(s){ return !!(s && ((s.cond&&s.cond.isDoctor) || /【(?:ドクター|医師)】/.test(s.notes||''))); }
 // その曜日(dow)に勤務可能な設定か（勤務できる曜日 cond.days を参照。未設定なら可とみなす）
 function staffWorksDow(s,dow){
   if(!s)return false;
@@ -591,12 +596,13 @@ function parseEmploymentType(notes){
 
 // ── 勤務条件を「入力式(cond)」⇔「条件文(notes)」で相互変換 ──
 function minToHM2(m){if(m==null||m==='')return '';return Math.floor(m/60)+':'+String(m%60).padStart(2,'0');}
-function defaultCond(){const dt={};[1,2,3,4,5,6].forEach(d=>{dt[d]={s:'',e:''};});return {days:{1:true,2:true,3:true,4:true,5:true,6:true},dayTimes:dt,weekMinH:'',weekMaxH:'',slot:'both',emp:'',baseOnly:false};}
+function defaultCond(){const dt={};[1,2,3,4,5,6].forEach(d=>{dt[d]={s:'',e:''};});return {days:{1:true,2:true,3:true,4:true,5:true,6:true},dayTimes:dt,weekMinH:'',weekMaxH:'',slot:'both',emp:'',baseOnly:false,isDoctor:false};}
 // 入力式の値から、AI・判定が読める“決まった書式”の条件文を生成（曜日別の勤務時間に対応）
 function condToNotes(c){
   if(!c)return '';
   const L=[];
   if(c.emp==='fulltime')L.push('【常勤】'); else if(c.emp==='parttime')L.push('【パート】');
+  if(c.isDoctor)L.push('【ドクター】');
   if(c.days){const a=[1,2,3,4,5,6].filter(d=>c.days[d]); if(a.length>0&&a.length<6)L.push(a.map(d=>DAY_JP[d]).join('・')+'勤務可能');}
   if(c.slot==='surg')L.push('手術のみ'); else if(c.slot==='out')L.push('外来のみ'); else if(c.slot==='both')L.push('外来・手術いずれも可');
   const mn=c.weekMinH, mx=c.weekMaxH;
@@ -618,6 +624,7 @@ function notesToCond(notes){
   const lv=staffLeaveLimitMin(notes), st=staffStartLimitMin(notes), wh=parseWeeklyHours(notes), emp=parseEmploymentType(notes);
   if(wh){ if(wh.min)c.weekMinH=wh.min; if(wh.max&&wh.max<40)c.weekMaxH=wh.max; }
   if(emp)c.emp=emp;
+  if(/【(?:ドクター|医師)】|\bdoctor\b|ドクター|医師/.test(notes||''))c.isDoctor=true;
   if(/手術のみ|手術室のみ/.test(notes||''))c.slot='surg'; else if(/外来のみ/.test(notes||''))c.slot='out'; else c.slot='both';
   ['月','火','水','木','金','土'].forEach((j,i)=>{ if(new RegExp(j+'曜?(?:不可|休)').test(notes||''))c.days[i+1]=false; });
   // 旧データは全曜日共通の時刻 → 許可曜日すべてに同じ時刻を入れる
@@ -637,6 +644,7 @@ function enforceHourLimits(rawAsgn, staff, weeks, slots, pinned, reqMap){
   });
 
   staff.forEach(s=>{
+    if(isDoctorStaff(s)) return;
     const wh=parseWeeklyHours(s.notes);
     if(!wh||wh.max<=0) return;
     const maxH=Math.min(wh.max, WEEKLY_LIMIT);
@@ -763,7 +771,7 @@ function dayHours(dk,staffId,asgn,excl,slotsState,staffArr){
     var r=slotRangeMin(sl); if(!r||r.s==null)return;
     if(r.s<12*60)hasAm=true; else hasPm=true;
   });
-  if(hasAm&&hasPm){
+  if(hasAm&&hasPm&&!isDoctorStaff(s)){
     var cap=15*60+30; lv=(lv==null)?cap:Math.min(lv,cap);
   }
   return daySpanHours(ranges, lv);
@@ -875,7 +883,7 @@ async function autoGenerate(staff,y,m,dates,apiKey,weeklyReq,manualExclusions,sl
   const staffDesc=staff.map(s=>{
     const wh=parseWeeklyHours(s.notes);
     const emp=parseEmploymentType(s.notes);
-    const empLabel=emp==='fulltime'?'【常勤】':emp==='parttime'?'【パート】':'';
+    const empLabel=(isDoctorStaff(s)?'【ドクター】':'')+(emp==='fulltime'?'【常勤】':emp==='parttime'?'【パート】':'');
     // AI送信時は全角数字を半角に正規化。条件文(notes)＋自由メモ(memo)の両方を渡す
     const combined=((s.notes||'')+(s.memo?('\n'+s.memo):'')).replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0));
     const lines=combined.split('\n').filter(l=>l.trim()).map(l=>`    ・${l.trim()}`).join('\n');
@@ -921,7 +929,7 @@ ${parttimeStaff.length>0?parttimeStaff.map(s=>`    ${s.name}(ID:${s.id})`).join(
     :'';
   const hourConstraints=staff
     .map(s=>({s,wh:parseWeeklyHours(s.notes)}))
-    .filter(({wh})=>wh&&(wh.min>0||wh.max<40))
+    .filter(({s,wh})=>!isDoctorStaff(s)&&wh&&(wh.min>0||wh.max<40))
     .map(({s,wh})=>{
       let line=`  ${s.name}(ID:${s.id}): 週${wh.min>0?wh.min+'h以上':''}${wh.min>0&&wh.max<40?'〜':''}${wh.max<40?wh.max+'h以内':''}`;
       if(wh.min>0){
@@ -954,8 +962,11 @@ ${hourConstraints||'  （時間制約の設定なし）'}
   1人が「午前手術(am_surg 9:30-15:00)」と「午後手術(pm_surg 13:00-18:30)」の両方に通しで入る場合、
   その日は6時間勤務とし、15:30で退勤する扱い（9:30〜15:30）。労働時間は6.0hで計算する。
   → この人は午後手術の15:30以降は不在になるため、午後手術の15:30〜18:30は別のスタッフでカバーすること。
+━━ ドクターの扱い━━
+  【ドクター】のスタッフは、通し手術15:30退勤キャップ、1日8時間・週40時間の自動調整対象外です。
+  ドクターには自動的な帰宅時刻を付けず、診療上必要な枠へ配置してください。
 ━━ 労働基準法（第32条）の制約━━
-  1日8時間・週40時間が上限。必ず守ること。
+  ドクター以外は1日8時間・週40時間が上限。必ず守ること。
   1日複数コマの上限例: am_out_r1+pm2_r1=7.0h OK / am_out+pm1+pm2=9.0h → 違反
 ━━ 【最重要】時間帯の連続カバー（無人禁止）━━
   各コマは「開始時刻〜終了時刻」まで途切れなく最低1名が在席している必要があります。
@@ -1822,6 +1833,12 @@ function CondEditor({cond,onCond,memo,onMemo}){
       <div><label style={lbl}>雇用形態</label><div style={{display:'flex',gap:6}}>
         {[['','指定なし'],['fulltime','常勤'],['parttime','パート']].map(([v,t])=>(<button key={v} onClick={()=>set('emp',v)} style={chip((c.emp||'')===v)}>{t}</button>))}
       </div></div>
+      <div style={{padding:'8px 10px',background:c.isDoctor?'#EEF2FF':'#fff',border:'1px solid '+(c.isDoctor?'#818CF8':'#E2E8F0'),borderRadius:8}}>
+        <label style={{display:'flex',alignItems:'flex-start',gap:8,cursor:'pointer'}}>
+          <input type="checkbox" checked={!!c.isDoctor} onChange={e=>set('isDoctor',e.target.checked)} style={{marginTop:2,width:16,height:16,flexShrink:0}}/>
+          <span style={{fontSize:12,lineHeight:1.5,color:'#1E293B'}}><b>ドクター</b>（通し手術15:30退勤・1日8時間/週40時間の自動調整対象外）<br/><span style={{fontSize:11,color:'#64748B'}}>医師として登録する場合にチェック。自動的に「帰15:30」などを付けません。</span></span>
+        </label>
+      </div>
       <div><label style={lbl}>勤務できる曜日と時間（曜日ごと）</label>
         <div style={{display:'flex',flexDirection:'column',gap:5}}>
           {[1,2,3,4,5,6].map(d=>{
@@ -3176,7 +3193,7 @@ td.cell-off{background:#fff}
                 if((dayAsgn[slot.id]||[]).includes(o.id)) return false;
                 const dh2=dayHours(dk,o.id,asgn,manualExclusions,slots);
                 const sh2=slotHours(d.getDay(),slot.id,slots);
-                return dh2+sh2<=DAILY_LIMIT;
+                return isDoctorStaff(o)||dh2+sh2<=DAILY_LIMIT;
               }).slice(0,3).map(o=>o.name).join('・');
               viol.push((d.getMonth()+1)+'/'+d.getDate()+'('+DAY_JP[d.getDay()]+') '+slot.label+(cands?' → 代替候補: '+cands:''));
             });
@@ -3230,7 +3247,7 @@ td.cell-off{background:#fff}
         dates.forEach(d=>{
           const dk=tdk(d);
           const dh=dayHours(dk,s.id,asgn,manualExclusions,slots);
-          if(dh>DAILY_LIMIT) overDays.push((d.getMonth()+1)+'/'+d.getDate()+'('+DAY_JP[d.getDay()]+') '+dh.toFixed(1)+'h');
+          if(!isDoctorStaff(s)&&dh>DAILY_LIMIT) overDays.push((d.getMonth()+1)+'/'+d.getDate()+'('+DAY_JP[d.getDay()]+') '+dh.toFixed(1)+'h');
         });
         if(overDays.length>0) ng.push({cond:'1日8時間以内（労基法）', detail:overDays.join('、')});
 
@@ -3737,8 +3754,8 @@ ${bodyHtml}
               if(activeCount>=reqCount) continue;
               const dh=dayHours(dk,s.id,next,manualExclusions,slots);
               const sh=slotHours(dow,slot.id,slots);
-              if(dh+sh>DAILY_LIMIT) continue;
-              if(wTotal+sh>WEEKLY_LIMIT) continue;
+              if(!isDoctorStaff(s)&&dh+sh>DAILY_LIMIT) continue;
+              if(!isDoctorStaff(s)&&wTotal+sh>WEEKLY_LIMIT) continue;
 
               if(!next[dk]) next[dk]={};
               if(!next[dk][slot.id]) next[dk][slot.id]=[];
@@ -3938,7 +3955,7 @@ ${bodyHtml}
             if(sh<=0) return;
             // 日の合計がDAILY_LIMITを超えないか確認
             const dh=dayHours(dk,ft.id,na,{},slots);
-            if(dh+sh>DAILY_LIMIT) return;
+            if(!isDoctorStaff(s)&&dh+sh>DAILY_LIMIT) return;
             if(wTotal+sh>maxH) return;
             const req=getReq(dk,slot.id);
             const curActive=curIds.filter(sid=>!(manualExclusions[dk]?.[slot.id]||[]).includes(sid)).length;
@@ -4062,7 +4079,7 @@ ${bodyHtml}
             if((manualExclusions[dk]?.[slot.id]||[]).includes(s.id)) continue;
             const dh=dayHours(dk,s.id,na,{},slots);
             const sh=slotHours(dow,slot.id,slots);
-            if(dh+sh>DAILY_LIMIT) continue;
+            if(!isDoctorStaff(s)&&dh+sh>DAILY_LIMIT) continue;
             const req=getReq(dk,slot.id);
             // 必要人数の2倍を超えるような過剰配置はしない
             if(curIds.length>=req*2) continue;
@@ -4189,11 +4206,11 @@ ${bodyHtml}
               if(!canCoverSlot(so,B,dow))return false; // そのコマの半分も在席できない人は移さない
               // 移動を試算：Aから外しBへ入れて、8時間以内・週上限以内か
               const trial={...na,[dk]:{...na[dk],[A.id]:(na[dk][A.id]||[]).filter(x=>x!==sid),[B.id]:[...(na[dk][B.id]||[]),sid]}};
-              if(dayHours(dk,sid,trial,manualExclusions,slots,staff)>DAILY_LIMIT)return false;
+              if((!isDoctorStaff(staff.find(x=>x.id===sid))&&dayHours(dk,sid,trial,manualExclusions,slots,staff)>DAILY_LIMIT))return false;
               const wh=parseWeeklyHours(notes);
               if(wh&&wh.max>0&&week.length>0){
                 const wkH=week.reduce((s2,d3)=>s2+dayHours(tdk(d3),sid,trial,manualExclusions,slots,staff),0);
-                if(wkH>Math.min(wh.max,WEEKLY_LIMIT))return false;
+                if(!isDoctorStaff(staff.find(x=>x.id===sid))&&wkH>Math.min(wh.max,WEEKLY_LIMIT))return false;
               }
               return true;
             });
@@ -4266,11 +4283,11 @@ ${bodyHtml}
           if(!inBase&&!elsewhere)return false;
           // 延長後も8時間以内・週上限以内
           const trial={...na,[dk]:{...na[dk],[slot.id]:[...(na[dk][slot.id]||[]),s.id]}};
-          if(dayHours(dk,s.id,trial,manualExclusions,slots,staff)>DAILY_LIMIT)return false;
+          if((!isDoctorStaff(s)&&dayHours(dk,s.id,trial,manualExclusions,slots,staff)>DAILY_LIMIT))return false;
           const wh=parseWeeklyHours(s.notes);
           if(wh&&wh.max>0&&week.length>0){
             const wkH=week.reduce((sum,d3)=>sum+dayHours(tdk(d3),s.id,trial,manualExclusions,slots,staff),0);
-            if(wkH>Math.min(wh.max,WEEKLY_LIMIT))return false;
+            if(!isDoctorStaff(s)&&wkH>Math.min(wh.max,WEEKLY_LIMIT))return false;
           }
           return true;
         });
@@ -4335,10 +4352,10 @@ ${bodyHtml}
     // v106: 無人帯解消を最優先（v105と整合）。本人の「希望」週上限(wh.max=○時間以内等)はソフト扱いにして
     //       超過を許す。1日8時間(DAILY_LIMIT)と法定相当の週40時間(WEEKLY_LIMIT)のみ厳守。
     const trialOK=(dk,sid,trial,week)=>{
-      if(dayHours(dk,sid,trial,manualExclusions,slots,staff)>DAILY_LIMIT)return false;
+      if((!isDoctorStaff(staff.find(x=>x.id===sid))&&dayHours(dk,sid,trial,manualExclusions,slots,staff)>DAILY_LIMIT))return false;
       if(week&&week.length>0){
         const wkH=week.reduce((sum,d3)=>sum+dayHours(tdk(d3),sid,trial,manualExclusions,slots,staff),0);
-        if(wkH>WEEKLY_LIMIT)return false;
+        if(!isDoctorStaff(staff.find(x=>x.id===sid))&&wkH>WEEKLY_LIMIT)return false;
       }
       return true;
     };
@@ -4531,7 +4548,7 @@ ${bodyHtml}
                       const wh=parseWeeklyHours(so.notes);
                       if(wh&&wh.max>0){
                         const wkH=week.reduce((s2,d3)=>s2+dayHours(tdk(d3),sid,trial,manualExclusions,slots,staff),0);
-                        if(wkH>Math.min(wh.max,WEEKLY_LIMIT)){wkOK=false;break;}
+                        if(!isDoctorStaff(s)&&wkH>Math.min(wh.max,WEEKLY_LIMIT)){wkOK=false;break;}
                       }
                     }
                   }
@@ -4595,8 +4612,8 @@ ${bodyHtml}
     // (wh.max=「○時間以内」等)はソフト扱いにして超過を許す（例: 上限20hの大滝を午後手術に入れ24hでも可）。
     // ただし「1日8時間(DAILY_LIMIT)」と「法定相当の週上限 WEEKLY_LIMIT(40h)」は引き続き厳守する。
     const dayWeekOK=(dk,sid,trial,week)=>{
-      if(dayHours(dk,sid,trial,manualExclusions,slots,staff)>DAILY_LIMIT)return false;
-      if(week.length>0){const wkH=week.reduce((a,d3)=>a+dayHours(tdk(d3),sid,trial,manualExclusions,slots,staff),0);if(wkH>WEEKLY_LIMIT)return false;}
+      if((!isDoctorStaff(staff.find(x=>x.id===sid))&&dayHours(dk,sid,trial,manualExclusions,slots,staff)>DAILY_LIMIT))return false;
+      if(week.length>0){const wkH=week.reduce((a,d3)=>a+dayHours(tdk(d3),sid,trial,manualExclusions,slots,staff),0);if(!isDoctorStaff(staff.find(x=>x.id===sid))&&wkH>WEEKLY_LIMIT)return false;}
       return true;
     };
     dates.forEach(d=>{
@@ -4664,7 +4681,7 @@ ${bodyHtml}
     setAsgn(fixed);
     pushEventLog('配置を自動調整');
     let over=0;
-    dates.forEach(d=>{const dk=tdk(d);if(isClosedDay(dk))return;staff.forEach(s=>{if(dayHours(dk,s.id,fixed,manualExclusions,slots,staff)>DAILY_LIMIT)over++;});});
+    dates.forEach(d=>{const dk=tdk(d);if(isClosedDay(dk))return;staff.forEach(s=>{if((!isDoctorStaff(s)&&dayHours(dk,s.id,fixed,manualExclusions,slots,staff)>DAILY_LIMIT))over++;});});
     alert('配置の自動調整を行いました（無人時間帯の解消・偏り・超過勤務／変更 '+changes.length+'件）。\n変更点は表の上に一覧表示され、追加された人には ✦ が付きます。\n「元に戻す」で取り消せます。'+(over>0?'\n\n※まだ解消できない超過が'+over+'件あります（延長できる人がいない枠）。':''));
   }
   function undoOvertimeRelief(){
@@ -4705,7 +4722,7 @@ ${bodyHtml}
           const tc=tmps[dk]?.[String(sid)];
           if(tc&&['off','paid','paid_am','paid_pm'].includes(tc.type))return; // 休み/有給は尊重
           // 1日の労働上限を超える場合は入れない（物理的に不可能な日を避ける）
-          if(dayHours(dk,sid,na,manualExclusions,slots)+slotHours(dow,slot.id,slots)>DAILY_LIMIT)return;
+          if((!isDoctorStaff(staff.find(x=>x.id===sid))&&dayHours(dk,sid,na,manualExclusions,slots)+slotHours(dow,slot.id,slots)>DAILY_LIMIT))return;
           cur=[...cur,sid];
           na[dk][slot.id]=cur;
         });
@@ -6452,7 +6469,7 @@ ${bodyHtml}
           <div style={{display:'flex',flexWrap:'wrap',gap:5,marginBottom:12}}>
             {staff.map(s=>{
               const mh=monthHours(s.id,dates,asgn,manualExclusions,slots);
-              const hasWeekViolation=weeks.some(wk=>weekHours(s.id,wk,asgn,manualExclusions,slots)>WEEKLY_LIMIT);
+              const hasWeekViolation=!isDoctorStaff(s)&&weeks.some(wk=>weekHours(s.id,wk,asgn,manualExclusions,slots)>WEEKLY_LIMIT);
               return(
                 <span key={s.id} style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 10px',borderRadius:20,border:'1px solid '+(hasWeekViolation?'#D85A30':s.color),background:(hasWeekViolation?'#D85A30':s.color)+'18',fontSize:11}}>
                   <span style={{width:6,height:6,borderRadius:'50%',background:hasWeekViolation?'#D85A30':s.color,flexShrink:0}}/>
@@ -6494,7 +6511,7 @@ ${bodyHtml}
                           const hasOpenOutpatient=hasOutpatientOpenOverrideForDay(outpatientClosures,dk,sls);
                           const showClosedOnly=isClosed&&!hasOpenOutpatient;
                           const offIds=Object.entries(dt).filter(([,v])=>['off','paid'].includes(v.type)).map(([sid])=>parseInt(sid));
-                          const overStaff=staff.filter(s=>!offIds.includes(s.id)&&dayHours(dk,s.id,asgn,manualExclusions,slots)>DAILY_LIMIT);
+                          const overStaff=staff.filter(s=>!isDoctorStaff(s)&&!offIds.includes(s.id)&&dayHours(dk,s.id,asgn,manualExclusions,slots)>DAILY_LIMIT);
                           const shortageSlots=hasAnyAssignment&&!showClosedOnly?sls.filter(slot=>{
                             const actIds=(da[slot.id]||[]).filter(sid=>!(dExcl[slot.id]||[]).includes(sid)&&!offIds.includes(sid));
                             return actIds.length===0&&getReq(dk,slot.id)>0;
@@ -6612,7 +6629,7 @@ ${bodyHtml}
                   <div style={{display:'flex',alignItems:'center',gap:8}}>
                     {staff.filter(s=>dayHours(selDk,s.id,asgn,manualExclusions,slots)>0).map(s=>{
                       const dh=dayHours(selDk,s.id,asgn,manualExclusions,slots);
-                      return <span key={s.id} style={{fontSize:10,color:dh>DAILY_LIMIT?'#D85A30':K.textS}}>{s.name}{dh.toFixed(1)}h{dh>DAILY_LIMIT?'⚠':''}</span>;
+                      return <span key={s.id} style={{fontSize:10,color:(!isDoctorStaff(s)&&dh>DAILY_LIMIT)?'#D85A30':K.textS}}>{s.name}{dh.toFixed(1)}h{(!isDoctorStaff(s)&&dh>DAILY_LIMIT)?'⚠':''}</span>;
                     })}
                     <button onClick={()=>setSelDk(null)} style={{border:'none',background:'none',cursor:'pointer',fontSize:20,color:K.textS,lineHeight:1,padding:0}}>×</button>
                   </div>
@@ -8435,7 +8452,7 @@ function HoursPanel({staff,weeks,dates,asgn,manualExclusions,slots,onClose,onAut
                   </td>
                   {whs.map((wh2,i)=>{
                     const isShortWeek=weeks[i].length<3; // 月初・月末の短い週
-                    const over=!isShortWeek&&wh2>WEEKLY_LIMIT;
+                    const over=!isDoctorStaff(s)&&!isShortWeek&&wh2>WEEKLY_LIMIT;
                     const warn=!isShortWeek&&wh2>=36&&!over;
                     const weekHasWork=weeks[i].some(d=>{
                       const dk=tdk(d),da=asgn[dk]||{},dExcl=manualExclusions[dk]||{};
@@ -8905,5 +8922,14 @@ CHANGELOG v155
 - 🚩 バッジクリック時は「未処理＋当月」表示に戻してからメッセージ欄へ移動するようにした。
 - アプリ表示バージョンを v153 から v155 に更新。
 -->
+<!--
+CHANGELOG v156
+- スタッフ設定の勤務条件エディタに「ドクター」チェックを追加。
+- ドクターは通し手術時の自動15:30退勤キャップ対象外にした。
+- ドクターは1日8時間・週40時間による自動削除・自動調整・警告対象外にした。
+- AIシフト作成プロンプトにも「ドクターは勤務時間制限の自動調整対象外」と明記。
+- v155の外来枠 １診 / ２診 分割仕様は維持。
+-->
+
 </body>
 </html>
