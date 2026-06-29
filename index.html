@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v156</title>
+<title>シフト管理 v162</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v161';
+const APP_VERSION = 'v162';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -5554,27 +5554,58 @@ ${bodyHtml}
                                   <div style={{textAlign:'center',padding:'6px 0',color:'#991B1B',fontSize:11,fontWeight:600}}>{holName||'休診'}</div>
                                 ):(
                                   <div style={{display:'flex',flexDirection:'column',gap:2}}>
-                                    {sls.map(slot=>{
-                                      const excl=manualExclusions[dk]?.[slot.id]||[];
-                                      const activeIds=(da[slot.id]||[]).filter(sid=>!excl.includes(sid)&&!offIds.includes(sid));
+                                    {calendarSlotGroupsForUnit(sls).map(group=>{
+                                      const gSlots=group.slots||[];
+                                      const slot=group.slot||gSlots[0];
+                                      const roomGroup=group.kind==='outRooms';
+                                      const allActiveIds=uniqIds(gSlots.flatMap(sl=>{
+                                        const excl=manualExclusions[dk]?.[sl.id]||[];
+                                        return ((da[sl.id]||[]).filter(sid=>!excl.includes(sid)&&!offIds.includes(sid)));
+                                      }));
                                       const sc=getTimeColor(slot);
-                                      const req=getReq(dk,slot.id);
-                                      const short=req>0&&activeIds.length<req; // 横長表と同じ不足判定
+                                      const req=gSlots.reduce((sum,sl)=>sum+getReq(dk,sl.id),0);
+                                      const short=req>0&&allActiveIds.length<req; // 横長表と同じ不足判定
+                                      const shortageSlot=gSlots.find(sl=>{
+                                        const excl=manualExclusions[dk]?.[sl.id]||[];
+                                        const ids=(da[sl.id]||[]).filter(sid=>!excl.includes(sid)&&!offIds.includes(sid));
+                                        return getReq(dk,sl.id)>0&&ids.length<getReq(dk,sl.id);
+                                      })||slot;
+                                      const baseLabel=roomGroup?group.label:slot.label;
+                                      const outMark=roomGroup?outpatientAutoMarkForCalendar(outpatientClosures,dk,group,staffIsClosedDay(dk),da,manualExclusions[dk]||{},dt):(isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosures,dk,slot,req,staffIsClosedDay(dk)):'');
+                                      const surgMark=(!roomGroup&&slot.type==='surg')?surgeryMarkForSlot(surgeryFlags,dk,slot):'';
+                                      const labelText=roomGroup?baseLabel:staffCompactSlotLabel(slot);
                                       return(
-                                        <div key={slot.id} style={{borderLeft:'2px solid '+(short?'#F97316':sc.border),background:short?'#FDE9D6':sc.bg,borderRadius:3,padding:'1px 3px'}}>
-                                          <div onClick={short?(e=>{e.stopPropagation();setHelpTarget({dk,slotId:slot.id,slotLabel:slot.label,mo:d.getMonth()+1,day:d.getDate(),dow});}):undefined}
+                                        <div key={group.key} style={{borderLeft:'2px solid '+(short?'#F97316':sc.border),background:short?'#FDE9D6':sc.bg,borderRadius:3,padding:'1px 3px'}}>
+                                          <div onClick={short?(e=>{e.stopPropagation();setHelpTarget({dk,slotId:shortageSlot.id,slotLabel:shortageSlot.label,mo:d.getMonth()+1,day:d.getDate(),dow});}):undefined}
                                             title={short?'タップして「勤務できます」と挙手':''}
                                             style={{display:'flex',justifyContent:'space-between',alignItems:'center',lineHeight:1.3,cursor:short?'pointer':'default'}}>
-                                            {(()=>{const surgMark=slot.type==='surg'?surgeryMarkForSlot(surgeryFlags,dk,slot):'';const outMark=isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosures,dk,slot,req,staffIsClosedDay(dk)):'';return <span style={{fontSize:9,color:'#64748B',fontWeight:600,whiteSpace:'nowrap'}}>{staffCompactSlotLabel(slot)}{outMark&&<span style={{marginLeft:2,fontSize:8,fontWeight:900,color:'#166534'}}>{outMark}</span>}{surgMark&&<span style={staffSurgeryMarkStyle(surgMark)}>{surgMark}</span>}</span>;})()}
-                                            {short&&<span style={{fontSize:9,fontWeight:700,color:'#C2410C',whiteSpace:'nowrap'}}>⚠{activeIds.length}/{req}</span>}
+                                            <span style={{fontSize:9,color:'#64748B',fontWeight:600,whiteSpace:'nowrap'}}>{labelText}{outMark&&<span style={{marginLeft:2,fontSize:8,fontWeight:900,color:'#166534'}}>{outMark}</span>}{surgMark&&<span style={staffSurgeryMarkStyle(surgMark)}>{surgMark}</span>}</span>
+                                            {short&&<span style={{fontSize:9,fontWeight:700,color:'#C2410C',whiteSpace:'nowrap'}}>⚠{allActiveIds.length}/{req}</span>}
                                           </div>
-                                          <div style={{display:'flex',flexWrap:'wrap',gap:2}}>
-                                            {activeIds.length===0?<span style={{fontSize:8,color:'#CBD5E1'}}>--</span>:activeIds.map(sid=>{
-                                              const s=staff.find(x=>x.id===sid); if(!s)return null;
-                                              const isMe=sid===staffMyId;
-                                              return<span key={sid} style={{fontSize:10,background:s.color,color:'#fff',borderRadius:3,padding:'0 3px',whiteSpace:'nowrap',fontWeight:isMe?700:400,boxShadow:isMe?'0 0 0 2px #185FA5':'none'}}>{s.name}</span>;
-                                            })}
-                                          </div>
+                                          {roomGroup&&APP_UNIT==='doctor'?(
+                                            <div style={{display:'flex',flexDirection:'column',gap:1,marginTop:1}}>
+                                              {gSlots.map(sl=>{
+                                                const excl=manualExclusions[dk]?.[sl.id]||[];
+                                                const activeIds=(da[sl.id]||[]).filter(sid=>!excl.includes(sid)&&!offIds.includes(sid));
+                                                return <div key={sl.id} style={{display:'flex',flexWrap:'wrap',gap:2,alignItems:'center',minHeight:15}}>
+                                                  <span style={{fontSize:10,color:'#1E293B',fontWeight:700,minWidth:18}}>({sl.roomNo||1})</span>
+                                                  {activeIds.length===0?<span style={{fontSize:8,color:'#CBD5E1'}}>--</span>:activeIds.map(sid=>{
+                                                    const s=staff.find(x=>x.id===sid); if(!s)return null;
+                                                    const isMe=sid===staffMyId;
+                                                    return <span key={sid} style={{fontSize:10,background:s.color,color:'#fff',borderRadius:3,padding:'0 3px',whiteSpace:'nowrap',fontWeight:isMe?700:400,boxShadow:isMe?'0 0 0 2px #185FA5':'none'}}>{s.name}</span>;
+                                                  })}
+                                                </div>;
+                                              })}
+                                            </div>
+                                          ):(
+                                            <div style={{display:'flex',flexWrap:'wrap',gap:2}}>
+                                              {allActiveIds.length===0?<span style={{fontSize:8,color:'#CBD5E1'}}>--</span>:allActiveIds.map(sid=>{
+                                                const s=staff.find(x=>x.id===sid); if(!s)return null;
+                                                const isMe=sid===staffMyId;
+                                                return <span key={sid} style={{fontSize:10,background:s.color,color:'#fff',borderRadius:3,padding:'0 3px',whiteSpace:'nowrap',fontWeight:isMe?700:400,boxShadow:isMe?'0 0 0 2px #185FA5':'none'}}>{s.name}</span>;
+                                              })}
+                                            </div>
+                                          )}
                                         </div>
                                       );
                                     })}
