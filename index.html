@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v154</title>
+<title>シフト管理 v155</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v154';
+const APP_VERSION = 'v155';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -347,39 +347,52 @@ function labelToColorId(label){
 }
 
 // ── 診療枠マスタ（h は労働時間計算用・変更不可、colorId は編集可） ──
+// v155: 外来枠はベースシフト・シフト割当の単位として １診 / ２診 に分割する。
+//       手術枠は従来どおり分割しない。
 const SLOTS = {
   1:[ // 月曜：午後手術のみ
-    {id:'am_out', label:'午前外来',  time:'9:30-13:00',  type:'out',  h:3.5, colorId:'blue'},
-    {id:'surg',   label:'午後手術',  time:'13:00-16:00', type:'surg', h:3.0, colorId:'pink'},
-    {id:'pm1',    label:'昼外来',    time:'14:00-16:00', type:'out',  h:2.0, colorId:'blue'},
-    {id:'pm2',    label:'夜外来',    time:'16:00-19:30', type:'out',  h:3.5, colorId:'blue'},
+    {id:'am_out_r1', baseSlotId:'am_out', roomNo:1, label:'午前外来 １診', time:'9:30-13:00',  type:'out',  h:3.5, colorId:'blue'},
+    {id:'am_out_r2', baseSlotId:'am_out', roomNo:2, label:'午前外来 ２診', time:'9:30-13:00',  type:'out',  h:3.5, colorId:'blue'},
+    {id:'surg',      label:'午後手術',     time:'13:00-16:00', type:'surg', h:3.0, colorId:'pink'},
+    {id:'pm1_r1',    baseSlotId:'pm1',    roomNo:1, label:'昼外来 １診',   time:'14:00-16:00', type:'out',  h:2.0, colorId:'blue'},
+    {id:'pm1_r2',    baseSlotId:'pm1',    roomNo:2, label:'昼外来 ２診',   time:'14:00-16:00', type:'out',  h:2.0, colorId:'blue'},
+    {id:'pm2_r1',    baseSlotId:'pm2',    roomNo:1, label:'夜外来 １診',   time:'16:00-19:30', type:'out',  h:3.5, colorId:'blue'},
+    {id:'pm2_r2',    baseSlotId:'pm2',    roomNo:2, label:'夜外来 ２診',   time:'16:00-19:30', type:'out',  h:3.5, colorId:'blue'},
   ],
   2:[ // 火曜：午前手術のみ
-    {id:'am_out',  label:'午前外来', time:'9:30-13:00', type:'out',  h:3.5, colorId:'blue'},
-    {id:'am_surg', label:'午前手術', time:'9:30-13:00', type:'surg', h:3.5, colorId:'pink'},
+    {id:'am_out_r1',  baseSlotId:'am_out', roomNo:1, label:'午前外来 １診', time:'9:30-13:00', type:'out',  h:3.5, colorId:'blue'},
+    {id:'am_out_r2',  baseSlotId:'am_out', roomNo:2, label:'午前外来 ２診', time:'9:30-13:00', type:'out',  h:3.5, colorId:'blue'},
+    {id:'am_surg',    label:'午前手術',    time:'9:30-13:00', type:'surg', h:3.5, colorId:'pink'},
   ],
   3:[ // 水曜：午前手術＋午後手術
-    {id:'am_out',  label:'午前外来', time:'9:30-13:00',  type:'out',  h:3.5, colorId:'blue'},
-    {id:'surg',    label:'午前手術', time:'9:30-15:00',  type:'surg', h:5.5, colorId:'pink'},
-    {id:'pm_surg', label:'午後手術', time:'13:00-19:00', type:'surg', h:6.0, colorId:'pink'},
-    {id:'pm_out',  label:'夜外来',   time:'16:00-19:30', type:'out',  h:3.5, colorId:'blue'},
+    {id:'am_out_r1',  baseSlotId:'am_out', roomNo:1, label:'午前外来 １診', time:'9:30-13:00',  type:'out',  h:3.5, colorId:'blue'},
+    {id:'am_out_r2',  baseSlotId:'am_out', roomNo:2, label:'午前外来 ２診', time:'9:30-13:00',  type:'out',  h:3.5, colorId:'blue'},
+    {id:'surg',       label:'午前手術',    time:'9:30-15:00',  type:'surg', h:5.5, colorId:'pink'},
+    {id:'pm_surg',    label:'午後手術',    time:'13:00-19:00', type:'surg', h:6.0, colorId:'pink'},
+    {id:'pm_out_r1',  baseSlotId:'pm_out', roomNo:1, label:'夜外来 １診',   time:'16:00-19:30', type:'out',  h:3.5, colorId:'blue'},
+    {id:'pm_out_r2',  baseSlotId:'pm_out', roomNo:2, label:'夜外来 ２診',   time:'16:00-19:30', type:'out',  h:3.5, colorId:'blue'},
   ],
   4:[ // 木曜：午前手術＋午後手術
-    {id:'am_out',  label:'午前外来', time:'9:30-13:00',  type:'out',  h:3.5, colorId:'blue'},
-    {id:'surg',    label:'午前手術', time:'9:30-15:00',  type:'surg', h:5.5, colorId:'pink'},
-    {id:'pm_surg', label:'午後手術', time:'13:00-19:00', type:'surg', h:6.0, colorId:'pink'},
+    {id:'am_out_r1',  baseSlotId:'am_out', roomNo:1, label:'午前外来 １診', time:'9:30-13:00',  type:'out',  h:3.5, colorId:'blue'},
+    {id:'am_out_r2',  baseSlotId:'am_out', roomNo:2, label:'午前外来 ２診', time:'9:30-13:00',  type:'out',  h:3.5, colorId:'blue'},
+    {id:'surg',       label:'午前手術',    time:'9:30-15:00',  type:'surg', h:5.5, colorId:'pink'},
+    {id:'pm_surg',    label:'午後手術',    time:'13:00-19:00', type:'surg', h:6.0, colorId:'pink'},
   ],
   5:[ // 金曜：午前手術＋午後手術
-    {id:'am_out',  label:'午前外来', time:'9:30-13:00',  type:'out',  h:3.5, colorId:'blue'},
-    {id:'surg',    label:'午前手術', time:'9:30-15:00',  type:'surg', h:5.5, colorId:'pink'},
-    {id:'pm_surg', label:'午後手術', time:'13:00-19:00', type:'surg', h:6.0, colorId:'pink'},
-    {id:'pm1',     label:'昼外来',   time:'14:00-16:00', type:'out',  h:2.0, colorId:'blue'},
-    {id:'pm2',     label:'夜外来',   time:'16:00-19:30', type:'out',  h:3.5, colorId:'blue'},
+    {id:'am_out_r1',  baseSlotId:'am_out', roomNo:1, label:'午前外来 １診', time:'9:30-13:00',  type:'out',  h:3.5, colorId:'blue'},
+    {id:'am_out_r2',  baseSlotId:'am_out', roomNo:2, label:'午前外来 ２診', time:'9:30-13:00',  type:'out',  h:3.5, colorId:'blue'},
+    {id:'surg',       label:'午前手術',    time:'9:30-15:00',  type:'surg', h:5.5, colorId:'pink'},
+    {id:'pm_surg',    label:'午後手術',    time:'13:00-19:00', type:'surg', h:6.0, colorId:'pink'},
+    {id:'pm1_r1',     baseSlotId:'pm1',    roomNo:1, label:'昼外来 １診',   time:'14:00-16:00', type:'out',  h:2.0, colorId:'blue'},
+    {id:'pm1_r2',     baseSlotId:'pm1',    roomNo:2, label:'昼外来 ２診',   time:'14:00-16:00', type:'out',  h:2.0, colorId:'blue'},
+    {id:'pm2_r1',     baseSlotId:'pm2',    roomNo:1, label:'夜外来 １診',   time:'16:00-19:30', type:'out',  h:3.5, colorId:'blue'},
+    {id:'pm2_r2',     baseSlotId:'pm2',    roomNo:2, label:'夜外来 ２診',   time:'16:00-19:30', type:'out',  h:3.5, colorId:'blue'},
   ],
   6:[ // 土曜：午前手術＋午後手術
-    {id:'am_out',  label:'午前外来', time:'9:30-13:00',  type:'out',  h:3.5, colorId:'blue'},
-    {id:'surg',    label:'午前手術', time:'9:30-15:00',  type:'surg', h:5.5, colorId:'pink'},
-    {id:'pm_surg', label:'午後手術', time:'13:00-19:00', type:'surg', h:6.0, colorId:'pink'},
+    {id:'am_out_r1',  baseSlotId:'am_out', roomNo:1, label:'午前外来 １診', time:'9:30-13:00',  type:'out',  h:3.5, colorId:'blue'},
+    {id:'am_out_r2',  baseSlotId:'am_out', roomNo:2, label:'午前外来 ２診', time:'9:30-13:00',  type:'out',  h:3.5, colorId:'blue'},
+    {id:'surg',       label:'午前手術',    time:'9:30-15:00',  type:'surg', h:5.5, colorId:'pink'},
+    {id:'pm_surg',    label:'午後手術',    time:'13:00-19:00', type:'surg', h:6.0, colorId:'pink'},
   ],
 };
 
@@ -396,13 +409,103 @@ const STAFF0 = [
   {id:9,name:'青木',color:COLORS[8],notes:'火：午前、水：午後、木：18時まで\n土：月1〜2回午前のみ\n6/11より勤務開始',pin:'',workType:'normal'},
 ];
 const WEEKLY_REQ_DEFAULT = {
-  1:{am_out:2,surg:1,pm1:1,pm2:2},          // 月：午後手術1名
-  2:{am_out:2,am_surg:1},                     // 火：午前手術1名
-  3:{am_out:2,surg:1,pm_surg:1,pm_out:2},    // 水：午前手術1名・午後手術1名
-  4:{am_out:2,surg:1,pm_surg:1},             // 木：午前手術1名・午後手術1名
-  5:{am_out:2,surg:1,pm_surg:1,pm1:1,pm2:2}, // 金：午前手術1名・午後手術1名
-  6:{am_out:2,surg:1,pm_surg:1},             // 土：午前手術1名・午後手術1名
+  1:{am_out_r1:1,am_out_r2:1,surg:1,pm1_r1:1,pm1_r2:1,pm2_r1:1,pm2_r2:1},          // 月：外来は1診/2診、午後手術1名
+  2:{am_out_r1:1,am_out_r2:1,am_surg:1},                                           // 火：外来は1診/2診、午前手術1名
+  3:{am_out_r1:1,am_out_r2:1,surg:1,pm_surg:1,pm_out_r1:1,pm_out_r2:1},              // 水：外来は1診/2診、午前手術1名・午後手術1名
+  4:{am_out_r1:1,am_out_r2:1,surg:1,pm_surg:1},                                     // 木：外来は1診/2診、午前手術1名・午後手術1名
+  5:{am_out_r1:1,am_out_r2:1,surg:1,pm_surg:1,pm1_r1:1,pm1_r2:1,pm2_r1:1,pm2_r2:1},  // 金：外来は1診/2診、午前手術1名・午後手術1名
+  6:{am_out_r1:1,am_out_r2:1,surg:1,pm_surg:1},                                     // 土：外来は1診/2診、午前手術1名・午後手術1名
 };
+
+// ── v155 互換変換：旧「外来1枠に複数名」形式を「外来 １診 / ２診」形式へ移行 ──
+function cloneDefaultSlots(){const s={};Object.entries(SLOTS).forEach(([dow,sls])=>{s[dow]=sls.map(sl=>({...sl}));});return s;}
+function isRoomSplitOutSlot(slot){return !!(slot&&slot.type==='out'&&(slot.roomNo||/_r[12]$/.test(String(slot.id||''))||/[１２12]診/.test(String(slot.label||''))));}
+function baseOutLabel(label){return String(label||'').replace(/[\s　]*(?:[１２12]診|⑴|⑵)$/,'').trim();}
+function makeRoomOutSlot(slot,roomNo){
+  const baseId=slot.baseSlotId||slot.id;
+  const baseLabel=baseOutLabel(slot.label);
+  return {...slot,id:baseId+'_r'+roomNo,baseSlotId:baseId,roomNo,label:baseLabel+' '+(roomNo===1?'１診':'２診'),colorId:slot.colorId||labelToColorId(baseLabel)};
+}
+function normalizeSlotsForV155(src){
+  const input=src||SLOTS, out={};
+  Object.entries(input).forEach(([dow,sls])=>{
+    out[dow]=[];
+    (sls||[]).forEach(slot=>{
+      if(slot&&slot.type==='out'&&String(slot.label||'').indexOf('外来')>=0&&!isRoomSplitOutSlot(slot)){
+        out[dow].push(makeRoomOutSlot(slot,1),makeRoomOutSlot(slot,2));
+      }else out[dow].push({...slot});
+    });
+  });
+  return out;
+}
+function v155DeepSame(a,b){try{return JSON.stringify(a)===JSON.stringify(b);}catch(e){return false;}}
+function splitTargetIdsV155(dow,slotId,slotsNew){
+  const sls=(slotsNew&&slotsNew[dow])||[];
+  const exact=sls.find(sl=>sl.id===slotId);
+  if(exact)return [slotId];
+  const targets=sls.filter(sl=>sl.baseSlotId===slotId||sl.id===slotId+'_r1'||sl.id===slotId+'_r2').map(sl=>sl.id);
+  return targets.length?targets:[slotId];
+}
+function distributeIdsToRooms(ids,targetIds){
+  const out={}; targetIds.forEach(t=>out[t]=[]);
+  (ids||[]).forEach((sid,i)=>{const t=targetIds[Math.min(i,targetIds.length-1)]; if(t&&!out[t].includes(sid))out[t].push(sid);});
+  return out;
+}
+function normalizeDaySlotMapV155(dayMap,dow,slotsNew){
+  const out={};
+  Object.entries(dayMap||{}).forEach(([slotId,ids])=>{
+    const targets=splitTargetIdsV155(dow,slotId,slotsNew);
+    if(targets.length>=2){
+      const d=distributeIdsToRooms(ids||[],targets);
+      Object.entries(d).forEach(([tid,tids])=>{if(tids.length)out[tid]=[...(out[tid]||[]),...tids.filter(x=>!(out[tid]||[]).includes(x))];});
+    }else{
+      out[targets[0]]=[...((out[targets[0]]||[])),...(ids||[]).filter(x=>!((out[targets[0]]||[])).includes(x))];
+    }
+  });
+  return out;
+}
+function normalizeDatedSlotMapsV155(obj,slotsNew){
+  const out={};
+  Object.entries(obj||{}).forEach(([dk,dayMap])=>{const dow=new Date(dk).getDay();out[dk]=normalizeDaySlotMapV155(dayMap,dow,slotsNew);});
+  return out;
+}
+function normalizeBaseShiftV155(baseShift,slotsNew){
+  const out={A:{},B:{}};
+  ['A','B'].forEach(p=>{[1,2,3,4,5,6].forEach(dow=>{out[p][dow]=normalizeDaySlotMapV155((baseShift&&baseShift[p]&&baseShift[p][dow])||{},dow,slotsNew);});});
+  return out;
+}
+function normalizeWeeklyReqV155(req,slotsNew){
+  const out={};
+  [1,2,3,4,5,6].forEach(dow=>{
+    out[dow]={};
+    Object.entries((req&&req[dow])||{}).forEach(([slotId,val])=>{
+      const targets=splitTargetIdsV155(dow,slotId,slotsNew);
+      if(targets.length>=2){targets.forEach(t=>{out[dow][t]=Math.max(1,Math.ceil((Number(val)||0)/targets.length));});}
+      else out[dow][targets[0]]=Number(val)||0;
+    });
+    (slotsNew[dow]||[]).forEach(sl=>{if(out[dow][sl.id]===undefined)out[dow][sl.id]=sl.type==='out'?1:((WEEKLY_REQ_DEFAULT[dow]||{})[sl.id]??1);});
+  });
+  return out;
+}
+function normalizeMonthlyReqV155(req,slotsNew){
+  const out={};
+  Object.entries(req||{}).forEach(([dk,dayMap])=>{const dow=new Date(dk).getDay();out[dk]={};Object.entries(dayMap||{}).forEach(([slotId,val])=>{splitTargetIdsV155(dow,slotId,slotsNew).forEach(t=>{out[dk][t]=Number(val)||0;});});});
+  return out;
+}
+function normalizeOutpatientClosuresV155(closures,slotsNew){
+  const out={};
+  Object.entries(closures||{}).forEach(([dk,dayMap])=>{
+    const dow=new Date(dk).getDay(); out[dk]={};
+    Object.entries(dayMap||{}).forEach(([slotId,roomMap])=>{
+      const targets=splitTargetIdsV155(dow,slotId,slotsNew);
+      if(targets.length>=2){
+        targets.forEach((tid,i)=>{const v=(roomMap||{})[String(i+1)];if(v!==undefined)out[dk][tid]={'1':!!v};});
+      }else out[dk][targets[0]]={...(roomMap||{})};
+    });
+  });
+  return out;
+}
+
 const K = {
   bg:'#FFFFFF',bgS:'#F8FAFC',bgT:'#F1F5F9',
   text:'#1E293B',textS:'#64748B',
@@ -822,10 +925,10 @@ ${parttimeStaff.length>0?parttimeStaff.map(s=>`    ${s.name}(ID:${s.id})`).join(
     .map(({s,wh})=>{
       let line=`  ${s.name}(ID:${s.id}): 週${wh.min>0?wh.min+'h以上':''}${wh.min>0&&wh.max<40?'〜':''}${wh.max<40?wh.max+'h以内':''}`;
       if(wh.min>0){
-        // am_out(3.5h)のみだと何コマ必要か、am_out+pm2(7h)だと何コマか計算
+        // am_out_r1等(3.5h)のみだと何コマ必要か、am_out_r1+pm2_r1(7h)だと何コマか計算
         const daysNeededSingle=Math.ceil(wh.min/3.5);
         const daysNeededDouble=Math.ceil(wh.min/7.0);
-        line+=`\n    → 例: am_outのみ(3.5h/日)なら最低${daysNeededSingle}コマ必要 / am_out+pm2(7h/日)なら${daysNeededDouble}日で達成`;
+        line+=`\n    → 例: am_outのみ(3.5h/日)なら最低${daysNeededSingle}コマ必要 / am_out_r1+pm2_r1(7h/日)なら${daysNeededDouble}日で達成`;
       }
       return line;
     })
@@ -841,11 +944,11 @@ ${baseShiftDesc||''}
 ${hourConstraints||'  （時間制約の設定なし）'}
 
   各コマの労働時間（計算用）:
-    am_out=3.5h, am_surg=3.5h, pm1=2.0h, pm2=3.5h, pm_out=3.5h
+    am_out_r1/am_out_r2=3.5h, am_surg=3.5h, pm1_r1/pm1_r2=2.0h, pm2_r1/pm2_r2=3.5h, pm_out_r1/pm_out_r2=3.5h
     surg(月・午後手術)=3.0h, surg(水・木・金・土・午前手術)=5.5h, pm_surg=6.0h
 
-  例: 週35h以上のスタッフが月〜金に勤務する場合、am_out(3.5h)×5日=17.5hでは不足。
-    → am_out+pm2(7.0h)×5日=35.0h で条件達成。このように複数コマを組み合わせること。
+  例: 週35h以上のスタッフが月〜金に勤務する場合、am_out_r1等(3.5h)×5日=17.5hでは不足。
+    → am_out_r1+pm2_r1(7.0h)×5日=35.0h で条件達成。このように複数コマを組み合わせること。
 
 ━━ 通し手術の退勤ルール（6時間勤務）━━
   1人が「午前手術(am_surg 9:30-15:00)」と「午後手術(pm_surg 13:00-18:30)」の両方に通しで入る場合、
@@ -853,7 +956,7 @@ ${hourConstraints||'  （時間制約の設定なし）'}
   → この人は午後手術の15:30以降は不在になるため、午後手術の15:30〜18:30は別のスタッフでカバーすること。
 ━━ 労働基準法（第32条）の制約━━
   1日8時間・週40時間が上限。必ず守ること。
-  1日複数コマの上限例: am_out+pm2=7.0h OK / am_out+pm1+pm2=9.0h → 違反
+  1日複数コマの上限例: am_out_r1+pm2_r1=7.0h OK / am_out+pm1+pm2=9.0h → 違反
 ━━ 【最重要】時間帯の連続カバー（無人禁止）━━
   各コマは「開始時刻〜終了時刻」まで途切れなく最低1名が在席している必要があります。
   「○時まで勤務可能」のスタッフは、その時刻以降は在席できません（コマ終了まではカバーできない）。
@@ -1301,12 +1404,12 @@ function isOutpatientSlot(slot){
   const label=(slot&&slot.label||'').toString();
   return !!slot && slot.type==='out' && label.indexOf('外来')>=0;
 }
-// v131: 診察室数は「必要スタッフ数」ではなく外来枠の種類で決める。
-// これまで getReq() を診察室数として使っていたため、休診日の午前外来に「３診」が出ることがあった。
-// 原則、午前外来・夜外来は2診、昼外来は1診として扱う。
+// v155: 外来枠自体を １診 / ２診 に分けた後は、各分割枠の診察室数は1として扱う。
+//       旧形式の外来枠が残っている場合のみ、互換表示として2診ぶんを表示する。
 function outpatientRoomCountForSlot(slot){
+  if(slot&&slot.roomNo)return 1;
   const label=(slot&&slot.label||'').toString();
-  if(label.indexOf('昼外来')>=0)return 1;
+  if(/[１２12]診/.test(label))return 1;
   return 2;
 }
 function outpatientRoomClosed(closures,dk,slotId,roomIdx,dayClosed){
@@ -1322,7 +1425,8 @@ function outpatientMarkForSlot(closures,dk,slot,req,dayClosed=false,mode='compac
   const parts=[];
   for(let i=1;i<=n;i++){
     const mark=outpatientRoomClosed(closures,dk,slot.id,i,dayClosed)?'ー':'○';
-    parts.push(mode==='detail'?(CLINIC_ROOM_LABELS[i]+'：'+mark):(CLINIC_ROOM_NUMS[i]+mark));
+    if(slot&&slot.roomNo&&mode!=='detail')parts.push(mark);
+    else parts.push(mode==='detail'?((slot&&slot.roomNo?slot.label:CLINIC_ROOM_LABELS[i])+'：'+mark):(CLINIC_ROOM_NUMS[i]+mark));
   }
   return mode==='detail'?parts.join('　'):parts.join('');
 }
@@ -2113,7 +2217,7 @@ function App(){
   },[appMode]);
 
   // 管理者モード：申請・メッセージの処理結果もSupabaseへ即保存する。
-  // v154: これがないと「対応済み」「削除」が端末内だけに残り、数秒後のクラウド同期で未処理メッセージが復活して、🚩バッジ件数だけ残る。
+  // v155: これがないと「対応済み」「削除」が端末内だけに残り、数秒後のクラウド同期で未処理メッセージが復活して、🚩バッジ件数だけ残る。
   React.useEffect(()=>{
     if(appMode!=='admin'||!SB_ENABLED||!sbReadyRef.current)return;
     (async()=>{
@@ -2177,7 +2281,8 @@ function App(){
   const [staff,setStaff]=useState(()=>saved?.staff||STAFF0);
   // 実労働時間の退勤時刻判定に使う参照表を、描画前に同期更新（dayHoursから参照）
   STAFF_OBJ_LOOKUP={};(staff||[]).forEach(s=>{STAFF_OBJ_LOOKUP[s.id]=s;});
-  const [asgn,setAsgn]=useState(()=>saved?.asgn||{});
+  const initialSlotsV155=useMemo(()=>normalizeSlotsForV155(saved?.slots||SLOTS),[saved]);
+  const [asgn,setAsgn]=useState(()=>normalizeDatedSlotMapsV155(saved?.asgn||{},initialSlotsV155));
   const [tmps,setTmps]=useState(()=>saved?.tmps||{});
   // シフト表の最終更新日時（作成・編集のたびに更新）
   const [shiftUpdatedAt,setShiftUpdatedAt]=useState(()=>saved?.shiftUpdatedAt||'');
@@ -2234,7 +2339,7 @@ function App(){
   const [editLog,setEditLog]=useState(()=>Array.isArray(saved?.editLog)?saved.editLog:[]);
   const [showEditLog,setShowEditLog]=useState(false);
   // ── シフト確定（ロック）：確定時点の配置を基準保存し、以降の差分を赤二重線＋追記で表示 ──
-  const [lockedAsgn,setLockedAsgn]=useState(()=>saved?.lockedAsgn||{}); // {dk:{slotId:[確定時の出勤sid]}}
+  const [lockedAsgn,setLockedAsgn]=useState(()=>normalizeDatedSlotMapsV155(saved?.lockedAsgn||{},initialSlotsV155)); // {dk:{slotId:[確定時の出勤sid]}}
   const [lockedMonths,setLockedMonths]=useState(()=>saved?.lockedMonths||{}); // {"2026-7":確定日時ISO}
   // 超過勤務 自動調整：元に戻す用スナップショットと変更点
   const [preReliefAsgn,setPreReliefAsgn]=useState(null);
@@ -2246,24 +2351,32 @@ function App(){
   const [showStaffCheck,setShowStaffCheck]=useState(false);
   const [showLeaveAudit,setShowLeaveAudit]=useState(false);
   const [keyInput,setKeyInput]=useState('');
-  const [weeklyReq,setWeeklyReq]=useState(()=>saved?.weeklyReq||WEEKLY_REQ_DEFAULT);
-  const [monthlyReq,setMonthlyReq]=useState(()=>saved?.monthlyReq||{});
-  const [manualExclusions,setManualExclusions]=useState(()=>saved?.manualExclusions||{});
+  const [weeklyReq,setWeeklyReq]=useState(()=>normalizeWeeklyReqV155(saved?.weeklyReq||WEEKLY_REQ_DEFAULT,initialSlotsV155));
+  const [monthlyReq,setMonthlyReq]=useState(()=>normalizeMonthlyReqV155(saved?.monthlyReq||{},initialSlotsV155));
+  const [manualExclusions,setManualExclusions]=useState(()=>normalizeDatedSlotMapsV155(saved?.manualExclusions||{},initialSlotsV155));
   // 休診日管理: true=手動休診, false=手動開院（祝日でも強制開院）
   const [manualClosedDays,setManualClosedDays]=useState(()=>saved?.manualClosedDays||{});
   // ── ベースシフト（2週間ベース：Week A / Week B 交互） ──
   // 構造: { A: { 1: { am_out: [staffId,...], ... }, 2:..., ... 6 }, B: {...} }
-  const [baseShift,setBaseShift]=useState(()=>saved?.baseShift||{A:{},B:{}});
+  const [baseShift,setBaseShift]=useState(()=>normalizeBaseShiftV155(saved?.baseShift||{A:{},B:{}},initialSlotsV155));
 
   // ── 診療枠 state（編集可能） ──
-  const [slots,setSlots]=useState(()=>{
-    if(saved?.slots)return saved.slots;
-    const s={};
-    Object.entries(SLOTS).forEach(([dow,sls])=>{s[dow]=sls.map(sl=>({...sl}));});
-    return s;
-  });
+  const [slots,setSlots]=useState(()=>initialSlotsV155);
   // 通し手術判定が「現在のコマ」を参照できるよう、描画ごとに同期
   SLOTS_BY_DOW=slots||{};
+  // v155: 旧データ（外来枠が未分割）を読み込んだ場合、画面上で自動的に １診 / ２診 へ正規化する。
+  React.useEffect(()=>{
+    const ns=normalizeSlotsForV155(slots);
+    if(!v155DeepSame(ns,slots)){setSlots(ns);return;}
+    setWeeklyReq(prev=>{const n=normalizeWeeklyReqV155(prev,ns);return v155DeepSame(n,prev)?prev:n;});
+    setMonthlyReq(prev=>{const n=normalizeMonthlyReqV155(prev,ns);return v155DeepSame(n,prev)?prev:n;});
+    setAsgn(prev=>{const n=normalizeDatedSlotMapsV155(prev,ns);return v155DeepSame(n,prev)?prev:n;});
+    setManualExclusions(prev=>{const n=normalizeDatedSlotMapsV155(prev,ns);return v155DeepSame(n,prev)?prev:n;});
+    setLockedAsgn(prev=>{const n=normalizeDatedSlotMapsV155(prev,ns);return v155DeepSame(n,prev)?prev:n;});
+    setBaseShift(prev=>{const n=normalizeBaseShiftV155(prev,ns);return v155DeepSame(n,prev)?prev:n;});
+    setOutpatientClosures(prev=>{const n=normalizeOutpatientClosuresV155(prev,ns);return v155DeepSame(n,prev)?prev:n;});
+  // eslint-disable-next-line
+  },[slots,weeklyReq,monthlyReq,asgn,manualExclusions,lockedAsgn,baseShift,outpatientClosures]);
   // 診療枠 編集 state
   const [editSlotKey,setEditSlotKey]=useState(null);
   const [editSlotF,setEditSlotF]=useState({});
@@ -6220,7 +6333,7 @@ ${bodyHtml}
                                   return <button key={idx} type="button" onClick={()=>setOutpatientRoomState(dk,slot.id,idx,!roomClosed)}
                                     title={closed?(roomClosed?'祝日・休診日ですが、クリックするとこの診察室だけ診察ありに変更できます。':'祝日・休診日ですが、この診察室は診察ありです。クリックすると休診に戻せます。'):(roomClosed?'クリックして診察ありに戻す':'クリックして休診にする')}
                                     style={{padding:'4px 8px',borderRadius:K.rmd,border:'1px solid '+(roomClosed?'#FDBA74':'#86EFAC'),background:roomClosed?'#FFF7ED':'#F0FDF4',color:roomClosed?'#9A3412':'#166534',cursor:'pointer',fontSize:12,fontWeight:700,whiteSpace:'nowrap',opacity:1}}>
-                                    {CLINIC_ROOM_LABELS[idx]}：{roomClosed?'ー':'○'}
+                                    {slot.roomNo?slot.label:CLINIC_ROOM_LABELS[idx]}：{roomClosed?'ー':'○'}
                                   </button>;
                                 })}
                               </div>
@@ -7307,7 +7420,7 @@ ${bodyHtml}
               <div style={{fontWeight:500,fontSize:15}}>診療枠の設定</div>
               <p style={{fontSize:12,color:K.textS,marginTop:2}}>各コマの名前・時間・色を変更できます。「編集」をクリックして変更してください。</p>
             </div>
-            <button onClick={()=>{setSlots(()=>{const s={};Object.entries(SLOTS).forEach(([dow,sls])=>{s[dow]=sls.map(sl=>({...sl}));});return s;});setEditSlotKey(null);}}
+            <button onClick={()=>{setSlots(()=>cloneDefaultSlots());setEditSlotKey(null);}}
               style={{padding:'5px 14px',border:K.bdD,borderRadius:K.rmd,background:K.bg,color:K.textD,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
               初期値に戻す
             </button>
@@ -7817,7 +7930,7 @@ function BaseShiftTab({staff,slots,baseShift,setBaseShift,setBaseSlotStaff,toggl
           通常の勤務パターンをパターンA・パターンBに分けて設定します。
           <strong>1月1日からの通算週番号で A/B を交互に判定</strong>するため、月をまたいでも同じパターンが連続することはありません。
           <br/>
-          各コマのスタッフバッジをクリックすると、ON/OFFを切り替えられます（背景が濃い色＝割り当て中）。
+          外来枠は「１診」「２診」に分かれているため、診察室ごとに担当医を設定できます。各コマのスタッフバッジをクリックすると、ON/OFFを切り替えられます（背景が濃い色＝割り当て中）。
           <br/>
           <span style={{fontWeight:600}}>新しい月を開いたとき、空いている日にベースシフトが自動展開されます。</span>
         </div>
@@ -8784,13 +8897,13 @@ CHANGELOG v153
 - アプリ表示バージョンを v152 から v153 に更新。
 -->
 <!--
-CHANGELOG v154
+CHANGELOG v155
 - 管理画面でスタッフメッセージを「対応済み」または「削除」した結果が、Supabase の requests_data に保存されていなかった問題を修正。
 - 端末内では処理済みになっても、数秒後のクラウド同期で未処理メッセージが復活し、上部の 🚩 バッジ件数だけが残る原因を解消。
 - 管理者モードでも requests の変更をクラウドへ即時マージ保存するように変更。
 - 🚩 バッジ件数の集計を共通関数化し、削除直後の墓標データや空メッセージを件数に含めないよう補強。
 - 🚩 バッジクリック時は「未処理＋当月」表示に戻してからメッセージ欄へ移動するようにした。
-- アプリ表示バージョンを v153 から v154 に更新。
+- アプリ表示バージョンを v153 から v155 に更新。
 -->
 </body>
 </html>
