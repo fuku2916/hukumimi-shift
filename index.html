@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v158';
+const APP_VERSION = 'v159';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2542,12 +2542,50 @@ function App(){
     delete snap.history; delete snap.drafts; delete snap._drafts;
     return {at:new Date().toISOString(),made:snap.shiftUpdatedAt||'',kind:kind||'manual',label:label||'',data:snap,...(extra||{})};
   }
+  function mergeHistoryLists(){
+    const out=[], seen=new Set();
+    Array.from(arguments).forEach(list=>{
+      (Array.isArray(list)?list:[]).forEach(h=>{
+        if(!h||typeof h!=='object')return;
+        const key=[h.at||'',h.made||'',h.kind||'',h.label||'',h.archiveName||''].join('|');
+        if(seen.has(key))return; seen.add(key); out.push(h);
+      });
+    });
+    return out.sort((a,b)=>String(b.at||'').localeCompare(String(a.at||'')));
+  }
+  async function loadShiftHistoryFromCloudAny(){
+    // v159: クリニック行モードでは履歴が data.doctor.history だけでなく、
+    // 過去版の data.history / data.shared.history に残っている場合がある。
+    // SB.getSafe() は自職種＋sharedへ合成するため、トップ階層の旧履歴を見落とすことがあった。
+    let merged=[];
+    const cloud=await SB.getSafe('shift_data');
+    if(cloud.ok){
+      const base=(cloud.data&&typeof cloud.data==='object')?cloud.data:{};
+      merged=mergeHistoryLists(merged,base.history);
+    }else{
+      return {ok:false,history:[]};
+    }
+    if(CLINIC_MODE){
+      try{
+        const rid=SB._rowId('shift_data');
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        if(r.ok){
+          const j=await r.json(); const all=j[0]?.data||{};
+          const unitData=(all&&all[APP_UNIT]&&typeof all[APP_UNIT]==='object')?all[APP_UNIT]:{};
+          const shared=(all&&all.shared&&typeof all.shared==='object')?all.shared:{};
+          merged=mergeHistoryLists(merged,unitData.history,shared.history,all.history);
+        }
+      }catch(e){}
+    }
+    return {ok:true,history:pruneShiftHistory(merged)};
+  }
   async function saveCurrentSnapshotToHistory(kind,label){
     if(!SB_ENABLED)return {ok:false,skipped:true,error:'クラウドが設定されていません。'};
     const cloud=await SB.getSafe('shift_data');
     if(!cloud.ok)return {ok:false,error:'クラウドに接続できませんでした。'};
     const base=(cloud.data&&typeof cloud.data==='object')?cloud.data:{};
-    const hist=(Array.isArray(base.history)?base.history:[]);
+    const hres=await loadShiftHistoryFromCloudAny();
+    const hist=hres.ok?hres.history:(Array.isArray(base.history)?base.history:[]);
     const nextHist=pruneShiftHistory([makeHistorySnapshot(kind,label,currentShiftPayload()),...hist]);
     const ok=await SB.set('shift_data',{...base,history:nextHist});
     if(ok)setShiftHistory(nextHist);
@@ -2557,11 +2595,8 @@ function App(){
     if(!SB_ENABLED)return;
     setHistoryLoading(true);
     try{
-      const cloud=await SB.getSafe('shift_data');
-      if(cloud.ok){
-        const base=(cloud.data&&typeof cloud.data==='object')?cloud.data:{};
-        setShiftHistory(Array.isArray(base.history)?base.history:[]);
-      }
+      const r=await loadShiftHistoryFromCloudAny();
+      if(r.ok)setShiftHistory(r.history);
     }catch(e){}
     setHistoryLoading(false);
   }
@@ -2645,6 +2680,7 @@ function App(){
       // 直前の公開版を履歴に自動退避し、今回公開した版も「公開時点スナップショット」として保存する。
       // これにより、公開後に編集しても、公開時点の正本は履歴内で変化しない。
       let hist=(prev&&Array.isArray(prev.history))?prev.history:[];
+      try{const hr=await loadShiftHistoryFromCloudAny(); if(hr.ok)hist=hr.history;}catch(e){}
       const archiveAt=new Date().toISOString();
       const currentArchive=makeHistorySnapshot('published_archive','公開時点スナップショット',currentShiftPayload(),{publishedAt:archiveAt,archiveName:publishArchiveName(archiveAt)});
       const additions=[currentArchive];
@@ -8984,6 +9020,14 @@ CHANGELOG v157
 - ドクター画面では、診察室に担当医がいない場合、外来枠名横の表示を自動的に「(2)ー」のように休診扱いにする。
 - ナース・クラーク画面では、1診/2診を別カードにせず、外来全体の配置としてまとめて表示。
 - 内部の分割スロットID、ベースシフト保存形式、必要人数保存形式は維持。
+-->
+
+<!--
+CHANGELOG v159
+- ドクター管理者画面の「ファイル > 履歴」で、クリニック行モード時に旧保存場所の履歴を拾えず空表示になる問題を修正。
+- 履歴読み込み時に data.doctor.history だけでなく、過去版で残る data.history / data.shared.history も統合して表示するようにした。
+- 「全データ保存」「公開」時も、既存の旧履歴を引き継いだうえで新しい履歴を保存するようにした。
+- アプリ表示バージョンを v158 から v159 に更新。
 -->
 
 </body>
