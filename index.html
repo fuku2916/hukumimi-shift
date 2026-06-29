@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v163';
+const APP_VERSION = 'v164';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -1961,6 +1961,14 @@ function App(){
   const saved=useMemo(()=>loadLS(),[]);
   // 「手元の最新の作成日時」を常に保持するref。クラウド読込の競合判定で、起動時固定の saved ではなくこれを使う（未公開の編集が消える不具合の対策）。
   const shiftTsRef=React.useRef(saved?.shiftUpdatedAt||'');
+  // v164: 起動時のクラウド読込・旧形式データの自動正規化は「ユーザー編集」ではない。
+  // その間に asgn/slots/staff 等の state が変わっても、公開ボタンを未公開（緑）にしないための抑制フラグ。
+  const shiftHydratingRef=React.useRef(false);
+  function beginShiftHydration(ms){
+    shiftHydratingRef.current=true;
+    try{window.clearTimeout(beginShiftHydration._t);}catch(e){}
+    beginShiftHydration._t=window.setTimeout(()=>{shiftHydratingRef.current=false;},ms||1200);
+  }
   // ── アプリモード ──
   // 更新リロード後にログイン中の画面を復元（sessionStorageに直前のセッションがあれば使う）
   const [appMode,setAppMode]=useState(()=>{const r=loadResume();return (r&&r.appMode==='staff'&&r.staffMyId!=null)?'staff':'select';}); // 'select'|'admin'|'staff'
@@ -2012,6 +2020,7 @@ function App(){
   // Supabaseからデータ読み込み（管理者モード起動時）
   React.useEffect(()=>{
     if(appMode!=='admin'||!SB_ENABLED)return;
+    beginShiftHydration(1800); // v164: 起動直後の読込反映で shiftUpdatedAt を更新しない
     setSbLoading(true);
     (async()=>{
       try{
@@ -2087,6 +2096,7 @@ function App(){
   //   入るまで端末内の初期データ（PIN空）が表示され、全員「PIN未設定」になってしまう。
   React.useEffect(()=>{
     if((appMode!=='staff'&&appMode!=='staff_login')||!SB_ENABLED)return;
+    beginShiftHydration(1200); // v164: スタッフ画面の読込反映も編集扱いにしない
     setSbLoading(true);
     (async()=>{
       try{
@@ -2450,6 +2460,17 @@ function App(){
   // v155: 旧データ（外来枠が未分割）を読み込んだ場合、画面上で自動的に １診 / ２診 へ正規化する。
   React.useEffect(()=>{
     const ns=normalizeSlotsForV155(slots);
+    // v164: 旧形式→v155以降形式への自動正規化は読込時の整形であり、編集ではない。
+    // 正規化で state が変わる前に抑制フラグを立て、公開ボタンが緑になる誤判定を防ぐ。
+    const willNormalize = !v155DeepSame(ns,slots)
+      || !v155DeepSame(normalizeWeeklyReqV155(weeklyReq,ns),weeklyReq)
+      || !v155DeepSame(normalizeMonthlyReqV155(monthlyReq,ns),monthlyReq)
+      || !v155DeepSame(normalizeDatedSlotMapsV155(asgn,ns),asgn)
+      || !v155DeepSame(normalizeDatedSlotMapsV155(manualExclusions,ns),manualExclusions)
+      || !v155DeepSame(normalizeDatedSlotMapsV155(lockedAsgn,ns),lockedAsgn)
+      || !v155DeepSame(normalizeBaseShiftV155(baseShift,ns),baseShift)
+      || !v155DeepSame(normalizeOutpatientClosuresV155(outpatientClosures,ns),outpatientClosures);
+    if(willNormalize)beginShiftHydration(1000);
     if(!v155DeepSame(ns,slots)){setSlots(ns);return;}
     setWeeklyReq(prev=>{const n=normalizeWeeklyReqV155(prev,ns);return v155DeepSame(n,prev)?prev:n;});
     setMonthlyReq(prev=>{const n=normalizeMonthlyReqV155(prev,ns);return v155DeepSame(n,prev)?prev:n;});
@@ -2486,6 +2507,8 @@ function App(){
   useEffect(()=>{
     if(shiftStampSkipRef.current){shiftStampSkipRef.current=false;return;}
     if(shiftStampLoadRef.current){shiftStampLoadRef.current=false;return;}
+    // v164: クラウド読込・起動時正規化中の state 変化は、ユーザー編集ではないので作成日時を更新しない。
+    if(shiftHydratingRef.current)return;
     if(appMode!=='admin')return; // 編集できるのは管理者のみ
     setShiftUpdatedAt(new Date().toISOString());
   // eslint-disable-next-line
