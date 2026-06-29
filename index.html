@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v156';
+const APP_VERSION = 'v157';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -1447,6 +1447,44 @@ function hasOutpatientClosureForSlot(closures,dk,slot,dayClosed=false){
   return Object.entries(c).some(([idx,v])=>v && Number(idx)<=outpatientRoomCountForSlot(slot));
 }
 // v134: 祝日・休診日でも、診察室ごとの設定で「○」にした外来枠はカレンダー上に表示する。
+
+// v157: 月間カレンダー表示では、外来1診/2診を職種ごとに見やすく束ねる。
+// 内部データは v155/v156 の分割枠を維持し、ドクター画面だけ「(1) 北尾 / (2) --」のように診察室別表示する。
+function calendarSlotGroupsForUnit(sls){
+  const groups=[];
+  const byKey={};
+  (sls||[]).forEach(slot=>{
+    if(isRoomSplitOutSlot(slot)){
+      const key='out_'+(slot.baseSlotId||baseOutLabel(slot.label)||slot.id);
+      if(!byKey[key]){
+        byKey[key]={kind:'outRooms',key,slots:[],label:baseOutLabel(slot.label),slot};
+        groups.push(byKey[key]);
+      }
+      byKey[key].slots.push(slot);
+      byKey[key].slots.sort((a,b)=>(a.roomNo||0)-(b.roomNo||0));
+    }else{
+      groups.push({kind:'single',key:slot.id,slots:[slot],label:slot.label,slot});
+    }
+  });
+  return groups;
+}
+function uniqIds(ids){const out=[];(ids||[]).forEach(id=>{if(out.indexOf(id)<0)out.push(id);});return out;}
+function slotActiveIdsForCalendar(slot,da,dExcl,dt){
+  const allIds=(da&&da[slot.id])||[];
+  const exclIds=(dExcl&&dExcl[slot.id])||[];
+  const slotOffIds=Object.entries(dt||{}).filter(([,v])=>['off','paid'].includes(v.type)).map(([sid])=>parseInt(sid));
+  return allIds.filter(sid=>!exclIds.includes(sid)&&!slotOffIds.includes(sid));
+}
+function outpatientAutoMarkForCalendar(closures,dk,group,dayClosed,da,dExcl,dt){
+  if(!group||group.kind!=='outRooms')return '';
+  return (group.slots||[]).map(slot=>{
+    const rn=slot.roomNo||1;
+    const manualClosed=outpatientRoomClosed(closures,dk,slot.id,1,dayClosed);
+    const noDoctorAssigned=(APP_UNIT==='doctor' && slotActiveIdsForCalendar(slot,da,dExcl,dt).length===0);
+    return '('+rn+')'+((manualClosed||noDoctorAssigned)?'ー':'○');
+  }).join('');
+}
+
 function hasOutpatientOpenOverrideForSlot(closures,dk,slot){
   if(!isOutpatientSlot(slot))return false;
   const c=(closures&&closures[dk]&&closures[dk][slot.id])||{};
@@ -6541,68 +6579,76 @@ ${bodyHtml}
                                 </div>
                               ):(
                                 <>
-                                  {sls.map(slot=>{
+                                  {calendarSlotGroupsForUnit(sls).map(group=>{
+                                    const gSlots=group.slots||[];
+                                    const slot=group.slot||gSlots[0];
                                     const sc=getSlotColor(slot);
-                                    const allIds=(da[slot.id]||[]);
-                                    const exclIds=(dExcl[slot.id]||[]);
-                                    const slotOffIds=Object.entries(dt).filter(([,v])=>['off','paid'].includes(v.type)).map(([sid])=>parseInt(sid));
-                                    const activeIds=allIds.filter(sid=>!exclIds.includes(sid)&&!slotOffIds.includes(sid));
-                                    const req=getReq(dk,slot.id);
+                                    const roomGroup=group.kind==='outRooms';
+                                    const allIds=uniqIds(gSlots.flatMap(sl=>(da[sl.id]||[])));
+                                    const activeIds=uniqIds(gSlots.flatMap(sl=>slotActiveIdsForCalendar(sl,da,dExcl,dt)));
+                                    const req=gSlots.reduce((sum,sl)=>sum+getReq(dk,sl.id),0);
                                     const met=activeIds.length>=req;
                                     const coverColor=activeIds.length===0?K.textS:met?'#1D9E75':'#D85A30';
-                                    // 確定（ロック）後の差分：確定時にいたが今いない人＝removed、確定時いなかった今いる人＝added
                                     const isLocked=!!curMonthLockedAt;
-                                    const baseActive=isLocked?(lockedAsgn[dk]?.[slot.id]||[]):[];
-                                    // 完全に消えた人（asgnからも除去）はゴーストで表示。除外で残っている人は下のチップ側で赤二重線にする。
+                                    const baseActive=uniqIds(gSlots.flatMap(sl=>(isLocked?(lockedAsgn[dk]?.[sl.id]||[]):[])));
                                     const removedSinceLock=isLocked?baseActive.filter(id=>!activeIds.includes(id)&&!allIds.includes(id)):[];
+                                    const label=roomGroup?group.label:slot.label;
+                                    const outMark=roomGroup?outpatientAutoMarkForCalendar(outpatientClosures,dk,group,!!isClosedDay(dk),da,dExcl,dt):(isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosures,dk,slot,req,!!isClosedDay(dk)):'' );
+                                    const renderBadge=(sid,sl)=>{
+                                      const s=staff.find(x=>x.id===sid);
+                                      if(!s)return null;
+                                      const exclIds=(dExcl[sl.id]||[]);
+                                      const slotOffIds=Object.entries(dt).filter(([,v])=>['off','paid'].includes(v.type)).map(([sid])=>parseInt(sid));
+                                      const isExcl=exclIds.includes(sid);
+                                      const isOff=slotOffIds.includes(sid);
+                                      const isOffTmp=['off','paid','paid_am','paid_pm'].includes(tmps[dk]?.[String(sid)]?.type);
+                                      const leaveNote=(!isOffTmp&&!isExcl)?leaveNoteForSlot(s,sl,d.getDay(),da,dExcl):'';
+                                      const isReliefAdded=reliefAddedSet.has(dk+'|'+sl.id+'|'+sid);
+                                      const baseActiveSlot=isLocked?(lockedAsgn[dk]?.[sl.id]||[]):[];
+                                      const activeSlot=slotActiveIdsForCalendar(sl,da,dExcl,dt);
+                                      const isAddedSinceLock=isLocked&&!isExcl&&!isOff&&activeSlot.includes(sid)&&!baseActiveSlot.includes(sid);
+                                      const isRemovedSinceLock=isLocked&&baseActiveSlot.includes(sid)&&!activeSlot.includes(sid);
+                                      return(
+                                        <span key={sl.id+'_'+sid}
+                                          onClick={e=>{e.stopPropagation();if(!isOffTmp)togExclusion(dk,sl.id,sid);}}
+                                          title={isRemovedSinceLock?'確定後にこのコマから外れました':isAddedSinceLock?'確定後に追加されました':isOffTmp?'終日休（臨時条件タブで設定）':isExcl?'クリックでこのコマに戻す':'クリックでこのコマから外す（この日の他コマ・終日休には影響しません）'}
+                                          style={{fontSize:'var(--fs-badge)',background:isRemovedSinceLock?'#FEE2E2':(isOffTmp?'#94A3B8':s.color),color:isRemovedSinceLock?'#991B1B':'#fff',borderRadius:3,padding:'1px 3px',cursor:'pointer',userSelect:'none',whiteSpace:'nowrap',
+                                            border:isRemovedSinceLock?'1px dashed #FCA5A5':'none',
+                                            opacity:isRemovedSinceLock?1:((isExcl||isOffTmp)?0.35:1),
+                                            textDecoration:(isRemovedSinceLock||isExcl||isOffTmp)?'line-through':'none',
+                                            textDecorationStyle:isRemovedSinceLock?'double':'solid',
+                                            textDecorationColor:isRemovedSinceLock?'#DC2626':'currentColor',
+                                            boxShadow:isAddedSinceLock?'0 0 0 2px #DC2626':isReliefAdded?'0 0 0 2px #16A34A':'none'}}>
+                                          {isAddedSinceLock?'＋':(isReliefAdded?'✦':'')}{s.name}{isOffTmp?'(休)':(leaveNote?<span style={{fontWeight:700,opacity:0.95}}>{leaveNote}</span>:'')}
+                                        </span>
+                                      );
+                                    };
                                     return(
-                                      <div key={slot.id} style={{marginBottom:2,padding:'1px 3px',borderRadius:3,borderLeft:'2px solid '+sc.border,background:sc.bgLight}}>
+                                      <div key={group.key} style={{marginBottom:2,padding:'1px 3px',borderRadius:3,borderLeft:'2px solid '+sc.border,background:sc.bgLight}}>
                                         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                                          <div style={{fontSize:'var(--fs-slot)',color:K.textS}}>{slot.label}{isOutpatientSlot(slot)&&<span style={{marginLeft:3,fontWeight:700,color:'#166534'}}>{outpatientMarkForSlot(outpatientClosures,dk,slot,req,!!isClosedDay(dk))}</span>}{slot.type==='surg'&&surgeryCalUrl&&<span style={{marginLeft:3,fontWeight:700,color:surgeryMarkForSlot(surgeryFlags,dk,slot)==='○'?'#DC2626':'#94A3B8'}}>{surgeryMarkForSlot(surgeryFlags,dk,slot)}</span>}</div>
+                                          <div style={{fontSize:'var(--fs-slot)',color:K.textS}}>{label}{outMark&&<span style={{marginLeft:3,fontWeight:700,color:'#166534'}}>{outMark}</span>}{(!roomGroup&&slot.type==='surg'&&surgeryCalUrl)&&<span style={{marginLeft:3,fontWeight:700,color:surgeryMarkForSlot(surgeryFlags,dk,slot)==='○'?'#DC2626':'#94A3B8'}}>{surgeryMarkForSlot(surgeryFlags,dk,slot)}</span>}</div>
                                           <div style={{fontSize:'var(--fs-cell)',fontWeight:600,color:coverColor}}>{activeIds.length}/{req}</div>
                                         </div>
-                                        <div style={{display:'flex',flexWrap:'wrap',gap:2}}>
-                                          {activeIds.length===0&&allIds.filter(sid=>!slotOffIds.includes(sid)).length===0&&<span style={{fontSize:8,color:K.textS,opacity:.4}}>--</span>}
-                                          {allIds.map(sid=>{
-                                            const s=staff.find(x=>x.id===sid);
-                                            if(!s)return null;
-                                            const isExcl=exclIds.includes(sid);
-                                            const isOff=slotOffIds.includes(sid);
-                                            const isOffTmp=['off','paid','paid_am','paid_pm'].includes(tmps[dk]?.[String(sid)]?.type);
-                                            const leaveNote=(!isOffTmp&&!isExcl)?leaveNoteForSlot(s,slot,d.getDay(),da,dExcl):'';
-                                            const isReliefAdded=reliefAddedSet.has(dk+'|'+slot.id+'|'+sid);
-                                            // 確定後に追加された人（出勤中・確定時には不在）＝赤枠＋＋印で「追記」表示
-                                            const isAddedSinceLock=isLocked&&!isExcl&&!isOff&&activeIds.includes(sid)&&!baseActive.includes(sid);
-                                            // 確定後に外れた人（除外/終日休だが確定時は出勤）＝赤い二重線で表示
-                                            const isRemovedSinceLock=isLocked&&baseActive.includes(sid)&&!activeIds.includes(sid);
-                                            // isOff（tmps由来）のスタッフはバッジを薄く表示して「クリックで復活」を可能にする
-                                            return(
-                                              <span key={sid}
-                                                onClick={e=>{e.stopPropagation();if(!isOffTmp)togExclusion(dk,slot.id,sid);}}
-                                                title={isRemovedSinceLock?'確定後にこのコマから外れました':isAddedSinceLock?'確定後に追加されました':isOffTmp?'終日休（臨時条件タブで設定）':isExcl?'クリックでこのコマに戻す':'クリックでこのコマから外す（この日の他コマ・終日休には影響しません）'}
-                                                style={{fontSize:'var(--fs-badge)',background:isRemovedSinceLock?'#FEE2E2':(isOffTmp?'#94A3B8':s.color),color:isRemovedSinceLock?'#991B1B':'#fff',borderRadius:3,padding:'1px 3px',cursor:'pointer',userSelect:'none',whiteSpace:'nowrap',
-                                                  border:isRemovedSinceLock?'1px dashed #FCA5A5':'none',
-                                                  opacity:isRemovedSinceLock?1:((isExcl||isOffTmp)?0.35:1),
-                                                  textDecoration:(isRemovedSinceLock||isExcl||isOffTmp)?'line-through':'none',
-                                                  textDecorationStyle:isRemovedSinceLock?'double':'solid',
-                                                  textDecorationColor:isRemovedSinceLock?'#DC2626':'currentColor',
-                                                  boxShadow:isAddedSinceLock?'0 0 0 2px #DC2626':isReliefAdded?'0 0 0 2px #16A34A':'none'}}>
-                                                {isAddedSinceLock?'＋':(isReliefAdded?'✦':'')}{s.name}{isOffTmp?'(休)':(leaveNote?<span style={{fontWeight:700,opacity:0.95}}>{leaveNote}</span>:'')}
-                                              </span>
-                                            );
-                                          })}
-                                          {removedSinceLock.map(sid=>{
-                                            const s=staff.find(x=>x.id===sid);
-                                            if(!s)return null;
-                                            return(
-                                              <span key={'rm'+sid} title="確定後にこのコマから外れました"
-                                                style={{fontSize:'var(--fs-badge)',background:'#FEE2E2',color:'#991B1B',borderRadius:3,padding:'1px 3px',whiteSpace:'nowrap',border:'1px dashed #FCA5A5',
-                                                  textDecoration:'line-through',textDecorationStyle:'double',textDecorationColor:'#DC2626'}}>
-                                                {s.name}
-                                              </span>
-                                            );
-                                          })}
-                                        </div>
+                                        {roomGroup&&APP_UNIT==='doctor'?(
+                                          <div style={{display:'flex',flexDirection:'column',gap:1,marginTop:1}}>
+                                            {gSlots.map(sl=>{
+                                              const roomAllIds=(da[sl.id]||[]);
+                                              const roomActiveIds=slotActiveIdsForCalendar(sl,da,dExcl,dt);
+                                              return <div key={sl.id} style={{display:'flex',alignItems:'center',gap:3,minHeight:18,flexWrap:'wrap'}}>
+                                                <span style={{fontSize:'var(--fs-cell)',color:K.text,fontWeight:600,minWidth:28}}>({sl.roomNo||1})</span>
+                                                {roomActiveIds.length===0&&roomAllIds.length===0&&<span style={{fontSize:8,color:K.textS,opacity:.35}}>--</span>}
+                                                {roomAllIds.map(sid=>renderBadge(sid,sl))}
+                                              </div>;
+                                            })}
+                                            {removedSinceLock.map(sid=>{const s=staff.find(x=>x.id===sid);if(!s)return null;return <span key={'rm'+sid} title="確定後にこのコマから外れました" style={{fontSize:'var(--fs-badge)',background:'#FEE2E2',color:'#991B1B',borderRadius:3,padding:'1px 3px',whiteSpace:'nowrap',border:'1px dashed #FCA5A5',textDecoration:'line-through',textDecorationStyle:'double',textDecorationColor:'#DC2626'}}>{s.name}</span>;})}
+                                          </div>
+                                        ):(
+                                          <div style={{display:'flex',flexWrap:'wrap',gap:2}}>
+                                            {activeIds.length===0&&allIds.length===0&&<span style={{fontSize:8,color:K.textS,opacity:.4}}>--</span>}
+                                            {allIds.map(sid=>{const sl=gSlots.find(x=>(da[x.id]||[]).includes(sid))||slot;return renderBadge(sid,sl);})}
+                                            {removedSinceLock.map(sid=>{const s=staff.find(x=>x.id===sid);if(!s)return null;return <span key={'rm'+sid} title="確定後にこのコマから外れました" style={{fontSize:'var(--fs-badge)',background:'#FEE2E2',color:'#991B1B',borderRadius:3,padding:'1px 3px',whiteSpace:'nowrap',border:'1px dashed #FCA5A5',textDecoration:'line-through',textDecorationStyle:'double',textDecorationColor:'#DC2626'}}>{s.name}</span>;})}
+                                          </div>
+                                        )}
                                       </div>
                                     );
                                   })}
@@ -8929,6 +8975,14 @@ CHANGELOG v156
 - ドクターは1日8時間・週40時間による自動削除・自動調整・警告対象外にした。
 - AIシフト作成プロンプトにも「ドクターは勤務時間制限の自動調整対象外」と明記。
 - v155の外来枠 １診 / ２診 分割仕様は維持。
+-->
+<!--
+CHANGELOG v157
+- 月間カレンダー表示で、外来の １診 / ２診 を1つの外来カードに束ねて表示するように変更。
+- ドクター画面では、外来カード内に「(1) 担当医」「(2) 担当医」のように診察室別で表示。
+- ドクター画面では、診察室に担当医がいない場合、外来枠名横の表示を自動的に「(2)ー」のように休診扱いにする。
+- ナース・クラーク画面では、1診/2診を別カードにせず、外来全体の配置としてまとめて表示。
+- 内部の分割スロットID、ベースシフト保存形式、必要人数保存形式は維持。
 -->
 
 </body>
