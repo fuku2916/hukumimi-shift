@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v159';
+const APP_VERSION = 'v160';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -3025,37 +3025,57 @@ function App(){
         const showClosedOnly2=isClosed2&&!hasOpenOutpatient2;
         let sh='';
         if(!showClosedOnly2){
-          sls.forEach(slot=>{
-            const allIds=da[slot.id]||[];
-            const exclIds=(dExcl[slot.id]||[]).map(String);
+          calendarSlotGroupsForUnit(sls).forEach(group=>{
+            const gSlots=(group.slots||[]);
+            const slot=group.slot||gSlots[0];
+            if(!slot)return;
+            const roomGroup=group.kind==='outRooms';
+            const label=roomGroup?group.label:slot.label;
             const staffExistsPDF=sid=>staffPDF.some(st=>String(st.id)===String(sid));
-            const isSlotOffPDF=sid=>{
+            const isSlotOffPDF=(sid,sl)=>{
               const tmp=dt[String(sid)]||dt[sid];
               if(!tmp)return false;
               if(['off','paid'].includes(tmp.type))return true;
-              const id=slot.id||'', label=slot.label||'';
-              if(tmp.type==='paid_am')return ['am_out','am_surg','surg'].includes(id)||label.includes('午前');
-              if(tmp.type==='paid_pm')return ['pm_surg','pm_out','pm1','pm2'].includes(id)||label.includes('午後')||label.includes('昼')||label.includes('夜');
+              const id=(sl&&sl.id)||'', label2=(sl&&sl.label)||'';
+              if(tmp.type==='paid_am')return ['am_out','am_surg','surg'].includes(id)||label2.includes('午前');
+              if(tmp.type==='paid_pm')return ['pm_surg','pm_out','pm1','pm2'].includes(id)||label2.includes('午後')||label2.includes('昼')||label2.includes('夜');
               return false;
             };
-            const activeIds=allIds.filter(sid=>staffExistsPDF(sid)&&!exclIds.includes(String(sid))&&!isSlotOffPDF(sid));
-            const req=getReqPDF(dk,slot.id),met=activeIds.length>=req;
-            const lbl2=slot.label||'';
+            const activeIdsForSlot=sl=>{
+              const allIds=da[sl.id]||[];
+              const exclIds=(dExcl[sl.id]||[]).map(String);
+              return allIds.filter(sid=>staffExistsPDF(sid)&&!exclIds.includes(String(sid))&&!isSlotOffPDF(sid,sl));
+            };
+            const activeIds=uniqIds(gSlots.flatMap(sl=>activeIdsForSlot(sl)));
+            const req=gSlots.reduce((sum,sl)=>sum+getReqPDF(dk,sl.id),0);
+            const met=activeIds.length>=req;
+            const lbl2=label||'';
             const slotBg=lbl2.includes('夜')?'#F3F0FF':lbl2.includes('昼')||lbl2.includes('午後')?'#FFF7ED':'#EFF6FF';
             const slotBd=lbl2.includes('夜')?'#7C3AED':lbl2.includes('昼')||lbl2.includes('午後')?'#C05C00':'#1D6FCC';
-            const surgMark=(slot.type==='surg'&&hasSurgerySnapshot)?surgeryMarkForSlot(surgeryFlagsPDF,dk,slot):'';
-            const outMark=isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosuresPDF,dk,slot,req,!!isClosed2):'';
+            const surgMark=(!roomGroup&&slot.type==='surg'&&hasSurgerySnapshot)?surgeryMarkForSlot(surgeryFlagsPDF,dk,slot):'';
+            const outMark=roomGroup?outpatientAutoMarkForCalendar(outpatientClosuresPDF,dk,group,!!isClosed2,da,dExcl,dt):(isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosuresPDF,dk,slot,req,!!isClosed2):'');
             const markHtml=(outMark?`<span class="out-mark ok">${outMark}</span>`:'')+(surgMark?`<span class="surg-mark ${surgMark==='○'?'on':'off'}">${surgMark}</span>`:'');
-            // v128: 印刷用カレンダーでは「実際に出勤する人」だけを表示する。
-            // 管理画面上では除外・休みを薄く表示して経緯を確認できるが、印刷物にまで
-            // 薄い過去スタッフ名が出ると下書きや旧版が混ざって見えるため、activeIds に限定する。
-            const names=activeIds.map(sid=>{
+            const badgeHtml=(sid,sl)=>{
               const st=staffPDF.find(x=>String(x.id)===String(sid));if(!st)return '';
-              const leaveNote=leaveNoteForSlot(st,slot,dow,da,dExcl);
+              const leaveNote=leaveNoteForSlot(st,sl,dow,da,dExcl);
               const txt=st.name+(leaveNote?leaveNote:'');
               return `<span class="sname" style="background:${st.color};color:#fff">${txt}</span>`;
-            }).join('');
-            sh+=`<div class="slot" style="background:${slotBg};border-left:3px solid ${slotBd}"><div class="sl-hd"><span class="sl-lbl" style="color:${slotBd}">${slot.label}${markHtml}</span><span class="sl-cnt ${met?'':'unmet'}">${activeIds.length}/${req}</span></div><div class="sl-names">${names||'<span class="no-staff">--</span>'}</div></div>`;
+            };
+            let names='';
+            if(roomGroup&&APP_UNIT==='doctor'){
+              names='<div class="room-names">'+gSlots.map(sl=>{
+                const roomIds=activeIdsForSlot(sl);
+                const rn=sl.roomNo||1;
+                const b=roomIds.map(sid=>badgeHtml(sid,sl)).join('')||'<span class="no-staff">--</span>';
+                return `<div class="room-row"><span class="room-no">(${rn})</span>${b}</div>`;
+              }).join('')+'</div>';
+            }else{
+              names=activeIds.map(sid=>{
+                const sl=gSlots.find(x=>activeIdsForSlot(x).map(String).includes(String(sid)))||slot;
+                return badgeHtml(sid,sl);
+              }).join('')||'<span class="no-staff">--</span>';
+            }
+            sh+=`<div class="slot" style="background:${slotBg};border-left:3px solid ${slotBd}"><div class="sl-hd"><span class="sl-lbl" style="color:${slotBd}">${label}${markHtml}</span><span class="sl-cnt ${met?'':'unmet'}">${activeIds.length}/${req}</span></div><div class="sl-names">${names}</div></div>`;
           });
           const offN=Object.entries(dt).filter(([,v])=>['off','paid','paid_am','paid_pm'].includes(v.type)).map(([sid,v])=>{
             const nm=(staffPDF.find(st=>String(st.id)===String(sid))||{}).name;if(!nm)return null;
@@ -3076,7 +3096,7 @@ function App(){
 html,body{width:210mm;background:#fff;color:#000}
 body{font-family:"Helvetica Neue",-apple-system,"Hiragino Sans",sans-serif;padding:6mm;transform-origin:top left;transform:scale(${scale});width:calc(210mm / ${scale});-webkit-print-color-adjust:exact;print-color-adjust:exact}
 h1{font-size:13pt;font-weight:700;margin-bottom:1.5mm}.sub{font-size:8pt;color:#333;margin-bottom:1mm}.snap{font-size:8pt;color:#166534;font-weight:700;margin-bottom:1mm}.warn{font-size:7pt;color:#666;margin-bottom:1.5mm}
-table{border-collapse:collapse;width:100%;table-layout:fixed}th{background:#fff;color:#000;font-size:10pt;font-weight:700;padding:2px;border:2px solid #000;text-align:center}td{border:1.5px solid #000;padding:2px;vertical-align:top;background:#fff}td.empty{background:#fff}td.sat{background:#FFFBEB}.dn{font-size:11pt;font-weight:700;margin-bottom:1mm;padding-bottom:0.5mm;border-bottom:1px solid #555}.closed{font-size:8pt;color:#991B1B;text-align:center;font-weight:700}.slot{border-radius:2px;padding:1px 2px;margin-bottom:2px}.sl-hd{display:flex;justify-content:space-between;align-items:center}.sl-lbl{font-size:8pt;font-weight:700}.sl-cnt{font-size:7.5pt;font-weight:700;color:#166534;padding:0 1px}.unmet{color:#DC2626!important;font-weight:700}.sl-names{display:flex;flex-wrap:wrap;gap:2px;margin-top:0.5px}.sname{font-size:9pt;font-weight:700;padding:0 2px;border-radius:3px;line-height:1.25}.sname.muted{opacity:.45;text-decoration:line-through}.no-staff{font-size:7pt;color:#999;font-weight:400}.off-list{font-size:7.5pt;color:#BE185D;margin-top:1mm}.out-mark{font-size:7.5pt;font-weight:900;margin-left:2px}.out-mark.ok{color:#166534}.out-mark.warn{color:#B45309}.surg-mark{font-size:9pt;font-weight:900;margin-left:2px}.surg-mark.on{color:#DC2626}.surg-mark.off{color:#64748B}
+table{border-collapse:collapse;width:100%;table-layout:fixed}th{background:#fff;color:#000;font-size:10pt;font-weight:700;padding:2px;border:2px solid #000;text-align:center}td{border:1.5px solid #000;padding:2px;vertical-align:top;background:#fff}td.empty{background:#fff}td.sat{background:#FFFBEB}.dn{font-size:11pt;font-weight:700;margin-bottom:1mm;padding-bottom:0.5mm;border-bottom:1px solid #555}.closed{font-size:8pt;color:#991B1B;text-align:center;font-weight:700}.slot{border-radius:2px;padding:1px 2px;margin-bottom:2px}.sl-hd{display:flex;justify-content:space-between;align-items:center}.sl-lbl{font-size:8pt;font-weight:700}.sl-cnt{font-size:7.5pt;font-weight:700;color:#166534;padding:0 1px}.unmet{color:#DC2626!important;font-weight:700}.sl-names{display:flex;flex-wrap:wrap;gap:2px;margin-top:0.5px}.sname{font-size:9pt;font-weight:700;padding:0 2px;border-radius:3px;line-height:1.25}.sname.muted{opacity:.45;text-decoration:line-through}.room-names{display:flex;flex-direction:column;gap:1px}.room-row{display:flex;align-items:center;gap:2px;min-height:12px}.room-no{font-size:8.5pt;font-weight:700;min-width:14pt}.no-staff{font-size:7pt;color:#999;font-weight:400}.off-list{font-size:7.5pt;color:#BE185D;margin-top:1mm}.out-mark{font-size:7.5pt;font-weight:900;margin-left:2px}.out-mark.ok{color:#166534}.out-mark.warn{color:#B45309}.surg-mark{font-size:9pt;font-weight:900;margin-left:2px}.surg-mark.on{color:#DC2626}.surg-mark.off{color:#64748B}
 @page{size:A4 portrait;margin:8mm}@media print{body{transform:scale(${scale});transform-origin:top left;width:calc(210mm / ${scale});padding:0}}
 </style></head><body>
 <h1>${printTitle}　${py}年 ${pm}月</h1>
