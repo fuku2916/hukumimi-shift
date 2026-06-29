@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v160';
+const APP_VERSION = 'v161';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -327,6 +327,31 @@ function injectPrintButton(printWin){
     const st=printWin.document.createElement('style');
     st.textContent='@media print{.__noprint{display:none!important}}';
     printWin.document.head.appendChild(st);
+
+    // v161: 印刷用に開いた静的画面を、そのまま単独HTMLとしてPCへ保存できるようにする。
+    // ChatGPT/ブラウザからMacの任意フォルダへ直接上書き保存はできないため、ブラウザのダウンロードとして保存する。
+    const saveBtn=printWin.document.createElement('button');
+    saveBtn.textContent='💾 保存';
+    saveBtn.className='__noprint';
+    saveBtn.setAttribute('style','position:fixed;top:10px;right:104px;z-index:99999;padding:10px 16px;font-size:15px;font-weight:700;background:#166534;color:#fff;border:none;border-radius:10px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25)');
+    saveBtn.onclick=function(){
+      try{
+        const clone=printWin.document.documentElement.cloneNode(true);
+        clone.querySelectorAll('.__noprint').forEach(function(n){n.remove();});
+        const html='<!DOCTYPE html>\n'+clone.outerHTML;
+        const blob=new Blob([html],{type:'text/html;charset=utf-8'});
+        const url=printWin.URL.createObjectURL(blob);
+        const a=printWin.document.createElement('a');
+        const raw=(printWin.document.title||'shift_snapshot').replace(/[\\/:*?"<>|]/g,'_').replace(/\s+/g,'_');
+        a.href=url;
+        a.download=raw+'.html';
+        printWin.document.body.appendChild(a);
+        a.click();
+        setTimeout(function(){try{printWin.URL.revokeObjectURL(url);a.remove();}catch(_){}} ,1000);
+      }catch(e){alert('保存用HTMLを作成できませんでした。');}
+    };
+    printWin.document.body.appendChild(saveBtn);
+
     const btn=printWin.document.createElement('button');
     btn.textContent='🖨 印刷';
     btn.className='__noprint';
