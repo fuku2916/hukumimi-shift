@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v169</title>
+<title>シフト管理 v173</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -807,7 +807,6 @@ function weekHours(staffId,weekDates,asgn,excl,slotsState,staffArr){
 function monthHours(staffId,dates,asgn,excl,slotsState,staffArr){
   return dates.reduce((s,d)=>s+dayHours(tdk(d),staffId,asgn,excl,slotsState,staffArr),0);
 }
-function getWeeksForDates(dates){return groupByWeek(dates);}
 
 async function autoGenerate(staff,y,m,dates,apiKey,weeklyReq,manualExclusions,slots,currentAsgn,tmps,holidays,manualClosedDays,baseShiftDesc,requests){
   holidays=holidays||{};
@@ -1086,7 +1085,6 @@ const APP_UNIT=(()=>{
 })();
 const UNIT_LABELS={clerk:'クラーク',nurse:'ナース',doctor:'ドクター'};
 const APP_UNIT_LABEL=UNIT_LABELS[APP_UNIT]||'';
-const ROW_ID=APP_UNIT||'main'; // Supabaseの保存行ID（clerk / nurse / doctor）
 // ── マルチクリニック対応（2026-06-22）──
 // クリニックを指定すると shift_data を行 id=<clinic> で扱い、診療枠/休診日を data.shared に一本化する。
 // クリニック未指定（従来URL）は legacy モード＝今までどおり id=main の {clerk,nurse,doctor} を使う（後方互換）。
@@ -1466,11 +1464,6 @@ function outpatientMarkForSlot(closures,dk,slot,req,dayClosed=false,mode='compac
   }
   return mode==='detail'?parts.join('　'):parts.join('');
 }
-function hasOutpatientClosureForSlot(closures,dk,slot,dayClosed=false){
-  if(dayClosed&&isOutpatientSlot(slot))return true;
-  const c=(closures&&closures[dk]&&closures[dk][slot.id])||{};
-  return Object.entries(c).some(([idx,v])=>v && Number(idx)<=outpatientRoomCountForSlot(slot));
-}
 // v134: 祝日・休診日でも、診察室ごとの設定で「○」にした外来枠はカレンダー上に表示する。
 
 // v157: 月間カレンダー表示では、外来1診/2診を職種ごとに見やすく束ねる。
@@ -1630,13 +1623,7 @@ function calcUsedDays(history){
 function calcRemaining(granted, history){
   return Math.max(0, (granted||0) - calcUsedDays(history));
 }
-const PAID_COLORS={
-  full:{bg:'#FDF2F8',border:'#D946A8',text:'#86198F',badge:'有給'},
-  am:  {bg:'#FDF4FF',border:'#A855F7',text:'#7E22CE',badge:'有(午前)'},
-  pm:  {bg:'#F5F3FF',border:'#7C3AED',text:'#5B21B6',badge:'有(午後)'},
-};
 
-const tabStyle=(a)=>({padding:'12px 14px',border:'none',background:'none',cursor:'pointer',fontSize:13,fontWeight:a?500:400,color:a?K.textI:K.textS,borderBottom:a?'2px solid '+K.textI:'2px solid transparent'});
 const stStyle=(a)=>({padding:'7px 12px',border:'none',background:'none',cursor:'pointer',fontSize:12,fontWeight:a?500:400,color:a?K.textI:K.textS,borderBottom:a?'2px solid '+K.textI:'2px solid transparent'});
 const cntBtn={width:18,height:18,border:K.bd2,borderRadius:3,background:K.bgS,cursor:'pointer',fontSize:12,lineHeight:'1',padding:0,display:'flex',alignItems:'center',justifyContent:'center'};
 
@@ -4496,7 +4483,6 @@ ${bodyHtml}
             if(A.id===B.id)continue;
             if(A.type!==B.type)continue; // 同種コマ間のみ（スキル安全）
             if(activeCount(dk,A.id)<=getReq(dk,A.id))continue; // Aに余剰がなければ動かさない
-            const rB=slotRangeMin(B);
             const cand=(na[dk][A.id]||[]).find(sid=>{
               if(isOffOrExcl(dk,A.id,sid))return false;
               if((na[dk][B.id]||[]).includes(sid))return false;
@@ -6309,8 +6295,7 @@ ${bodyHtml}
       h+='</tbody></table>';
     }
     h+='<div class="note">「申請対象日」は休み・有給・出勤希望・打刻修正などの対象日です。「申請日」はスタッフが申請した日時または管理者が処理した日時です。<br>この画面はブラウザの印刷機能からPDF保存できます。Windows/Macでは「印刷」→「PDFとして保存」を選んでください。税理士・社労士へ送る場合は、保存したPDFをメールに添付してください。</div>';
-    h+='<!-- v171 changelog: v170で混入した未終了文字列を修正し、起動不能を解消。 --><!-- v172 changelog: 履歴の「表示」と「この版に戻す」で参照するスナップショット元を統一。復元は表示されているsnap.dataを正本にし、restoreDataは補助に限定。 -->
-</body></html>';
+    h+='<!-- v171 changelog: v170で混入した未終了文字列を修正し、起動不能を解消。 --><!-- v172 changelog: 履歴の「表示」と「この版に戻す」で参照するスナップショット元を統一。復元は表示されているsnap.dataを正本にし、restoreDataは補助に限定。 --></body></html>';
     w.document.open();w.document.write(h);w.document.close();
     setTimeout(()=>{try{w.focus();}catch(_){ }},200);
   }
@@ -8627,8 +8612,7 @@ function StaffCheckPanel({staff,dates,asgn,manualExclusions,tmps,slots,weeks,y,m
       if(r.days.length===0)h+='<tr><td colspan=7>この月の勤務はありません</td></tr>';
       h+='</table>';
     });
-    h+='<!-- v171 changelog: v170で混入した未終了文字列を修正し、起動不能を解消。 --><!-- v172 changelog: 履歴の「表示」と「この版に戻す」で参照するスナップショット元を統一。復元は表示されているsnap.dataを正本にし、restoreDataは補助に限定。 -->
-</body></html>'; w.document.write(h); w.document.close();
+    h+='<!-- v171 changelog: v170で混入した未終了文字列を修正し、起動不能を解消。 --><!-- v172 changelog: 履歴の「表示」と「この版に戻す」で参照するスナップショット元を統一。復元は表示されているsnap.dataを正本にし、restoreDataは補助に限定。 --></body></html>'; w.document.write(h); w.document.close();
   }
   const td={border:'1px solid #E2E8F0',padding:'3px 6px'};
   return(
