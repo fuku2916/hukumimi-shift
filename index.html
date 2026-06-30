@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v166';
+const APP_VERSION = 'v167';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2786,6 +2786,12 @@ function App(){
   function restoreSnapshot(snap){
     if(!snap||!snap.data)return;
     if(!window.confirm('この版（作成 '+fmtStamp(snap.made||snap.at)+'）に戻しますか？\n現在の編集内容は置き換わります。戻したあと「公開」で確定してください。'))return;
+    // v167: 復元ボタンは applyShiftPayload を経由せず個別に state を差し替えるため、
+    // v166 の抑制処理が効いていなかった。復元の最初に必ず抑制フラグを立てる。
+    // これにより、復元直後に baseShift の useEffect が走って現在のベースシフトを再展開し、
+    // スナップショット表示と復元後編集画面がズレる問題を防ぐ。
+    suppressBaseApplyRef.current=Date.now()+8000;
+    beginShiftHydration(5000);
     const d=snapshotPayloadForCurrentUnit(snap.data);
     if(!d||typeof d!=='object'||(!d.asgn&&!d.slots&&!d.staff)){
       alert('この履歴データは現在のシフト表形式として読み取れませんでした。表示はできますが、復元対象のasgn/slots/staffが見つかりません。');
@@ -3584,8 +3590,9 @@ ${bodyHtml}
 
   // ── 月切替時にベースシフトを自動展開 ──
   useEffect(()=>{
-    // v166: 履歴復元直後は、復元スナップショットのasgnをそのまま尊重する。
+    // v167: 履歴復元直後・クラウド読込/正規化中は、復元スナップショットのasgnをそのまま尊重する。
     // ここでベースシフトを自動展開すると、過去スナップショット表示と復元後編集画面が不一致になる。
+    if(shiftHydratingRef.current)return;
     if(suppressBaseApplyRef.current&&Date.now()<suppressBaseApplyRef.current)return;
     suppressBaseApplyRef.current=0;
     // ベースシフトが空ならスキップ
@@ -9180,9 +9187,10 @@ CHANGELOG v159
 -->
 
 <!--
-CHANGELOG v166
-- 履歴スナップショットの「この版に戻す」後に、現在のベースシフト自動展開が走って復元内容が変わる問題を修正。
-- 復元時はスナップショット内のasgn/手動除外/休診/必要人数等を正本として扱い、復元直後のベースシフト補完を一時抑制。
+CHANGELOG v167
+- v166で抑制処理を applyShiftPayload 側に入れていたが、履歴の「この版に戻す」は独自復元処理を通っていたため抑制が効かない問題を修正。
+- restoreSnapshot の開始時点でベースシフト自動展開の抑制と読込中フラグを立て、復元直後に現在のベースシフトが混ざらないようにした。
+- ベースシフト自動展開 useEffect でも読込/復元中は必ずスキップするよう補強。
 - これにより、履歴で表示した公開時点スナップショットと、復元後の編集画面の内容が一致しやすくなった。
 -->
 
