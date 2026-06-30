@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v181</title>
+<title>シフト管理</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v184';
+const APP_VERSION = 'v185-debug';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -1105,6 +1105,82 @@ ${closedDesc}
 // Supabase設定（ここを書き換えてください）
 const SUPABASE_URL='https://hwctwbnzjjdllqsmlvqm.supabase.co';
 const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh3Y3R3Ym56ampkbGxxc21sdnFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NzkzMDQsImV4cCI6MjA5NjQ1NTMwNH0.quP2UmR59c1ULUgZkqaq0kzeD8VlOY3cKH4ZaZJwtf0';
+
+// ===== v185-debug: Supabase 401診断 =====
+// 全fetchをラップし、Supabaseへの非2xx応答（＝401の本文＝理由）とトークン種別/期限を記録するだけ。
+// アプリの動作は一切変えない（応答はそのまま返す）。原因特定後はこのブロックごと削除する。
+try{(function(){
+  if(window.__sbDebugInstalled)return; window.__sbDebugInstalled=true;
+  window.__sbLog=[];
+  const origFetch=window.fetch.bind(window);
+  function decodeTok(auth){
+    try{
+      const t=String(auth||'').replace(/^Bearer\s+/i,'');
+      const seg=t.split('.')[1]; if(!seg)return {role:'(なし)',exp:null};
+      const p=JSON.parse(decodeURIComponent(escape(atob(seg.replace(/-/g,'+').replace(/_/g,'/')))));
+      return {role:p.role||'?',exp:p.exp||null};
+    }catch(_){ return {role:'?',exp:null}; }
+  }
+  let badge;
+  function updateBadge(){ try{ if(badge)badge.textContent='🐛401ログ保存 ('+window.__sbLog.length+')'; }catch(_){ } }
+  window.fetch=async function(input,init){
+    const url=(typeof input==='string')?input:((input&&input.url)||'');
+    const isSB=url.indexOf('supabase')>=0;
+    const method=String((init&&init.method)||(input&&input.method)||'GET').toUpperCase();
+    let auth=''; try{ auth=(init&&init.headers&&(init.headers.Authorization||init.headers.authorization))||''; }catch(_){ }
+    let res;
+    try{ res=await origFetch(input,init); }
+    catch(e){ if(isSB){ try{window.__sbLog.push({t:new Date().toISOString(),kind:'network-error',method,url:url.replace(SUPABASE_URL,''),error:String(e)});updateBadge();}catch(_){ } } throw e; }
+    try{
+      const isAuth=url.indexOf('/auth/v1/token')>=0;
+      if(isSB && (!res.ok || isAuth)){
+        let body=''; try{ body=await res.clone().text(); }catch(_){ }
+        const tk=decodeTok(auth); const now=Math.floor(Date.now()/1000);
+        window.__sbLog.push({
+          t:new Date().toISOString(), method, status:res.status,
+          url:url.replace(SUPABASE_URL,''),
+          tokenRole:tk.role, tokenExp:tk.exp,
+          tokenExpired:(tk.exp!=null)?(tk.exp<now):null,
+          usingAnonKey:(String(auth).indexOf(SUPABASE_KEY)>=0),
+          body:String(body).slice(0,600)
+        });
+        if(window.__sbLog.length>300)window.__sbLog.shift();
+        updateBadge();
+      }
+    }catch(_){ }
+    return res;
+  };
+  function dl(){
+    try{
+      const payload={
+        generatedAt:new Date().toISOString(),
+        appVersion:(typeof APP_VERSION!=='undefined'?APP_VERSION:''),
+        clinic:(typeof APP_CLINIC!=='undefined'?APP_CLINIC:''),
+        unit:(typeof APP_UNIT!=='undefined'?APP_UNIT:''),
+        entries:window.__sbLog
+      };
+      const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+      const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+      a.download='sb401_log_'+(payload.clinic||'')+'_'+(payload.unit||'')+'_'+new Date().toISOString().replace(/[:.]/g,'-')+'.json';
+      document.body.appendChild(a); a.click();
+      setTimeout(()=>{ try{document.body.removeChild(a);URL.revokeObjectURL(a.href);}catch(_){ } },800);
+    }catch(_){ }
+  }
+  window.__downloadSbLog=dl;
+  function mount(){
+    try{
+      if(document.getElementById('__sbDbgBtn'))return;
+      badge=document.createElement('button'); badge.id='__sbDbgBtn';
+      badge.textContent='🐛401ログ保存 (0)';
+      badge.style.cssText='position:fixed;left:8px;bottom:8px;z-index:99999;background:#991B1B;color:#fff;border:none;border-radius:8px;padding:8px 10px;font-size:12px;box-shadow:0 2px 6px rgba(0,0,0,.3);opacity:.9;cursor:pointer';
+      badge.onclick=dl;
+      document.body.appendChild(badge);
+    }catch(_){ }
+  }
+  if(document.readyState!=='loading')mount(); else document.addEventListener('DOMContentLoaded',mount);
+})();}catch(_){ }
+// ===== /v185-debug =====
+
 // ── 職種ユニット（クラーク/ナース/ドクター）──
 // 1つのアプリで3職種ぶんの独立したシフト表を管理する。判定の優先順位：
 //   ① URLの ?unit=（または ?u= / #hash）  ② URLパスに clerk/nurse/doctor を含む  ③ 端末に保存した選択
