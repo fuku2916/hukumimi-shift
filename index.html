@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v162</title>
+<title>シフト管理 v169</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v167';
+const APP_VERSION = 'v169';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2539,8 +2539,38 @@ function App(){
   const [shiftHistory,setShiftHistory]=useState([]); // [{at,made,data}]（クラウドから取得）
   const [showHistory,setShowHistory]=useState(false);
   const [historyLoading,setHistoryLoading]=useState(false);
+  const FULL_RESTORE_KEYS=['y','m','clinicId','clinicLabel','unit','unitLabel','staff','asgn','tmps','weeklyReq','monthlyReq','manualExclusions','manualClosedDays','baseShift','slots','newSlotCounter','paidLeave','shiftUpdatedAt','editLog','lockedAsgn','lockedMonths','surgeryFlags','surgeryCalSnapshotAt','outpatientClosures','outpatientClosuresUpdatedAt'];
+  function clonePlain(obj){try{return JSON.parse(JSON.stringify(obj));}catch(e){return obj;}}
   function currentShiftPayload(extra){
-    return {y,m,clinicId:APP_CLINIC||'',clinicLabel:CLINIC_LABEL||'',staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,surgeryFlags,surgeryCalSnapshotAt:surgeryCalUpdatedAt,outpatientClosures,outpatientClosuresUpdatedAt,...(extra||{})};
+    // v169: 公開履歴から完全復元できるよう、復元に必要な全 state を固定リストで保存する。
+    // 履歴復元時はこのスナップショットを正本とし、現在画面の state は一切 fallback として使わない。
+    const payload={
+      _snapshotSchema:'full_restore_v169',
+      _restoreKeys:FULL_RESTORE_KEYS.slice(),
+      y,m,
+      clinicId:APP_CLINIC||'',clinicLabel:CLINIC_LABEL||'',unit:APP_UNIT||'',unitLabel:APP_UNIT_LABEL||'',
+      staff:clonePlain(staff||[]),
+      asgn:clonePlain(asgn||{}),
+      tmps:clonePlain(tmps||{}),
+      weeklyReq:clonePlain(weeklyReq||{}),
+      monthlyReq:clonePlain(monthlyReq||{}),
+      manualExclusions:clonePlain(manualExclusions||{}),
+      manualClosedDays:clonePlain(manualClosedDays||{}),
+      baseShift:clonePlain(baseShift||{A:{},B:{}}),
+      slots:clonePlain(slots||SLOTS),
+      newSlotCounter:newSlotCounter||1,
+      paidLeave:clonePlain(paidLeave||{}),
+      shiftUpdatedAt:shiftUpdatedAt||'',
+      editLog:clonePlain(Array.isArray(editLog)?editLog:[]),
+      lockedAsgn:clonePlain(lockedAsgn||{}),
+      lockedMonths:clonePlain(lockedMonths||{}),
+      surgeryFlags:clonePlain(surgeryFlags||{}),
+      surgeryCalSnapshotAt:surgeryCalUpdatedAt||'',
+      outpatientClosures:clonePlain(outpatientClosures||{}),
+      outpatientClosuresUpdatedAt:outpatientClosuresUpdatedAt||'',
+      ...(extra||{})
+    };
+    return payload;
   }
   function setOutpatientRoomState(dk,slotId,roomIdx,closed){
     setOutpatientClosures(prev=>{
@@ -2593,9 +2623,12 @@ function App(){
   // v124: 「公開」時点のシフト表も、あとから変わらない正本スナップショットとして残す。
   // 履歴はスタッフ公開データとは別枠なので、作成途中のシフトを履歴に保存してもスタッフ画面には公開されない。
   function makeHistorySnapshot(kind,label,data,extra){
-    const snap={...(data||currentShiftPayload())};
-    delete snap.history; delete snap.drafts; delete snap._drafts;
-    return {at:new Date().toISOString(),made:snap.shiftUpdatedAt||'',kind:kind||'manual',label:label||'',data:snap,...(extra||{})};
+    // v169: 履歴は「表示用」ではなく「完全復元用の正本」として保存する。
+    // data と restoreData の両方に同じ完全スナップショットを入れ、旧表示処理との互換も保つ。
+    const snap=clonePlain(data||currentShiftPayload());
+    if(snap){delete snap.history; delete snap.drafts; delete snap._drafts;}
+    const full=clonePlain(snap||{});
+    return {at:new Date().toISOString(),made:full.shiftUpdatedAt||'',kind:kind||'manual',label:label||'',data:full,restoreData:clonePlain(full),restoreSchema:'full_restore_v169',restoreKeys:FULL_RESTORE_KEYS.slice(),...(extra||{})};
   }
   function mergeHistoryLists(){
     const out=[], seen=new Set();
@@ -2755,13 +2788,13 @@ function App(){
     }catch(e){alert('保存に失敗しました：'+(e&&e.message||e));}
     setPublishing(false);
   }
-  // v165: 履歴スナップショットの data は、時期によって
-  // ① 現在職種のシフト本体そのもの、② クリニック行全体 {shared, doctor, nurse, clerk}、
-  // ③ 旧legacy行 {doctor,nurse,clerk} のいずれかで保存されていることがある。
-  // 「表示」は exportPDF 側で見えても、「この版に戻す」は d.asgn 等を直読みしていたため、
-  // ②③では asgn が見つからず復元されないことがあった。ここで現在の職種用payloadへ正規化する。
+  // v169: 履歴スナップショットの data は時期により形が異なる。
+  // ただし「この版に戻す」は、履歴内の完全スナップショットだけを正本とし、現在画面の state は参照しない。
   function snapshotPayloadForCurrentUnit(raw){
     if(!raw||typeof raw!=='object')return raw;
+    // v169以降の完全復元データ
+    if(raw.restoreData&&typeof raw.restoreData==='object')return snapshotPayloadForCurrentUnit(raw.restoreData);
+    if(raw.data&&typeof raw.data==='object'&&(raw.data.asgn||raw.data.slots||raw.data.staff||raw.data.restoreData))return snapshotPayloadForCurrentUnit(raw.data);
     if(raw.asgn||raw.slots||raw.staff)return raw; // すでに現在形式
     const unit=APP_UNIT||'doctor';
     // クリニック行形式: {shared:{slots,...}, doctor:{asgn,...}, nurse:{...}, clerk:{...}}
@@ -2781,43 +2814,83 @@ function App(){
     }
     return raw;
   }
+  function buildStrictRestorePayload(snap){
+    const source=snapshotPayloadForCurrentUnit((snap&&snap.restoreData)?snap.restoreData:(snap&&snap.data));
+    if(!source||typeof source!=='object'||!source.asgn){return null;}
+    // v169: 現在画面の値を fallback に使わない。履歴に無いものは空/既定値にする。
+    const rSlots=normalizeSlotsForV155(source.slots||SLOTS);
+    return {
+      y:source.y||y,
+      m:source.m||m,
+      staff:Array.isArray(source.staff)?clonePlain(source.staff):[],
+      asgn:normalizeDatedSlotMapsV155(clonePlain(source.asgn||{}),rSlots),
+      tmps:(source.tmps&&typeof source.tmps==='object')?clonePlain(source.tmps):{},
+      weeklyReq:normalizeWeeklyReqV155(clonePlain(source.weeklyReq||{}),rSlots),
+      monthlyReq:normalizeMonthlyReqV155(clonePlain(source.monthlyReq||{}),rSlots),
+      manualExclusions:normalizeDatedSlotMapsV155(clonePlain(source.manualExclusions||{}),rSlots),
+      manualClosedDays:(source.manualClosedDays&&typeof source.manualClosedDays==='object')?clonePlain(source.manualClosedDays):{},
+      baseShift:normalizeBaseShiftV155(clonePlain(source.baseShift||{A:{},B:{}}),rSlots),
+      slots:rSlots,
+      newSlotCounter:source.newSlotCounter||1,
+      paidLeave:(source.paidLeave&&typeof source.paidLeave==='object')?clonePlain(source.paidLeave):{},
+      editLog:Array.isArray(source.editLog)?clonePlain(source.editLog):[],
+      lockedAsgn:normalizeDatedSlotMapsV155(clonePlain((source.lockedAsgn&&typeof source.lockedAsgn==='object')?source.lockedAsgn:{}),rSlots),
+      lockedMonths:(source.lockedMonths&&typeof source.lockedMonths==='object')?clonePlain(source.lockedMonths):{},
+      outpatientClosures:normalizeOutpatientClosuresV155(clonePlain((source.outpatientClosures&&typeof source.outpatientClosures==='object')?source.outpatientClosures:{}),rSlots),
+      outpatientClosuresUpdatedAt:source.outpatientClosuresUpdatedAt||'',
+      surgeryCalUrl:source.surgeryCalUrl,
+      sourceShiftUpdatedAt:source.shiftUpdatedAt||''
+    };
+  }
 
   // 履歴の版に戻す（戻したあと「公開」で確定）
   function restoreSnapshot(snap){
-    if(!snap||!snap.data)return;
-    if(!window.confirm('この版（作成 '+fmtStamp(snap.made||snap.at)+'）に戻しますか？\n現在の編集内容は置き換わります。戻したあと「公開」で確定してください。'))return;
-    // v167: 復元ボタンは applyShiftPayload を経由せず個別に state を差し替えるため、
-    // v166 の抑制処理が効いていなかった。復元の最初に必ず抑制フラグを立てる。
-    // これにより、復元直後に baseShift の useEffect が走って現在のベースシフトを再展開し、
-    // スナップショット表示と復元後編集画面がズレる問題を防ぐ。
-    suppressBaseApplyRef.current=Date.now()+8000;
-    beginShiftHydration(5000);
-    const d=snapshotPayloadForCurrentUnit(snap.data);
-    if(!d||typeof d!=='object'||(!d.asgn&&!d.slots&&!d.staff)){
-      alert('この履歴データは現在のシフト表形式として読み取れませんでした。表示はできますが、復元対象のasgn/slots/staffが見つかりません。');
+    if(!snap||(!snap.data&&!snap.restoreData))return;
+    if(!window.confirm('この版（作成 '+fmtStamp(snap.made||snap.at)+'）に戻しますか？\n現在の編集内容は完全に消去され、履歴データの内容だけで置き換えられます。戻したあと「公開」で確定してください。'))return;
+
+    const restored=buildStrictRestorePayload(snap);
+    if(!restored){
+      alert('この履歴データには復元用の割当データ(asgn)が見つかりませんでした。表示はできますが、この版として復元できません。');
       return;
     }
-    if(d.staff)setStaff(d.staff);
-    if(d.surgeryCalUrl!==undefined){const cu=(d.surgeryCalUrl||'').toString();setSurgeryCalUrl(cu);setSurgeryCalInput(cu);saveSurgeryCalUrl(cu);}
-    if(d.slots)setSlots(normalizeSlotsForV155(d.slots));
-    if(d.asgn)setAsgn(normalizeDatedSlotMapsV155(d.asgn,normalizeSlotsForV155(d.slots||slots||SLOTS)));
-    if(d.tmps)setTmps(d.tmps);
-    if(d.weeklyReq)setWeeklyReq(normalizeWeeklyReqV155(d.weeklyReq,normalizeSlotsForV155(d.slots||slots||SLOTS)));
-    if(d.monthlyReq)setMonthlyReq(normalizeMonthlyReqV155(d.monthlyReq,normalizeSlotsForV155(d.slots||slots||SLOTS)));
-    if(d.manualExclusions)setManualExclusions(normalizeDatedSlotMapsV155(d.manualExclusions,normalizeSlotsForV155(d.slots||slots||SLOTS)));
-    if(d.manualClosedDays)setManualClosedDays(d.manualClosedDays);
-    if(d.outpatientClosures&&typeof d.outpatientClosures==='object')setOutpatientClosures(normalizeOutpatientClosuresV155(d.outpatientClosures,normalizeSlotsForV155(d.slots||slots||SLOTS)));
-    if(d.outpatientClosuresUpdatedAt!==undefined)setOutpatientClosuresUpdatedAt(d.outpatientClosuresUpdatedAt||'');
-    if(d.baseShift)setBaseShift(normalizeBaseShiftV155(d.baseShift,normalizeSlotsForV155(d.slots||slots||SLOTS)));
-    if(d.paidLeave)setPaidLeave(d.paidLeave);
-    if(d.newSlotCounter)setNewSlotCounter(d.newSlotCounter);
-    if(Array.isArray(d.editLog))setEditLog(d.editLog);
-    if(d.lockedAsgn&&typeof d.lockedAsgn==='object')setLockedAsgn(normalizeDatedSlotMapsV155(d.lockedAsgn,normalizeSlotsForV155(d.slots||slots||SLOTS)));
-    if(d.lockedMonths&&typeof d.lockedMonths==='object')setLockedMonths(d.lockedMonths);
-    if(d.y)setY(d.y);if(d.m)setM(d.m);
+
+    // v169: 復元は「履歴データの完全置換」。現在画面の配置・除外・休診・必要人数・ベースシフトは残さない。
+    // AI再配置、ベースシフト再展開、現在設定とのマージは一切行わない。
+    suppressBaseApplyRef.current=Date.now()+30000;
+    beginShiftHydration(30000);
+
+    function applyStrictRestoredState(){
+      setStaff(restored.staff);
+      if(restored.surgeryCalUrl!==undefined){const cu=(restored.surgeryCalUrl||'').toString();setSurgeryCalUrl(cu);setSurgeryCalInput(cu);saveSurgeryCalUrl(cu);}
+      setSlots(restored.slots);
+      setAsgn(restored.asgn);
+      setTmps(restored.tmps);
+      setWeeklyReq(restored.weeklyReq);
+      setMonthlyReq(restored.monthlyReq);
+      setManualExclusions(restored.manualExclusions);
+      setManualClosedDays(restored.manualClosedDays);
+      setOutpatientClosures(restored.outpatientClosures);
+      setOutpatientClosuresUpdatedAt(restored.outpatientClosuresUpdatedAt);
+      setBaseShift(restored.baseShift);
+      setPaidLeave(restored.paidLeave);
+      setNewSlotCounter(restored.newSlotCounter);
+      setEditLog(restored.editLog);
+      setLockedAsgn(restored.lockedAsgn);
+      setLockedMonths(restored.lockedMonths);
+      setY(restored.y);setM(restored.m);
+    }
+
+    applyStrictRestoredState();
+    [80,300,900,1800,3500].forEach(ms=>setTimeout(()=>{
+      suppressBaseApplyRef.current=Date.now()+30000;
+      beginShiftHydration(8000);
+      applyStrictRestoredState();
+    },ms));
+
     setShiftUpdatedAt(new Date().toISOString()); // 復元＝新しい未公開版
+    setPublishedAt('');
     setShowHistory(false);
-    setTimeout(()=>alert('復元しました。内容を確認して「公開」で確定してください。'),50);
+    setTimeout(()=>alert('履歴データの内容だけで復元しました。内容を確認して「公開」で確定してください。'),80);
   }
 
   // 公開時点スナップショットを現在の編集画面へ反映せずに閲覧・印刷する。
@@ -3204,6 +3277,8 @@ table{border-collapse:collapse;width:100%;table-layout:fixed}th{background:#fff;
 ${snapLine}
 <div class="warn">${warnText}</div>
 <table><thead><tr><th>月</th><th>火</th><th>水</th><th>木</th><th>金</th><th>土</th></tr></thead><tbody>${calHtml}</tbody></table>
+
+<!-- v169 changelog: 公開履歴を完全復元用スナップショットとして保存し、履歴復元では現在画面の配置・設定を全消去して履歴データのみで完全置換するよう修正。 -->
 </body></html>`);
     printWin.document.close();injectPrintButton(printWin);
     if(opts.autoPrint){setTimeout(()=>{try{printWin.print();}catch(e){}},500);}
@@ -3291,6 +3366,8 @@ td.cell-off{background:#fff}
 <h1>医療法人　福耳会　個人別シフト表　${y}年 ${m}月</h1>
 <div class="sub">印刷日: ${new Date().toLocaleDateString('ja-JP')}　／　シフト作成: ${shiftUpdatedAt?fmtStamp(shiftUpdatedAt):'—'}</div>
 <table><thead><tr><th class="name-h">スタッフ</th>${thHtml}</tr></thead><tbody>${rowsHtml}</tbody></table>
+
+<!-- v169 changelog: 公開履歴を完全復元用スナップショットとして保存し、履歴復元では現在画面の配置・設定を全消去して履歴データのみで完全置換するよう修正。 -->
 </body></html>`);
     printWin.document.close();injectPrintButton(printWin);
   }
@@ -3509,6 +3586,8 @@ h1{font-size:16pt;font-weight:700;margin-bottom:3mm}
 <h1>医療法人　福耳会　達成レポート　${y}年 ${m}月</h1>
 <div class="sub">印刷日: ${new Date().toLocaleDateString('ja-JP')}　／　シフト作成: ${shiftUpdatedAt?fmtStamp(shiftUpdatedAt):'—'}</div>
 ${bodyHtml}
+
+<!-- v169 changelog: 公開履歴を完全復元用スナップショットとして保存し、履歴復元では現在画面の配置・設定を全消去して履歴データのみで完全置換するよう修正。 -->
 </body></html>`);
     printWin.document.close();injectPrintButton(printWin);
   }
@@ -6210,7 +6289,9 @@ ${bodyHtml}
       h+='</tbody></table>';
     }
     h+='<div class="note">「申請対象日」は休み・有給・出勤希望・打刻修正などの対象日です。「申請日」はスタッフが申請した日時または管理者が処理した日時です。<br>この画面はブラウザの印刷機能からPDF保存できます。Windows/Macでは「印刷」→「PDFとして保存」を選んでください。税理士・社労士へ送る場合は、保存したPDFをメールに添付してください。</div>';
-    h+='</body></html>';
+    h+='
+<!-- v169 changelog: 公開履歴を完全復元用スナップショットとして保存し、履歴復元では現在画面の配置・設定を全消去して履歴データのみで完全置換するよう修正。 -->
+</body></html>';
     w.document.open();w.document.write(h);w.document.close();
     setTimeout(()=>{try{w.focus();}catch(_){ }},200);
   }
@@ -8527,7 +8608,9 @@ function StaffCheckPanel({staff,dates,asgn,manualExclusions,tmps,slots,weeks,y,m
       if(r.days.length===0)h+='<tr><td colspan=7>この月の勤務はありません</td></tr>';
       h+='</table>';
     });
-    h+='</body></html>'; w.document.write(h); w.document.close();
+    h+='
+<!-- v169 changelog: 公開履歴を完全復元用スナップショットとして保存し、履歴復元では現在画面の配置・設定を全消去して履歴データのみで完全置換するよう修正。 -->
+</body></html>'; w.document.write(h); w.document.close();
   }
   const td={border:'1px solid #E2E8F0',padding:'3px 6px'};
   return(
@@ -9194,5 +9277,7 @@ CHANGELOG v167
 - これにより、履歴で表示した公開時点スナップショットと、復元後の編集画面の内容が一致しやすくなった。
 -->
 
+
+<!-- v169 changelog: 公開履歴を完全復元用スナップショットとして保存し、履歴復元では現在画面の配置・設定を全消去して履歴データのみで完全置換するよう修正。 -->
 </body>
 </html>
