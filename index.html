@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v174</title>
+<title>シフト管理 v175</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v174';
+const APP_VERSION = 'v175';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -3674,23 +3674,14 @@ ${bodyHtml}
     return na;
   }
 
-  // ── 月切替時にベースシフトを自動展開 ──
+  // ── 月切替時のベースシフト自動展開（v175で無効化）──
+  // v175: ベースシフトの「自動」展開を完全に停止する。
+  // 履歴復元や保存済みシフトの配置が、ベースシフトの推測で勝手に書き換わる不具合
+  // （復元しても元に戻らない／空欄が推測で埋まる）を根本から防ぐため。
+  // ベースシフトを月へ反映したいときは「ベースシフト」タブの手動「月に反映」ボタンを使う。
+  // ※自動展開は一切行わない。復元＝履歴データそのまま。
   useEffect(()=>{
-    // v167: 履歴復元直後・クラウド読込/正規化中は、復元スナップショットのasgnをそのまま尊重する。
-    // ここでベースシフトを自動展開すると、過去スナップショット表示と復元後編集画面が不一致になる。
-    if(shiftHydratingRef.current)return;
-    if(suppressBaseApplyRef.current&&Date.now()<suppressBaseApplyRef.current)return;
-    suppressBaseApplyRef.current=0;
-    // ベースシフトが空ならスキップ
-    const hasBase=['A','B'].some(p=>Object.keys(baseShift[p]||{}).length>0);
-    if(!hasBase) return;
-    // v173: 表示中の月に既に割当があれば自動展開しない。
-    // 履歴復元・保存済みシフトの「意図的な空欄」を、ベースシフトの推測で埋めてしまわないため、
-    // まっさらな新規月だけを自動補完し、既存のシフトには一切手を加えない。
-    // （途中から空欄をベースで埋めたい場合は「ベースシフト」タブの手動適用ボタンを使う）
-    const monthHasAsgn=(dates||[]).some(d=>{const sm=asgn[tdk(d)];return sm&&Object.values(sm).some(ids=>(ids||[]).length>0);});
-    if(monthHasAsgn) return;
-    applyBaseShiftToMonth();
+    return; // 自動展開は無効（手動ボタンのみ）
   // eslint-disable-next-line
   },[y,m,baseShift]);
 
