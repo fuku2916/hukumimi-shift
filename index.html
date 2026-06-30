@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v177</title>
+<title>シフト管理 v178</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v177';
+const APP_VERSION = 'v178';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2036,8 +2036,9 @@ function App(){
         // v176: 履歴「この版に戻す」直後の初回読込では、クラウドの旧データで復元結果を上書きしない。
         // 復元はローカルを正本として表示し、ユーザーが内容確認のうえ「公開」でクラウドへ確定する。
         let _restoreLock='';try{_restoreLock=localStorage.getItem('fukumimi_restore_lock')||'';}catch(_){ }
+        // v178: ロックは消費しない。時間ウィンドウ(10分)内は毎回クラウド上書きをスキップする。
+        // （cloud-load が複数回走っても復元結果が守られるように。公開成功時にロック解除する。）
         const skipCloudShift = !!_restoreLock && (Date.now()-Date.parse(_restoreLock) < 600000);
-        if(_restoreLock){try{localStorage.removeItem('fukumimi_restore_lock');}catch(_){ }}
         // クリニックモードの共通(shared)＝診療枠・休診日・採番は全職種で同一。
         // ある職種の未公開編集の有無に関わらず、共通部分は常にクラウドの版を採用する。
         if(CLINIC_MODE && sd && !skipCloudShift){
@@ -2775,7 +2776,7 @@ function App(){
       hist=pruneShiftHistory([...additions,...hist]);
       const data=currentShiftPayload({history:hist});
       const ok=await SB.set('shift_data',data);
-      if(ok){setPublishedAt(shiftUpdatedAt);setShiftHistory(hist);alert('スタッフへ公開しました。\n（作成: '+fmtStamp(shiftUpdatedAt)+'）\n公開時点スナップショットを保存しました。\n保存名: '+currentArchive.archiveName);}
+      if(ok){try{localStorage.removeItem('fukumimi_restore_lock');}catch(_){ }setPublishedAt(shiftUpdatedAt);setShiftHistory(hist);alert('スタッフへ公開しました。\n（作成: '+fmtStamp(shiftUpdatedAt)+'）\n公開時点スナップショットを保存しました。\n保存名: '+currentArchive.archiveName);}
       else alert('保存に失敗しました。もう一度お試しください。');
     }catch(e){alert('保存に失敗しました：'+(e&&e.message||e));}
     setPublishing(false);
@@ -2897,6 +2898,8 @@ function App(){
       saveLS(merged);
       // 復元直後の初回読込でクラウドの旧データに上書きされないようロックを立てる。
       try{localStorage.setItem('fukumimi_restore_lock',new Date().toISOString());}catch(_){ }
+      // v178 デバッグ：復元が実際に保存した7/1配置を別キーに記録（原因切り分け用）。
+      try{localStorage.setItem('fukumimi_restore_debug',JSON.stringify({at:new Date().toISOString(),snapKind:snap.kind,snapLabel:snap.label,srcAsgn71:(restored.asgn||{})['2026-07-01']||null,savedAsgn71:(merged.asgn||{})['2026-07-01']||null,savedKey:(typeof LS_KEY!=='undefined'?LS_KEY:'?')}));}catch(_){ }
       if(restored.surgeryCalUrl!==undefined){try{saveSurgeryCalUrl((restored.surgeryCalUrl||'').toString());}catch(_){ }}
     }catch(e){
       alert('復元データの保存に失敗しました：'+(e&&e.message||e));
