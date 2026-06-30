@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v178</title>
+<title>シフト管理 v179</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v178';
+const APP_VERSION = 'v179';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2898,8 +2898,6 @@ function App(){
       saveLS(merged);
       // 復元直後の初回読込でクラウドの旧データに上書きされないようロックを立てる。
       try{localStorage.setItem('fukumimi_restore_lock',new Date().toISOString());}catch(_){ }
-      // v178 デバッグ：復元が実際に保存した7/1配置を別キーに記録（原因切り分け用）。
-      try{localStorage.setItem('fukumimi_restore_debug',JSON.stringify({at:new Date().toISOString(),snapKind:snap.kind,snapLabel:snap.label,srcAsgn71:(restored.asgn||{})['2026-07-01']||null,savedAsgn71:(merged.asgn||{})['2026-07-01']||null,savedKey:(typeof LS_KEY!=='undefined'?LS_KEY:'?')}));}catch(_){ }
       if(restored.surgeryCalUrl!==undefined){try{saveSurgeryCalUrl((restored.surgeryCalUrl||'').toString());}catch(_){ }}
     }catch(e){
       alert('復元データの保存に失敗しました：'+(e&&e.message||e));
