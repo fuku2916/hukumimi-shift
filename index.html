@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v180</title>
+<title>シフト管理 v181</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v180';
+const APP_VERSION = 'v181';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2822,12 +2822,42 @@ function App(){
       source=snapshotPayloadForCurrentUnit(snap&&snap.restoreData);
     }
     if(!source||typeof source!=='object'||!source.asgn){return null;}
-    // v170: 人員配置(asgn)・除外・休診は履歴データを正本として完全置換する。
-    // ただし古い履歴には staff/slots マスタが入っていないことがあるため、
-    // 表示に必要なマスタだけは現在の安全なマスタで補う（配置は推測しない）。
     const sourceHasSlots=source.slots&&typeof source.slots==='object'&&Object.values(source.slots).some(v=>Array.isArray(v)&&v.length>0);
     const sourceHasStaff=Array.isArray(source.staff)&&source.staff.length>0;
-    const rSlots=normalizeSlotsForV155(sourceHasSlots?source.slots:(slots||SLOTS));
+
+    // v181: スナップショットが自身のスロットを持つ（v170以降の完全データ）場合は、
+    // 「表示(👁)」とまったく同じく、一切再正規化せずスナップショットの値をそのまま適用する。
+    // 以前は復元時に再正規化しており、その過程で「除外」「必要人数」がスナップショットと
+    // ずれて、表示は正しいのに戻すと内容が変わる（人が増える等）原因になっていた。
+    // これにより「表示」と「この版に戻す」が、除外・必要人数も含めて完全に一致する。
+    if(sourceHasSlots){
+      const _o=(v,d)=>(v&&typeof v==='object')?clonePlain(v):d;
+      return {
+        y:source.y||y,
+        m:source.m||m,
+        staff:sourceHasStaff?clonePlain(source.staff):clonePlain((Array.isArray(staff)&&staff.length)?staff:STAFF0),
+        asgn:_o(source.asgn,{}),
+        tmps:_o(source.tmps,{}),
+        weeklyReq:_o(source.weeklyReq,{}),
+        monthlyReq:_o(source.monthlyReq,{}),
+        manualExclusions:_o(source.manualExclusions,{}),
+        manualClosedDays:_o(source.manualClosedDays,{}),
+        baseShift:_o(source.baseShift,{A:{},B:{}}),
+        slots:clonePlain(source.slots),
+        newSlotCounter:source.newSlotCounter||1,
+        paidLeave:_o(source.paidLeave,{}),
+        editLog:Array.isArray(source.editLog)?clonePlain(source.editLog):[],
+        lockedAsgn:_o(source.lockedAsgn,{}),
+        lockedMonths:_o(source.lockedMonths,{}),
+        outpatientClosures:_o(source.outpatientClosures,{}),
+        outpatientClosuresUpdatedAt:source.outpatientClosuresUpdatedAt||'',
+        surgeryCalUrl:source.surgeryCalUrl,
+        sourceShiftUpdatedAt:source.shiftUpdatedAt||''
+      };
+    }
+
+    // 旧形式（スロット未保存）の履歴のみ、現在のマスタに合わせて正規化して補う（配置は推測しない）。
+    const rSlots=normalizeSlotsForV155(slots||SLOTS);
     const rStaff=sourceHasStaff?clonePlain(source.staff):clonePlain((Array.isArray(staff)&&staff.length)?staff:STAFF0);
     return {
       y:source.y||y,
