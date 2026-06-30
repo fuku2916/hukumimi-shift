@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v165';
+const APP_VERSION = 'v166';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2452,6 +2452,10 @@ function App(){
   // ── ベースシフト（2週間ベース：Week A / Week B 交互） ──
   // 構造: { A: { 1: { am_out: [staffId,...], ... }, 2:..., ... 6 }, B: {...} }
   const [baseShift,setBaseShift]=useState(()=>normalizeBaseShiftV155(saved?.baseShift||{A:{},B:{}},initialSlotsV155));
+  // v166: 履歴スナップショット復元直後は、ベースシフトの自動展開を走らせない。
+  // 「この版に戻す」は、その時点のasgnを正本として復元する操作であり、現在のベースシフトで再補完すると
+  // 表示したスナップショットと復元後の編集画面がズレる原因になる。
+  const suppressBaseApplyRef=React.useRef(0);
 
   // ── 診療枠 state（編集可能） ──
   const [slots,setSlots]=useState(()=>initialSlotsV155);
@@ -2669,6 +2673,10 @@ function App(){
   }
   function applyShiftPayload(d,opts){
     if(!d)return; opts=opts||{};
+    // v166: 復元操作では、スナップショットの実データを正本として戻す。
+    // 復元直後の自動ベースシフト補完を一度だけ抑制する。
+    suppressBaseApplyRef.current=Date.now()+1500;
+    beginShiftHydration(1200);
     if(d.staff)setStaff(d.staff);
     if(d.surgeryCalUrl!==undefined){const cu=(d.surgeryCalUrl||'').toString();setSurgeryCalUrl(cu);setSurgeryCalInput(cu);saveSurgeryCalUrl(cu);}
     if(d.slots)setSlots(d.slots);
@@ -3576,6 +3584,10 @@ ${bodyHtml}
 
   // ── 月切替時にベースシフトを自動展開 ──
   useEffect(()=>{
+    // v166: 履歴復元直後は、復元スナップショットのasgnをそのまま尊重する。
+    // ここでベースシフトを自動展開すると、過去スナップショット表示と復元後編集画面が不一致になる。
+    if(suppressBaseApplyRef.current&&Date.now()<suppressBaseApplyRef.current)return;
+    suppressBaseApplyRef.current=0;
     // ベースシフトが空ならスキップ
     const hasBase=['A','B'].some(p=>Object.keys(baseShift[p]||{}).length>0);
     if(!hasBase) return;
@@ -9165,6 +9177,13 @@ CHANGELOG v159
 - 履歴読み込み時に data.doctor.history だけでなく、過去版で残る data.history / data.shared.history も統合して表示するようにした。
 - 「全データ保存」「公開」時も、既存の旧履歴を引き継いだうえで新しい履歴を保存するようにした。
 - アプリ表示バージョンを v158 から v159 に更新。
+-->
+
+<!--
+CHANGELOG v166
+- 履歴スナップショットの「この版に戻す」後に、現在のベースシフト自動展開が走って復元内容が変わる問題を修正。
+- 復元時はスナップショット内のasgn/手動除外/休診/必要人数等を正本として扱い、復元直後のベースシフト補完を一時抑制。
+- これにより、履歴で表示した公開時点スナップショットと、復元後の編集画面の内容が一致しやすくなった。
 -->
 
 </body>
