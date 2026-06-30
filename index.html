@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v171';
+const APP_VERSION = 'v172';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2792,30 +2792,42 @@ function App(){
   // ただし「この版に戻す」は、履歴内の完全スナップショットだけを正本とし、現在画面の state は参照しない。
   function snapshotPayloadForCurrentUnit(raw){
     if(!raw||typeof raw!=='object')return raw;
-    // v169以降の完全復元データ
-    if(raw.restoreData&&typeof raw.restoreData==='object')return snapshotPayloadForCurrentUnit(raw.restoreData);
-    if(raw.data&&typeof raw.data==='object'&&(raw.data.asgn||raw.data.slots||raw.data.staff||raw.data.restoreData))return snapshotPayloadForCurrentUnit(raw.data);
-    if(raw.asgn||raw.slots||raw.staff)return raw; // すでに現在形式
+    // v172: クリニック行形式を、トップ階層の slots/staff より先に判定する。
+    // {shared:{slots,...}, doctor:{asgn,...}} のような履歴を raw.slots があるだけで「現在形式」と誤判定すると、
+    // doctor.asgn を取り逃がし、表示と復元がずれる。
     const unit=APP_UNIT||'doctor';
-    // クリニック行形式: {shared:{slots,...}, doctor:{asgn,...}, nurse:{...}, clerk:{...}}
     if(raw[unit]&&typeof raw[unit]==='object'){
       const shared=(raw.shared&&typeof raw.shared==='object')?raw.shared:{};
       const merged={...raw[unit]};
-      SHARED_KEYS.forEach(k=>{ if(shared[k]!==undefined)merged[k]=shared[k]; });
+      SHARED_KEYS.forEach(k=>{
+        if(shared[k]!==undefined)merged[k]=shared[k];
+        else if(raw[k]!==undefined&&merged[k]===undefined)merged[k]=raw[k];
+      });
       return merged;
     }
+    // v169以降の完全復元データまたは履歴ラッパー
+    if(raw.data&&typeof raw.data==='object'&&(raw.data.asgn||raw.data.slots||raw.data.staff||raw.data.restoreData||raw.data[unit]))return snapshotPayloadForCurrentUnit(raw.data);
+    if(raw.restoreData&&typeof raw.restoreData==='object'&&(raw.restoreData.asgn||raw.restoreData.slots||raw.restoreData.staff||raw.restoreData[unit]))return snapshotPayloadForCurrentUnit(raw.restoreData);
+    if(raw.asgn)return raw; // すでに現在形式（asgnがあるものだけを復元正本にする）
     // 旧legacy行形式。現在職種が取れない場合は、asgnを持つ最初の職種を復元候補にする。
     for(const k of ['doctor','nurse','clerk']){
       if(raw[k]&&typeof raw[k]==='object'&&(raw[k].asgn||raw[k].slots||raw[k].staff)){
         const merged={...raw[k]};
-        SHARED_KEYS.forEach(sk=>{ if(raw[sk]!==undefined)merged[sk]=raw[sk]; });
+        SHARED_KEYS.forEach(sk=>{ if(raw[sk]!==undefined&&merged[sk]===undefined)merged[sk]=raw[sk]; });
         return merged;
       }
     }
     return raw;
   }
   function buildStrictRestorePayload(snap){
-    const source=snapshotPayloadForCurrentUnit((snap&&snap.restoreData)?snap.restoreData:(snap&&snap.data));
+    // v172: 「この版に戻す」は、履歴一覧の「表示」で見えているデータを正本にする。
+    // 以前の修正で restoreData を優先していたが、古い履歴や移行済み履歴では data と restoreData が
+    // ずれている場合があり、「表示は正しいのに復元は違う」原因になっていた。
+    // まず snap.data（表示に使うのと同じデータ）から復元し、asgn が無い場合だけ restoreData にフォールバックする。
+    let source=snapshotPayloadForCurrentUnit(snap&&snap.data);
+    if(!source||typeof source!=='object'||!source.asgn){
+      source=snapshotPayloadForCurrentUnit(snap&&snap.restoreData);
+    }
     if(!source||typeof source!=='object'||!source.asgn){return null;}
     // v170: 人員配置(asgn)・除外・休診は履歴データを正本として完全置換する。
     // ただし古い履歴には staff/slots マスタが入っていないことがあるため、
@@ -3284,6 +3296,7 @@ ${snapLine}
 <table><thead><tr><th>月</th><th>火</th><th>水</th><th>木</th><th>金</th><th>土</th></tr></thead><tbody>${calHtml}</tbody></table>
 
 <!-- v169 changelog: 公開履歴を完全復元用スナップショットとして保存し、履歴復元では現在画面の配置・設定を全消去して履歴データのみで完全置換するよう修正。 -->
+<!-- v172 changelog: 履歴の「表示」と「この版に戻す」で参照するスナップショット元を統一。復元は表示されているsnap.dataを正本にし、restoreDataは補助に限定。 -->
 </body></html>`);
     printWin.document.close();injectPrintButton(printWin);
     if(opts.autoPrint){setTimeout(()=>{try{printWin.print();}catch(e){}},500);}
@@ -3373,6 +3386,7 @@ td.cell-off{background:#fff}
 <table><thead><tr><th class="name-h">スタッフ</th>${thHtml}</tr></thead><tbody>${rowsHtml}</tbody></table>
 
 <!-- v169 changelog: 公開履歴を完全復元用スナップショットとして保存し、履歴復元では現在画面の配置・設定を全消去して履歴データのみで完全置換するよう修正。 -->
+<!-- v172 changelog: 履歴の「表示」と「この版に戻す」で参照するスナップショット元を統一。復元は表示されているsnap.dataを正本にし、restoreDataは補助に限定。 -->
 </body></html>`);
     printWin.document.close();injectPrintButton(printWin);
   }
@@ -3593,6 +3607,7 @@ h1{font-size:16pt;font-weight:700;margin-bottom:3mm}
 ${bodyHtml}
 
 <!-- v169 changelog: 公開履歴を完全復元用スナップショットとして保存し、履歴復元では現在画面の配置・設定を全消去して履歴データのみで完全置換するよう修正。 -->
+<!-- v172 changelog: 履歴の「表示」と「この版に戻す」で参照するスナップショット元を統一。復元は表示されているsnap.dataを正本にし、restoreDataは補助に限定。 -->
 </body></html>`);
     printWin.document.close();injectPrintButton(printWin);
   }
@@ -6294,7 +6309,8 @@ ${bodyHtml}
       h+='</tbody></table>';
     }
     h+='<div class="note">「申請対象日」は休み・有給・出勤希望・打刻修正などの対象日です。「申請日」はスタッフが申請した日時または管理者が処理した日時です。<br>この画面はブラウザの印刷機能からPDF保存できます。Windows/Macでは「印刷」→「PDFとして保存」を選んでください。税理士・社労士へ送る場合は、保存したPDFをメールに添付してください。</div>';
-    h+='<!-- v171 changelog: v170で混入した未終了文字列を修正し、起動不能を解消。 --></body></html>';
+    h+='<!-- v171 changelog: v170で混入した未終了文字列を修正し、起動不能を解消。 --><!-- v172 changelog: 履歴の「表示」と「この版に戻す」で参照するスナップショット元を統一。復元は表示されているsnap.dataを正本にし、restoreDataは補助に限定。 -->
+</body></html>';
     w.document.open();w.document.write(h);w.document.close();
     setTimeout(()=>{try{w.focus();}catch(_){ }},200);
   }
@@ -8611,7 +8627,8 @@ function StaffCheckPanel({staff,dates,asgn,manualExclusions,tmps,slots,weeks,y,m
       if(r.days.length===0)h+='<tr><td colspan=7>この月の勤務はありません</td></tr>';
       h+='</table>';
     });
-    h+='<!-- v171 changelog: v170で混入した未終了文字列を修正し、起動不能を解消。 --></body></html>'; w.document.write(h); w.document.close();
+    h+='<!-- v171 changelog: v170で混入した未終了文字列を修正し、起動不能を解消。 --><!-- v172 changelog: 履歴の「表示」と「この版に戻す」で参照するスナップショット元を統一。復元は表示されているsnap.dataを正本にし、restoreDataは補助に限定。 -->
+</body></html>'; w.document.write(h); w.document.close();
   }
   const td={border:'1px solid #E2E8F0',padding:'3px 6px'};
   return(
@@ -9280,5 +9297,6 @@ CHANGELOG v167
 
 
 <!-- v169 changelog: 公開履歴を完全復元用スナップショットとして保存し、履歴復元では現在画面の配置・設定を全消去して履歴データのみで完全置換するよう修正。 -->
+<!-- v172 changelog: 履歴の「表示」と「この版に戻す」で参照するスナップショット元を統一。復元は表示されているsnap.dataを正本にし、restoreDataは補助に限定。 -->
 </body>
 </html>
