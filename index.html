@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v181';
+const APP_VERSION = 'v182';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -533,6 +533,43 @@ function normalizeOutpatientClosuresV155(closures,slotsNew){
       }else out[dk][targets[0]]={...(roomMap||{})};
     });
   });
+  return out;
+}
+
+// v182: 履歴スナップショットに残る「実在しないコマのキー」を取り除く。
+// 例) slots が am_out_r1/am_out_r2（分割）なのに、asgn 等に旧 am_out（非分割）の残骸キーが
+// 同居しているケースがある。表示(👁)は slots に実在するコマだけを描画するため、この残骸キーは
+// 画面に出ない。ところが復元後に走る自動正規化(normalize*V155)が、この非分割キーを r1/r2 へ
+// 畳み込んで隠れていた人員を復活させてしまう（＝「戻す」と人が増える／除外が外れるバグの本体）。
+// 復元値からあらかじめ残骸キーを除けば、(1)「表示」と完全一致し、(2)正規化が無変化(固定点)になる。
+function _validSlotIdSetV182(slotsObj,dow){
+  const set=new Set();
+  ((slotsObj&&slotsObj[dow])||[]).forEach(sl=>{ if(sl&&sl.id!=null)set.add(String(sl.id)); });
+  return set;
+}
+function pruneDatedToSlotsV182(obj,slotsObj){
+  const out={};
+  Object.entries(obj||{}).forEach(([dk,dayMap])=>{
+    const dow=new Date(dk).getDay(), ids=_validSlotIdSetV182(slotsObj,dow), o={};
+    Object.entries(dayMap||{}).forEach(([sid,v])=>{ if(ids.has(String(sid)))o[sid]=v; });
+    out[dk]=o;
+  });
+  return out;
+}
+function pruneWeeklyToSlotsV182(req,slotsObj){
+  const out={};
+  [1,2,3,4,5,6].forEach(dow=>{
+    const ids=_validSlotIdSetV182(slotsObj,dow); out[dow]={};
+    Object.entries((req&&req[dow])||{}).forEach(([sid,v])=>{ if(ids.has(String(sid)))out[dow][sid]=v; });
+  });
+  return out;
+}
+function pruneBaseShiftToSlotsV182(bs,slotsObj){
+  const out={A:{},B:{}};
+  ['A','B'].forEach(p=>{[1,2,3,4,5,6].forEach(dow=>{
+    const ids=_validSlotIdSetV182(slotsObj,dow); out[p][dow]={};
+    Object.entries((bs&&bs[p]&&bs[p][dow])||{}).forEach(([sid,v])=>{ if(ids.has(String(sid)))out[p][dow][sid]=v; });
+  });});
   return out;
 }
 
@@ -2832,24 +2869,27 @@ function App(){
     // これにより「表示」と「この版に戻す」が、除外・必要人数も含めて完全に一致する。
     if(sourceHasSlots){
       const _o=(v,d)=>(v&&typeof v==='object')?clonePlain(v):d;
+      // v182: スナップショットの slots（＝表示で実際に描画されるコマ）に存在しないキーを除去する。
+      // これにより「表示」と完全一致し、復元後の自動正規化が無変化（固定点）になる。
+      const _slots=clonePlain(source.slots);
       return {
         y:source.y||y,
         m:source.m||m,
         staff:sourceHasStaff?clonePlain(source.staff):clonePlain((Array.isArray(staff)&&staff.length)?staff:STAFF0),
-        asgn:_o(source.asgn,{}),
+        asgn:pruneDatedToSlotsV182(_o(source.asgn,{}),_slots),
         tmps:_o(source.tmps,{}),
-        weeklyReq:_o(source.weeklyReq,{}),
-        monthlyReq:_o(source.monthlyReq,{}),
-        manualExclusions:_o(source.manualExclusions,{}),
+        weeklyReq:pruneWeeklyToSlotsV182(_o(source.weeklyReq,{}),_slots),
+        monthlyReq:pruneDatedToSlotsV182(_o(source.monthlyReq,{}),_slots),
+        manualExclusions:pruneDatedToSlotsV182(_o(source.manualExclusions,{}),_slots),
         manualClosedDays:_o(source.manualClosedDays,{}),
-        baseShift:_o(source.baseShift,{A:{},B:{}}),
-        slots:clonePlain(source.slots),
+        baseShift:pruneBaseShiftToSlotsV182(_o(source.baseShift,{A:{},B:{}}),_slots),
+        slots:_slots,
         newSlotCounter:source.newSlotCounter||1,
         paidLeave:_o(source.paidLeave,{}),
         editLog:Array.isArray(source.editLog)?clonePlain(source.editLog):[],
-        lockedAsgn:_o(source.lockedAsgn,{}),
+        lockedAsgn:pruneDatedToSlotsV182(_o(source.lockedAsgn,{}),_slots),
         lockedMonths:_o(source.lockedMonths,{}),
-        outpatientClosures:_o(source.outpatientClosures,{}),
+        outpatientClosures:pruneDatedToSlotsV182(_o(source.outpatientClosures,{}),_slots),
         outpatientClosuresUpdatedAt:source.outpatientClosuresUpdatedAt||'',
         surgeryCalUrl:source.surgeryCalUrl,
         sourceShiftUpdatedAt:source.shiftUpdatedAt||''
