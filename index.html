@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v175</title>
+<title>シフト管理 v176</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v175';
+const APP_VERSION = 'v176';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2858,43 +2858,51 @@ function App(){
       return;
     }
 
-    // v169: 復元は「履歴データの完全置換」。現在画面の配置・除外・休診・必要人数・ベースシフトは残さない。
-    // AI再配置、ベースシフト再展開、現在設定とのマージは一切行わない。
-    suppressBaseApplyRef.current=Date.now()+30000;
-    beginShiftHydration(30000);
-
-    function applyStrictRestoredState(){
-      setStaff(restored.staff);
-      if(restored.surgeryCalUrl!==undefined){const cu=(restored.surgeryCalUrl||'').toString();setSurgeryCalUrl(cu);setSurgeryCalInput(cu);saveSurgeryCalUrl(cu);}
-      setSlots(restored.slots);
-      setAsgn(restored.asgn);
-      setTmps(restored.tmps);
-      setWeeklyReq(restored.weeklyReq);
-      setMonthlyReq(restored.monthlyReq);
-      setManualExclusions(restored.manualExclusions);
-      setManualClosedDays(restored.manualClosedDays);
-      setOutpatientClosures(restored.outpatientClosures);
-      setOutpatientClosuresUpdatedAt(restored.outpatientClosuresUpdatedAt);
-      setBaseShift(restored.baseShift);
-      setPaidLeave(restored.paidLeave);
-      setNewSlotCounter(restored.newSlotCounter);
-      setEditLog(restored.editLog);
-      setLockedAsgn(restored.lockedAsgn);
-      setLockedMonths(restored.lockedMonths);
-      setY(restored.y);setM(restored.m);
+    // v176: 復元は「ローカル保存へ直接書き込み → 画面再読込」で確定する。
+    // これまでの setState 方式では、復元直後に正規化・クラウド読込・自動補完などの
+    // 後続処理が走り、現在のライブ状態（ベースシフト由来の配置など）へ戻してしまうため、
+    // 履歴データがシフト表に反映されなかった。
+    // 起動時の初期 state（loadLS）として読み込ませれば、いかなる後続 effect にも
+    // 干渉されず、履歴データそのままのシフト表に確実に戻る。
+    // ※ AI再配置・ベースシフト再展開・現在設定とのマージは一切行わない。
+    try{
+      const baseLS=loadLS()||{};
+      const now=new Date().toISOString();
+      const merged={
+        ...baseLS,
+        y:restored.y, m:restored.m,
+        staff:restored.staff,
+        asgn:restored.asgn,
+        tmps:restored.tmps,
+        weeklyReq:restored.weeklyReq,
+        monthlyReq:restored.monthlyReq,
+        manualExclusions:restored.manualExclusions,
+        manualClosedDays:restored.manualClosedDays,
+        baseShift:restored.baseShift,
+        slots:restored.slots,
+        newSlotCounter:restored.newSlotCounter,
+        paidLeave:restored.paidLeave,
+        shiftUpdatedAt:now,
+        editLog:restored.editLog,
+        lockedAsgn:restored.lockedAsgn,
+        lockedMonths:restored.lockedMonths,
+        outpatientClosures:restored.outpatientClosures,
+        outpatientClosuresUpdatedAt:restored.outpatientClosuresUpdatedAt
+      };
+      saveLS(merged);
+      if(restored.surgeryCalUrl!==undefined){try{saveSurgeryCalUrl((restored.surgeryCalUrl||'').toString());}catch(_){ }}
+    }catch(e){
+      alert('復元データの保存に失敗しました：'+(e&&e.message||e));
+      return;
     }
-
-    applyStrictRestoredState();
-    [80,300,900,1800,3500].forEach(ms=>setTimeout(()=>{
-      suppressBaseApplyRef.current=Date.now()+30000;
-      beginShiftHydration(8000);
-      applyStrictRestoredState();
-    },ms));
-
-    setShiftUpdatedAt(new Date().toISOString()); // 復元＝新しい未公開版
-    setPublishedAt('');
     setShowHistory(false);
-    setTimeout(()=>alert('履歴データの内容だけで復元しました。内容を確認して「公開」で確定してください。'),80);
+    alert('履歴データの内容で復元しました。画面を更新して反映します。\n更新後、内容を確認して「公開」で確定してください。');
+    // 復元データを初期stateとして読み込ませるため、キャッシュを避けて再読込する。
+    try{
+      const sp=new URLSearchParams(location.search);
+      sp.set('_r',Date.now().toString());
+      location.replace(location.pathname+'?'+sp.toString()+location.hash);
+    }catch(e){ try{location.reload();}catch(_){ } }
   }
 
   // 公開時点スナップショットを現在の編集画面へ反映せずに閲覧・印刷する。
