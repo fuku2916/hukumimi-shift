@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v176</title>
+<title>シフト管理 v177</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v176';
+const APP_VERSION = 'v177';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2033,9 +2033,14 @@ function App(){
         // 新クリニックを移行前に一度開いた端末で、空データがクラウドより新しく見えて読み込まれない問題への対策。
         const localHasShift=!!(saved&&saved.asgn&&Object.keys(saved.asgn).length>0);
         const cloudWins = !localHasShift || !localTs || (cloudTs && cloudTs>=localTs);
+        // v176: 履歴「この版に戻す」直後の初回読込では、クラウドの旧データで復元結果を上書きしない。
+        // 復元はローカルを正本として表示し、ユーザーが内容確認のうえ「公開」でクラウドへ確定する。
+        let _restoreLock='';try{_restoreLock=localStorage.getItem('fukumimi_restore_lock')||'';}catch(_){ }
+        const skipCloudShift = !!_restoreLock && (Date.now()-Date.parse(_restoreLock) < 600000);
+        if(_restoreLock){try{localStorage.removeItem('fukumimi_restore_lock');}catch(_){ }}
         // クリニックモードの共通(shared)＝診療枠・休診日・採番は全職種で同一。
         // ある職種の未公開編集の有無に関わらず、共通部分は常にクラウドの版を採用する。
-        if(CLINIC_MODE && sd){
+        if(CLINIC_MODE && sd && !skipCloudShift){
           if(sd.slots)setSlots(sd.slots);
           if(sd.manualClosedDays)setManualClosedDays(sd.manualClosedDays);
           if(sd.newSlotCounter)setNewSlotCounter(sd.newSlotCounter);
@@ -2045,7 +2050,7 @@ function App(){
         // v135: 履歴は現在の編集中シフトとは別物なので、cloudWins判定に関係なく常にクラウドから読む。
         // これにより、外来枠設定などを変更した直後でも「公開」しなくても履歴一覧が見える。
         if(sd&&Array.isArray(sd.history))setShiftHistory(sd.history);
-        if(sd&&Object.keys(sd).length>0 && cloudWins){
+        if(sd&&Object.keys(sd).length>0 && cloudWins && !skipCloudShift){
           if(sd.staff)setStaff(sd.staff);
           if(sd.slots)setSlots(sd.slots);
           if(sd.asgn)setAsgn(sd.asgn);
@@ -2890,6 +2895,8 @@ function App(){
         outpatientClosuresUpdatedAt:restored.outpatientClosuresUpdatedAt
       };
       saveLS(merged);
+      // 復元直後の初回読込でクラウドの旧データに上書きされないようロックを立てる。
+      try{localStorage.setItem('fukumimi_restore_lock',new Date().toISOString());}catch(_){ }
       if(restored.surgeryCalUrl!==undefined){try{saveSurgeryCalUrl((restored.surgeryCalUrl||'').toString());}catch(_){ }}
     }catch(e){
       alert('復元データの保存に失敗しました：'+(e&&e.message||e));
