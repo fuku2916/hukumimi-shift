@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v169';
+const APP_VERSION = 'v170';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2371,7 +2371,7 @@ function App(){
   const [tab,setTab]=useState('shift');
   const [y,setY]=useState(()=>saved?.y||new Date().getFullYear());
   const [m,setM]=useState(()=>saved?.m||new Date().getMonth()+1);
-  const [staff,setStaff]=useState(()=>saved?.staff||STAFF0);
+  const [staff,setStaff]=useState(()=>Array.isArray(saved?.staff)&&saved.staff.length?saved.staff:STAFF0);
   // 実労働時間の退勤時刻判定に使う参照表を、描画前に同期更新（dayHoursから参照）
   STAFF_OBJ_LOOKUP={};(staff||[]).forEach(s=>{STAFF_OBJ_LOOKUP[s.id]=s;});
   const initialSlotsV155=useMemo(()=>normalizeSlotsForV155(saved?.slots||SLOTS),[saved]);
@@ -2422,7 +2422,7 @@ function App(){
   const [ef,setEf]=useState({});
   const [showAdd,setShowAdd]=useState(false);
   const [addF,setAddF]=useState({name:'',cond:defaultCond(),memo:'',color:COLORS[0],pin:'',workType:'normal',code:'',fullName:'',email:'',payrollClinic:defaultPayrollClinic(),workClinics:defaultWorkClinics()});
-  const [nid,setNid]=useState(()=>saved?.staff?Math.max(...saved.staff.map(s=>s.id),9)+1:10);
+  const [nid,setNid]=useState(()=>Array.isArray(saved?.staff)&&saved.staff.length?Math.max(...saved.staff.map(s=>s.id),9)+1:10);
   const [aLoad,setALoad]=useState(false);
   const [aRes,setARes]=useState(null);
   const [aErr,setAErr]=useState(null);
@@ -2542,10 +2542,10 @@ function App(){
   const FULL_RESTORE_KEYS=['y','m','clinicId','clinicLabel','unit','unitLabel','staff','asgn','tmps','weeklyReq','monthlyReq','manualExclusions','manualClosedDays','baseShift','slots','newSlotCounter','paidLeave','shiftUpdatedAt','editLog','lockedAsgn','lockedMonths','surgeryFlags','surgeryCalSnapshotAt','outpatientClosures','outpatientClosuresUpdatedAt'];
   function clonePlain(obj){try{return JSON.parse(JSON.stringify(obj));}catch(e){return obj;}}
   function currentShiftPayload(extra){
-    // v169: 公開履歴から完全復元できるよう、復元に必要な全 state を固定リストで保存する。
+    // v170: 公開履歴から完全復元できるよう、復元に必要な全 state を固定リストで保存する。
     // 履歴復元時はこのスナップショットを正本とし、現在画面の state は一切 fallback として使わない。
     const payload={
-      _snapshotSchema:'full_restore_v169',
+      _snapshotSchema:'full_restore_v170',
       _restoreKeys:FULL_RESTORE_KEYS.slice(),
       y,m,
       clinicId:APP_CLINIC||'',clinicLabel:CLINIC_LABEL||'',unit:APP_UNIT||'',unitLabel:APP_UNIT_LABEL||'',
@@ -2628,7 +2628,7 @@ function App(){
     const snap=clonePlain(data||currentShiftPayload());
     if(snap){delete snap.history; delete snap.drafts; delete snap._drafts;}
     const full=clonePlain(snap||{});
-    return {at:new Date().toISOString(),made:full.shiftUpdatedAt||'',kind:kind||'manual',label:label||'',data:full,restoreData:clonePlain(full),restoreSchema:'full_restore_v169',restoreKeys:FULL_RESTORE_KEYS.slice(),...(extra||{})};
+    return {at:new Date().toISOString(),made:full.shiftUpdatedAt||'',kind:kind||'manual',label:label||'',data:full,restoreData:clonePlain(full),restoreSchema:'full_restore_v170',restoreKeys:FULL_RESTORE_KEYS.slice(),...(extra||{})};
   }
   function mergeHistoryLists(){
     const out=[], seen=new Set();
@@ -2788,7 +2788,7 @@ function App(){
     }catch(e){alert('保存に失敗しました：'+(e&&e.message||e));}
     setPublishing(false);
   }
-  // v169: 履歴スナップショットの data は時期により形が異なる。
+  // v170: 履歴スナップショットの data は時期により形が異なる。
   // ただし「この版に戻す」は、履歴内の完全スナップショットだけを正本とし、現在画面の state は参照しない。
   function snapshotPayloadForCurrentUnit(raw){
     if(!raw||typeof raw!=='object')return raw;
@@ -2817,12 +2817,17 @@ function App(){
   function buildStrictRestorePayload(snap){
     const source=snapshotPayloadForCurrentUnit((snap&&snap.restoreData)?snap.restoreData:(snap&&snap.data));
     if(!source||typeof source!=='object'||!source.asgn){return null;}
-    // v169: 現在画面の値を fallback に使わない。履歴に無いものは空/既定値にする。
-    const rSlots=normalizeSlotsForV155(source.slots||SLOTS);
+    // v170: 人員配置(asgn)・除外・休診は履歴データを正本として完全置換する。
+    // ただし古い履歴には staff/slots マスタが入っていないことがあるため、
+    // 表示に必要なマスタだけは現在の安全なマスタで補う（配置は推測しない）。
+    const sourceHasSlots=source.slots&&typeof source.slots==='object'&&Object.values(source.slots).some(v=>Array.isArray(v)&&v.length>0);
+    const sourceHasStaff=Array.isArray(source.staff)&&source.staff.length>0;
+    const rSlots=normalizeSlotsForV155(sourceHasSlots?source.slots:(slots||SLOTS));
+    const rStaff=sourceHasStaff?clonePlain(source.staff):clonePlain((Array.isArray(staff)&&staff.length)?staff:STAFF0);
     return {
       y:source.y||y,
       m:source.m||m,
-      staff:Array.isArray(source.staff)?clonePlain(source.staff):[],
+      staff:rStaff,
       asgn:normalizeDatedSlotMapsV155(clonePlain(source.asgn||{}),rSlots),
       tmps:(source.tmps&&typeof source.tmps==='object')?clonePlain(source.tmps):{},
       weeklyReq:normalizeWeeklyReqV155(clonePlain(source.weeklyReq||{}),rSlots),
