@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v170';
+const APP_VERSION = 'v171';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -6294,9 +6294,7 @@ ${bodyHtml}
       h+='</tbody></table>';
     }
     h+='<div class="note">「申請対象日」は休み・有給・出勤希望・打刻修正などの対象日です。「申請日」はスタッフが申請した日時または管理者が処理した日時です。<br>この画面はブラウザの印刷機能からPDF保存できます。Windows/Macでは「印刷」→「PDFとして保存」を選んでください。税理士・社労士へ送る場合は、保存したPDFをメールに添付してください。</div>';
-    h+='
-<!-- v169 changelog: 公開履歴を完全復元用スナップショットとして保存し、履歴復元では現在画面の配置・設定を全消去して履歴データのみで完全置換するよう修正。 -->
-</body></html>';
+    h+='<!-- v171 changelog: v170で混入した未終了文字列を修正し、起動不能を解消。 --></body></html>';
     w.document.open();w.document.write(h);w.document.close();
     setTimeout(()=>{try{w.focus();}catch(_){ }},200);
   }
@@ -8613,9 +8611,7 @@ function StaffCheckPanel({staff,dates,asgn,manualExclusions,tmps,slots,weeks,y,m
       if(r.days.length===0)h+='<tr><td colspan=7>この月の勤務はありません</td></tr>';
       h+='</table>';
     });
-    h+='
-<!-- v169 changelog: 公開履歴を完全復元用スナップショットとして保存し、履歴復元では現在画面の配置・設定を全消去して履歴データのみで完全置換するよう修正。 -->
-</body></html>'; w.document.write(h); w.document.close();
+    h+='<!-- v171 changelog: v170で混入した未終了文字列を修正し、起動不能を解消。 --></body></html>'; w.document.write(h); w.document.close();
   }
   const td={border:'1px solid #E2E8F0',padding:'3px 6px'};
   return(
