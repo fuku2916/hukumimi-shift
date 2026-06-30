@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>シフト管理 v173</title>
+<title>シフト管理 v174</title>
 <style>
 /* レスポンシブ：スマホ（<768px）は小さめフォント */
 :root {
@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v173';
+const APP_VERSION = 'v174';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -3684,8 +3684,12 @@ ${bodyHtml}
     // ベースシフトが空ならスキップ
     const hasBase=['A','B'].some(p=>Object.keys(baseShift[p]||{}).length>0);
     if(!hasBase) return;
-    // v158: 当月に一部割当があっても、空いている枠だけベースシフトを補完する。
-    // 既存割当は applyBaseShiftToMonth 側で枠単位に保護する。
+    // v173: 表示中の月に既に割当があれば自動展開しない。
+    // 履歴復元・保存済みシフトの「意図的な空欄」を、ベースシフトの推測で埋めてしまわないため、
+    // まっさらな新規月だけを自動補完し、既存のシフトには一切手を加えない。
+    // （途中から空欄をベースで埋めたい場合は「ベースシフト」タブの手動適用ボタンを使う）
+    const monthHasAsgn=(dates||[]).some(d=>{const sm=asgn[tdk(d)];return sm&&Object.values(sm).some(ids=>(ids||[]).length>0);});
+    if(monthHasAsgn) return;
     applyBaseShiftToMonth();
   // eslint-disable-next-line
   },[y,m,baseShift]);
