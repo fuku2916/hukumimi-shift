@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v183-debug';
+const APP_VERSION = 'v184';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -536,40 +536,43 @@ function normalizeOutpatientClosuresV155(closures,slotsNew){
   return out;
 }
 
-// v182: 履歴スナップショットに残る「実在しないコマのキー」を取り除く。
-// 例) slots が am_out_r1/am_out_r2（分割）なのに、asgn 等に旧 am_out（非分割）の残骸キーが
-// 同居しているケースがある。表示(👁)は slots に実在するコマだけを描画するため、この残骸キーは
-// 画面に出ない。ところが復元後に走る自動正規化(normalize*V155)が、この非分割キーを r1/r2 へ
-// 畳み込んで隠れていた人員を復活させてしまう（＝「戻す」と人が増える／除外が外れるバグの本体）。
-// 復元値からあらかじめ残骸キーを除けば、(1)「表示」と完全一致し、(2)正規化が無変化(固定点)になる。
-function _validSlotIdSetV182(slotsObj,dow){
-  const set=new Set();
-  ((slotsObj&&slotsObj[dow])||[]).forEach(sl=>{ if(sl&&sl.id!=null)set.add(String(sl.id)); });
-  return set;
-}
-function pruneDatedToSlotsV182(obj,slotsObj){
+// v184: 復元時、外来コマを 1診/2診 に分割する際に「除外・ロック」を“その人が配置された部屋”へ追従させる。
+//
+// 【バグの真因（v181〜v183で未解決だった点）】
+// 履歴スナップショットが「分割なし」コマ（例 am_out）で保存されている場合、復元直後に走る自動正規化
+// (normalizeSlotsForV155 + normalizeDatedSlotMapsV155) が am_out を am_out_r1/r2 へ分割し、配置(asgn)と
+// 除外(manualExclusions)を“それぞれ別々に”インデックス順で振り分ける。その結果、ある人の「除外」が
+// 本人の配置と違う部屋に飛び、除外が効かず、隠れるはずの人が出現する。
+// 例(2026-07-01): 配置 am_out=[小田,大滝,杉本,大西]→ r1=[小田]/r2=[大滝,杉本,大西]、
+//   除外 am_out=[大西]→（独立分割で）r1=[大西]。大西の配置は r2 なのに除外が r1 → r2 で大西が表示（3/2）。
+//
+// 【対策】配置(asgn)は従来どおり分割し、除外・ロックは「その人が実際に配置された部屋」に置く。
+// これで除外は必ず本人と同じ部屋に入り、表示(👁)とドンピシャ一致する（大西は隠れて 2/2 に戻る）。
+function alignDatedMapToAsgnV184(obj,splitAsgn,slotsNew){
   const out={};
   Object.entries(obj||{}).forEach(([dk,dayMap])=>{
-    const dow=new Date(dk).getDay(), ids=_validSlotIdSetV182(slotsObj,dow), o={};
-    Object.entries(dayMap||{}).forEach(([sid,v])=>{ if(ids.has(String(sid)))o[sid]=v; });
+    const dow=new Date(dk).getDay();
+    const dayAsgn=(splitAsgn&&splitAsgn[dk])||{};
+    const o={};
+    Object.entries(dayMap||{}).forEach(([slotId,ids])=>{
+      const targets=splitTargetIdsV155(dow,slotId,slotsNew);
+      if(targets.length>=2){
+        // 分割コマ：各IDを「配置されている部屋」に置く。どの部屋にも配置が無いIDは描画に影響しないため落とす。
+        (ids||[]).forEach(sid=>{
+          targets.forEach(t=>{
+            if(((dayAsgn[t]||[]).map(String)).includes(String(sid))){
+              if(!o[t])o[t]=[];
+              if(!o[t].map(String).includes(String(sid)))o[t].push(sid);
+            }
+          });
+        });
+      }else{
+        const t=targets[0]; if(!o[t])o[t]=[];
+        (ids||[]).forEach(sid=>{ if(!o[t].map(String).includes(String(sid)))o[t].push(sid); });
+      }
+    });
     out[dk]=o;
   });
-  return out;
-}
-function pruneWeeklyToSlotsV182(req,slotsObj){
-  const out={};
-  [1,2,3,4,5,6].forEach(dow=>{
-    const ids=_validSlotIdSetV182(slotsObj,dow); out[dow]={};
-    Object.entries((req&&req[dow])||{}).forEach(([sid,v])=>{ if(ids.has(String(sid)))out[dow][sid]=v; });
-  });
-  return out;
-}
-function pruneBaseShiftToSlotsV182(bs,slotsObj){
-  const out={A:{},B:{}};
-  ['A','B'].forEach(p=>{[1,2,3,4,5,6].forEach(dow=>{
-    const ids=_validSlotIdSetV182(slotsObj,dow); out[p][dow]={};
-    Object.entries((bs&&bs[p]&&bs[p][dow])||{}).forEach(([sid,v])=>{ if(ids.has(String(sid)))out[p][dow][sid]=v; });
-  });});
   return out;
 }
 
@@ -2862,34 +2865,39 @@ function App(){
     const sourceHasSlots=source.slots&&typeof source.slots==='object'&&Object.values(source.slots).some(v=>Array.isArray(v)&&v.length>0);
     const sourceHasStaff=Array.isArray(source.staff)&&source.staff.length>0;
 
-    // v181: スナップショットが自身のスロットを持つ（v170以降の完全データ）場合は、
-    // 「表示(👁)」とまったく同じく、一切再正規化せずスナップショットの値をそのまま適用する。
-    // 以前は復元時に再正規化しており、その過程で「除外」「必要人数」がスナップショットと
-    // ずれて、表示は正しいのに戻すと内容が変わる（人が増える等）原因になっていた。
-    // これにより「表示」と「この版に戻す」が、除外・必要人数も含めて完全に一致する。
+    // v184: スナップショットが自身のスロットを持つ（v170以降の完全データ）場合の復元。
+    //
+    // 復元後の画面では自動正規化(normalizeSlotsForV155)が必ず走り、分割なし外来コマ(am_out 等)を
+    // 1診/2診(am_out_r1/r2)へ分割する。この分割を“復元の段階で先に・かつ整合的に”行っておくことで、
+    // 復元後の自動正規化が無変化（固定点）になり、画面が勝手に書き換わらないようにする。
+    //
+    // 肝は除外・ロックの扱い：配置(asgn)はインデックス順で部屋へ分割し、除外(manualExclusions)と
+    // ロック(lockedAsgn)は「その人が配置された部屋」へ追従させる(alignDatedMapToAsgnV184)。
+    // これにより「表示(👁)」とまったく同じ顔ぶれ・人数になる（独立分割で除外が別部屋へ飛ぶv181〜v183の不具合を解消）。
     if(sourceHasSlots){
       const _o=(v,d)=>(v&&typeof v==='object')?clonePlain(v):d;
-      // v182: スナップショットの slots（＝表示で実際に描画されるコマ）に存在しないキーを除去する。
-      // これにより「表示」と完全一致し、復元後の自動正規化が無変化（固定点）になる。
-      const _slots=clonePlain(source.slots);
+      // スナップショットのコマを現行(分割)形式へ正規化。すでに分割済みなら何も変わらない（冪等）。
+      const _slots=normalizeSlotsForV155(clonePlain(source.slots));
+      // 配置を部屋へ分割（従来ロジック）。除外・ロックはこの分割結果に合わせて部屋を決める。
+      const _asgn=normalizeDatedSlotMapsV155(_o(source.asgn,{}),_slots);
       return {
         y:source.y||y,
         m:source.m||m,
         staff:sourceHasStaff?clonePlain(source.staff):clonePlain((Array.isArray(staff)&&staff.length)?staff:STAFF0),
-        asgn:pruneDatedToSlotsV182(_o(source.asgn,{}),_slots),
+        asgn:_asgn,
         tmps:_o(source.tmps,{}),
-        weeklyReq:pruneWeeklyToSlotsV182(_o(source.weeklyReq,{}),_slots),
-        monthlyReq:pruneDatedToSlotsV182(_o(source.monthlyReq,{}),_slots),
-        manualExclusions:pruneDatedToSlotsV182(_o(source.manualExclusions,{}),_slots),
+        weeklyReq:normalizeWeeklyReqV155(_o(source.weeklyReq,{}),_slots),
+        monthlyReq:normalizeMonthlyReqV155(_o(source.monthlyReq,{}),_slots),
+        manualExclusions:alignDatedMapToAsgnV184(_o(source.manualExclusions,{}),_asgn,_slots),
         manualClosedDays:_o(source.manualClosedDays,{}),
-        baseShift:pruneBaseShiftToSlotsV182(_o(source.baseShift,{A:{},B:{}}),_slots),
+        baseShift:normalizeBaseShiftV155(_o(source.baseShift,{A:{},B:{}}),_slots),
         slots:_slots,
         newSlotCounter:source.newSlotCounter||1,
         paidLeave:_o(source.paidLeave,{}),
         editLog:Array.isArray(source.editLog)?clonePlain(source.editLog):[],
-        lockedAsgn:pruneDatedToSlotsV182(_o(source.lockedAsgn,{}),_slots),
+        lockedAsgn:alignDatedMapToAsgnV184(_o(source.lockedAsgn,{}),_asgn,_slots),
         lockedMonths:_o(source.lockedMonths,{}),
-        outpatientClosures:pruneDatedToSlotsV182(_o(source.outpatientClosures,{}),_slots),
+        outpatientClosures:normalizeOutpatientClosuresV155(_o(source.outpatientClosures,{}),_slots),
         outpatientClosuresUpdatedAt:source.outpatientClosuresUpdatedAt||'',
         surgeryCalUrl:source.surgeryCalUrl,
         sourceShiftUpdatedAt:source.shiftUpdatedAt||''
@@ -2933,48 +2941,6 @@ function App(){
       alert('この履歴データには復元用の割当データ(asgn)が見つかりませんでした。表示はできますが、この版として復元できません。');
       return;
     }
-
-    // ===== v183-debug: 復元トレースを採取してJSONダウンロード =====
-    // ①履歴スナップショット(source) ②復元で組んだ内容(restored) ③3秒後の実画面データ(liveAfter)
-    // を1ファイルに書き出す。原因特定後にこのブロックごと削除する。
-    try{
-      const _pick=o=>{ if(!o||typeof o!=='object')return o; return {
-        y:o.y, m:o.m,
-        slots:o.slots, asgn:o.asgn, manualExclusions:o.manualExclusions,
-        weeklyReq:o.weeklyReq, monthlyReq:o.monthlyReq, tmps:o.tmps,
-        manualClosedDays:o.manualClosedDays, outpatientClosures:o.outpatientClosures,
-        lockedAsgn:o.lockedAsgn,
-        staff:Array.isArray(o.staff)?o.staff.map(s=>({id:s.id,name:s.name})):o.staff
-      };};
-      const _srcRaw=snapshotPayloadForCurrentUnit(snap&&snap.data);
-      const _dbg={
-        version:APP_VERSION,
-        clinic:(typeof APP_CLINIC!=='undefined'?APP_CLINIC:''),
-        unit:(typeof APP_UNIT!=='undefined'?APP_UNIT:''),
-        lsKey:(typeof LS_KEY!=='undefined'?LS_KEY:''),
-        snapMeta:{name:snap.name||snap.archiveName||'', made:snap.made||'', at:snap.at||''},
-        step1_source:_pick(_srcRaw),
-        step2_restored:_pick(restored),
-        step3_liveAfter:null,
-        capturedAt:new Date().toISOString()
-      };
-      window.__restoreDebug=_dbg;
-      const _download=()=>{ try{
-        const blob=new Blob([JSON.stringify(_dbg,null,2)],{type:'application/json'});
-        const a=document.createElement('a');
-        a.href=URL.createObjectURL(blob);
-        a.download='restore_debug_'+(_dbg.clinic||'')+'_'+(_dbg.unit||'')+'_'+_dbg.capturedAt.replace(/[:.]/g,'-')+'.json';
-        document.body.appendChild(a); a.click();
-        setTimeout(()=>{try{document.body.removeChild(a);URL.revokeObjectURL(a.href);}catch(_){ }},1000);
-      }catch(_){ } };
-      // 3秒後（正規化・自動保存が落ち着いた後）の localStorage を実画面データとして採取
-      setTimeout(()=>{
-        try{ const live=JSON.parse(localStorage.getItem(LS_KEY)||'{}'); _dbg.step3_liveAfter=_pick(live); }catch(_){ _dbg.step3_liveAfter={error:'read failed'}; }
-        try{ console.log('%c[restore-debug] window.__restoreDebug を確認してください','color:#1D6FCC;font-weight:bold'); console.log(_dbg); }catch(_){ }
-        _download();
-      },3000);
-    }catch(_){ /* デバッグ採取の失敗は本処理に影響させない */ }
-    // ===== /v183-debug =====
 
     // v180: 復元は「ローカル保存へ書き込み＋画面をその場で更新」で行う（リロードはしない）。
     // 以前はリロードしていたが、リロード時の再認証がSupabase側のエラーでログアウトを誘発し、
