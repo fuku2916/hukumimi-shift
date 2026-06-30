@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v182';
+const APP_VERSION = 'v183-debug';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2933,6 +2933,48 @@ function App(){
       alert('この履歴データには復元用の割当データ(asgn)が見つかりませんでした。表示はできますが、この版として復元できません。');
       return;
     }
+
+    // ===== v183-debug: 復元トレースを採取してJSONダウンロード =====
+    // ①履歴スナップショット(source) ②復元で組んだ内容(restored) ③3秒後の実画面データ(liveAfter)
+    // を1ファイルに書き出す。原因特定後にこのブロックごと削除する。
+    try{
+      const _pick=o=>{ if(!o||typeof o!=='object')return o; return {
+        y:o.y, m:o.m,
+        slots:o.slots, asgn:o.asgn, manualExclusions:o.manualExclusions,
+        weeklyReq:o.weeklyReq, monthlyReq:o.monthlyReq, tmps:o.tmps,
+        manualClosedDays:o.manualClosedDays, outpatientClosures:o.outpatientClosures,
+        lockedAsgn:o.lockedAsgn,
+        staff:Array.isArray(o.staff)?o.staff.map(s=>({id:s.id,name:s.name})):o.staff
+      };};
+      const _srcRaw=snapshotPayloadForCurrentUnit(snap&&snap.data);
+      const _dbg={
+        version:APP_VERSION,
+        clinic:(typeof APP_CLINIC!=='undefined'?APP_CLINIC:''),
+        unit:(typeof APP_UNIT!=='undefined'?APP_UNIT:''),
+        lsKey:(typeof LS_KEY!=='undefined'?LS_KEY:''),
+        snapMeta:{name:snap.name||snap.archiveName||'', made:snap.made||'', at:snap.at||''},
+        step1_source:_pick(_srcRaw),
+        step2_restored:_pick(restored),
+        step3_liveAfter:null,
+        capturedAt:new Date().toISOString()
+      };
+      window.__restoreDebug=_dbg;
+      const _download=()=>{ try{
+        const blob=new Blob([JSON.stringify(_dbg,null,2)],{type:'application/json'});
+        const a=document.createElement('a');
+        a.href=URL.createObjectURL(blob);
+        a.download='restore_debug_'+(_dbg.clinic||'')+'_'+(_dbg.unit||'')+'_'+_dbg.capturedAt.replace(/[:.]/g,'-')+'.json';
+        document.body.appendChild(a); a.click();
+        setTimeout(()=>{try{document.body.removeChild(a);URL.revokeObjectURL(a.href);}catch(_){ }},1000);
+      }catch(_){ } };
+      // 3秒後（正規化・自動保存が落ち着いた後）の localStorage を実画面データとして採取
+      setTimeout(()=>{
+        try{ const live=JSON.parse(localStorage.getItem(LS_KEY)||'{}'); _dbg.step3_liveAfter=_pick(live); }catch(_){ _dbg.step3_liveAfter={error:'read failed'}; }
+        try{ console.log('%c[restore-debug] window.__restoreDebug を確認してください','color:#1D6FCC;font-weight:bold'); console.log(_dbg); }catch(_){ }
+        _download();
+      },3000);
+    }catch(_){ /* デバッグ採取の失敗は本処理に影響させない */ }
+    // ===== /v183-debug =====
 
     // v180: 復元は「ローカル保存へ書き込み＋画面をその場で更新」で行う（リロードはしない）。
     // 以前はリロードしていたが、リロード時の再認証がSupabase側のエラーでログアウトを誘発し、
