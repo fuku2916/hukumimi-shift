@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v164';
+const APP_VERSION = 'v165';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2747,24 +2747,59 @@ function App(){
     }catch(e){alert('保存に失敗しました：'+(e&&e.message||e));}
     setPublishing(false);
   }
+  // v165: 履歴スナップショットの data は、時期によって
+  // ① 現在職種のシフト本体そのもの、② クリニック行全体 {shared, doctor, nurse, clerk}、
+  // ③ 旧legacy行 {doctor,nurse,clerk} のいずれかで保存されていることがある。
+  // 「表示」は exportPDF 側で見えても、「この版に戻す」は d.asgn 等を直読みしていたため、
+  // ②③では asgn が見つからず復元されないことがあった。ここで現在の職種用payloadへ正規化する。
+  function snapshotPayloadForCurrentUnit(raw){
+    if(!raw||typeof raw!=='object')return raw;
+    if(raw.asgn||raw.slots||raw.staff)return raw; // すでに現在形式
+    const unit=APP_UNIT||'doctor';
+    // クリニック行形式: {shared:{slots,...}, doctor:{asgn,...}, nurse:{...}, clerk:{...}}
+    if(raw[unit]&&typeof raw[unit]==='object'){
+      const shared=(raw.shared&&typeof raw.shared==='object')?raw.shared:{};
+      const merged={...raw[unit]};
+      SHARED_KEYS.forEach(k=>{ if(shared[k]!==undefined)merged[k]=shared[k]; });
+      return merged;
+    }
+    // 旧legacy行形式。現在職種が取れない場合は、asgnを持つ最初の職種を復元候補にする。
+    for(const k of ['doctor','nurse','clerk']){
+      if(raw[k]&&typeof raw[k]==='object'&&(raw[k].asgn||raw[k].slots||raw[k].staff)){
+        const merged={...raw[k]};
+        SHARED_KEYS.forEach(sk=>{ if(raw[sk]!==undefined)merged[sk]=raw[sk]; });
+        return merged;
+      }
+    }
+    return raw;
+  }
+
   // 履歴の版に戻す（戻したあと「公開」で確定）
   function restoreSnapshot(snap){
     if(!snap||!snap.data)return;
     if(!window.confirm('この版（作成 '+fmtStamp(snap.made||snap.at)+'）に戻しますか？\n現在の編集内容は置き換わります。戻したあと「公開」で確定してください。'))return;
-    const d=snap.data;
+    const d=snapshotPayloadForCurrentUnit(snap.data);
+    if(!d||typeof d!=='object'||(!d.asgn&&!d.slots&&!d.staff)){
+      alert('この履歴データは現在のシフト表形式として読み取れませんでした。表示はできますが、復元対象のasgn/slots/staffが見つかりません。');
+      return;
+    }
     if(d.staff)setStaff(d.staff);
-    if(d.slots)setSlots(d.slots);
-    if(d.asgn)setAsgn(d.asgn);
+    if(d.surgeryCalUrl!==undefined){const cu=(d.surgeryCalUrl||'').toString();setSurgeryCalUrl(cu);setSurgeryCalInput(cu);saveSurgeryCalUrl(cu);}
+    if(d.slots)setSlots(normalizeSlotsForV155(d.slots));
+    if(d.asgn)setAsgn(normalizeDatedSlotMapsV155(d.asgn,normalizeSlotsForV155(d.slots||slots||SLOTS)));
     if(d.tmps)setTmps(d.tmps);
-    if(d.weeklyReq)setWeeklyReq(d.weeklyReq);
-    if(d.monthlyReq)setMonthlyReq(d.monthlyReq);
-    if(d.manualExclusions)setManualExclusions(d.manualExclusions);
+    if(d.weeklyReq)setWeeklyReq(normalizeWeeklyReqV155(d.weeklyReq,normalizeSlotsForV155(d.slots||slots||SLOTS)));
+    if(d.monthlyReq)setMonthlyReq(normalizeMonthlyReqV155(d.monthlyReq,normalizeSlotsForV155(d.slots||slots||SLOTS)));
+    if(d.manualExclusions)setManualExclusions(normalizeDatedSlotMapsV155(d.manualExclusions,normalizeSlotsForV155(d.slots||slots||SLOTS)));
     if(d.manualClosedDays)setManualClosedDays(d.manualClosedDays);
-    if(d.outpatientClosures&&typeof d.outpatientClosures==='object')setOutpatientClosures(d.outpatientClosures);
+    if(d.outpatientClosures&&typeof d.outpatientClosures==='object')setOutpatientClosures(normalizeOutpatientClosuresV155(d.outpatientClosures,normalizeSlotsForV155(d.slots||slots||SLOTS)));
     if(d.outpatientClosuresUpdatedAt!==undefined)setOutpatientClosuresUpdatedAt(d.outpatientClosuresUpdatedAt||'');
-    if(d.baseShift)setBaseShift(d.baseShift);
+    if(d.baseShift)setBaseShift(normalizeBaseShiftV155(d.baseShift,normalizeSlotsForV155(d.slots||slots||SLOTS)));
     if(d.paidLeave)setPaidLeave(d.paidLeave);
     if(d.newSlotCounter)setNewSlotCounter(d.newSlotCounter);
+    if(Array.isArray(d.editLog))setEditLog(d.editLog);
+    if(d.lockedAsgn&&typeof d.lockedAsgn==='object')setLockedAsgn(normalizeDatedSlotMapsV155(d.lockedAsgn,normalizeSlotsForV155(d.slots||slots||SLOTS)));
+    if(d.lockedMonths&&typeof d.lockedMonths==='object')setLockedMonths(d.lockedMonths);
     if(d.y)setY(d.y);if(d.m)setM(d.m);
     setShiftUpdatedAt(new Date().toISOString()); // 復元＝新しい未公開版
     setShowHistory(false);
@@ -2774,11 +2809,11 @@ function App(){
   // 公開時点スナップショットを現在の編集画面へ反映せずに閲覧・印刷する。
   function viewSnapshot(snap){
     if(!snap||!snap.data)return;
-    exportPDF(snap.data,{snapshot:snap,mode:'view'});
+    exportPDF(snapshotPayloadForCurrentUnit(snap.data),{snapshot:snap,mode:'view'});
   }
   function printSnapshot(snap){
     if(!snap||!snap.data)return;
-    exportPDF(snap.data,{snapshot:snap,mode:'print',autoPrint:true});
+    exportPDF(snapshotPayloadForCurrentUnit(snap.data),{snapshot:snap,mode:'print',autoPrint:true});
   }
 
   // Supabase自動保存（requests）※shift_dataとは別タイマーで保存（互いに上書きしないように）
