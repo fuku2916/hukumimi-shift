@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v188';
+const APP_VERSION = 'v189';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -1427,6 +1427,12 @@ const LS_REQ='fukumimi_requests_v1'+_LSC+_LSU; // スタッフ申請データ（
 const ADMIN_PIN_KEY='fukumimi_admin_pin'+_LSC; // 管理者PINの端末キャッシュ（正はクラウド）
 function loadAdminPin(){try{return localStorage.getItem(ADMIN_PIN_KEY)||'';}catch(e){return '';}}
 function saveAdminPin(pin){try{if(pin)localStorage.setItem(ADMIN_PIN_KEY,pin);else localStorage.removeItem(ADMIN_PIN_KEY);}catch(e){}}
+// v189: 管理者「認証済み」フラグ。sessionStorage＝同じタブを開いている間だけ保持。
+//        職種切替（?unit=…付き再読込）は同一タブ内なので保持され、PINの入れ直しが不要になる。
+//        タブ（ブラウザ）を閉じると消えるので、次回は再度PIN入力。クリニックごとに分離(_LSC)。
+const ADMIN_OK_KEY='fukumimi_admin_ok'+_LSC;
+function loadAdminOk(){try{return sessionStorage.getItem(ADMIN_OK_KEY)==='1';}catch(e){return false;}}
+function saveAdminOk(v){try{if(v)sessionStorage.setItem(ADMIN_OK_KEY,'1');else sessionStorage.removeItem(ADMIN_OK_KEY);}catch(e){}}
 function loadLS(){try{const r=localStorage.getItem(LS_KEY);return r?JSON.parse(r):null;}catch(e){return null;}}
 function saveLS(d){try{localStorage.setItem(LS_KEY,JSON.stringify(d));}catch(e){}}
 function loadRequests(){try{const r=localStorage.getItem(LS_REQ);return r?JSON.parse(r):{};}catch(e){return {};}}
@@ -2022,7 +2028,11 @@ function App(){
   }
   // ── アプリモード ──
   // 更新リロード後にログイン中の画面を復元（sessionStorageに直前のセッションがあれば使う）
-  const [appMode,setAppMode]=useState(()=>{const r=loadResume();return (r&&r.appMode==='staff'&&r.staffMyId!=null)?'staff':'select';}); // 'select'|'admin'|'staff'
+  const [appMode,setAppMode]=useState(()=>{
+    // v189: 同じタブで管理者認証済みなら、職種切替の再読込後も管理者モードで復帰（PIN再入力不要）。
+    try{if(loadAdminOk())return 'admin';}catch(e){}
+    const r=loadResume();return (r&&r.appMode==='staff'&&r.staffMyId!=null)?'staff':'select';
+  }); // 'select'|'admin'|'staff'
   const [sbLoading,setSbLoading]=useState(false);
   const [sbStatus,setSbStatus]=useState(''); // ''|'ok'|'error'
   // 使用中に新しい版が公開されたら通知（入力中に勝手にリロードしないよう、バナーでタップ更新を促す）
@@ -5478,11 +5488,11 @@ ${bodyHtml}
                     <input type="password" inputMode="numeric" maxLength={4} autoComplete="new-password" autoCorrect="off" autoCapitalize="off" spellCheck={false}
                       value={adminPinInput}
                       onChange={e=>{setAdminPinErr('');setAdminPinInput(e.target.value.replace(/[^0-9]/g,'').slice(0,4));}}
-                      onKeyDown={e=>{if(e.key==='Enter'&&adminPinInput.length===4){if(adminPinInput===adminPin){setAppMode('admin');setAdminPinInput('');}else setAdminPinErr('PINが違います');}}}
+                      onKeyDown={e=>{if(e.key==='Enter'&&adminPinInput.length===4){if(adminPinInput===adminPin){saveAdminOk(true);setAppMode('admin');setAdminPinInput('');}else setAdminPinErr('PINが違います');}}}
                       placeholder="管理者PIN（4桁）"
                       style={{width:'100%',padding:'12px',border:'1.5px solid '+(adminPinErr?'#EF4444':'#93C5FD'),borderRadius:8,fontSize:22,textAlign:'center',letterSpacing:'0.4em',fontWeight:700,boxSizing:'border-box'}}/>
                     <button
-                      onClick={()=>{if(adminPinInput===adminPin){setAppMode('admin');setAdminPinInput('');}else setAdminPinErr('PINが違います');}}
+                      onClick={()=>{if(adminPinInput===adminPin){saveAdminOk(true);setAppMode('admin');setAdminPinInput('');}else setAdminPinErr('PINが違います');}}
                       disabled={adminPinInput.length!==4}
                       style={{width:'100%',padding:'12px',border:'none',borderRadius:8,background:adminPinInput.length===4?'#185FA5':'#CBD5E1',color:'#fff',cursor:adminPinInput.length===4?'pointer':'not-allowed',fontSize:16,fontWeight:700}}>
                       入室
@@ -5499,7 +5509,7 @@ ${bodyHtml}
                       placeholder="新しいPIN（4桁）"
                       style={{width:'100%',padding:'12px',border:'1.5px solid #93C5FD',borderRadius:8,fontSize:22,textAlign:'center',letterSpacing:'0.4em',fontWeight:700,boxSizing:'border-box'}}/>
                     <button
-                      onClick={async()=>{if(adminPinInput.length===4){const r=await saveAdminPinEverywhere(adminPinInput);if(r.ok){setAdminPinInput('');setAppMode('admin');}else alert(r.error||'管理者PINの保存に失敗しました');}}}
+                      onClick={async()=>{if(adminPinInput.length===4){const r=await saveAdminPinEverywhere(adminPinInput);if(r.ok){saveAdminOk(true);setAdminPinInput('');setAppMode('admin');}else alert(r.error||'管理者PINの保存に失敗しました');}}}
                       disabled={adminPinInput.length!==4}
                       style={{width:'100%',padding:'12px',border:'none',borderRadius:8,background:adminPinInput.length===4?'#185FA5':'#CBD5E1',color:'#fff',cursor:adminPinInput.length===4?'pointer':'not-allowed',fontSize:16,fontWeight:700}}>
                       設定して入室
@@ -6446,7 +6456,7 @@ ${bodyHtml}
           {/* v111: スマホでは左側だけ横スクロール。☰メニューボタンは右端固定にする */}
           <div className="admin-header-left-scroll" style={{display:'flex',alignItems:'center',flex:1,minWidth:0,overflowX:'auto',WebkitOverflowScrolling:'touch',scrollbarWidth:'none'}}>
           {/* ロゴ・ホーム */}
-          <button onClick={()=>{setAppMode('select');setAdminPinInput('');setAdminPinErr('');setOpenMenu(null);}}
+          <button onClick={()=>{saveAdminOk(false);setAppMode('select');setAdminPinInput('');setAdminPinErr('');setOpenMenu(null);}}
             style={{display:'flex',alignItems:'center',gap:4,padding:'4px 8px',border:'none',background:'none',cursor:'pointer',marginRight:6,flexShrink:0}}>
             <span style={{fontSize:20}}>🏥</span>
             <span style={{fontWeight:700,fontSize:'var(--fs-menu)',color:K.text,whiteSpace:'nowrap'}}>福耳会{CLINIC_LABEL?'｜'+CLINIC_LABEL:''}{APP_UNIT_LABEL?'｜'+APP_UNIT_LABEL:''}</span>
