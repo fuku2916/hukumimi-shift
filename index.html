@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v186';
+const APP_VERSION = 'v187';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -1152,7 +1152,7 @@ function defaultWorkClinics(){return APP_CLINIC?[APP_CLINIC]:['ekimae','iguchi',
 function normalizeWorkClinics(v){const a=Array.isArray(v)?v:[];const out=a.filter(x=>CLINIC_KEYS.includes(x));return out.length?out:defaultWorkClinics();}
 function clinicFullLabel(k){return CLINIC_FULL_LABELS[k]||CLINIC_LABELS[k]||k;}
 // data.shared に置く共通キー（クリニック内の全職種で共有）
-const SHARED_KEYS=['clinicName','slots','newSlotCounter','manualClosedDays','surgeryCalUrl','surgeryCalUrlUpdatedAt','outpatientClosures','outpatientClosuresUpdatedAt'];
+const SHARED_KEYS=['clinicName','slots','newSlotCounter','manualClosedDays','surgeryCalUrl','surgeryCalUrlUpdatedAt','outpatientClosures','outpatientClosuresUpdatedAt','outpatientDoctorPresence'];
 try{ document.title='シフト管理'+(APP_UNIT_LABEL?'（'+APP_UNIT_LABEL+'）':'')+' '+APP_VERSION; }catch(e){}
 // ================================================================
 
@@ -1533,16 +1533,40 @@ function slotActiveIdsForCalendar(slot,da,dExcl,dt){
   const slotOffIds=Object.entries(dt||{}).filter(([,v])=>['off','paid'].includes(v.type)).map(([sid])=>parseInt(sid));
   return allIds.filter(sid=>!exclIds.includes(sid)&&!slotOffIds.includes(sid));
 }
-function outpatientAutoMarkForCalendar(closures,dk,group,dayClosed,da,dExcl,dt){
+// v187: 医師の在室情報（診察室ごとに担当医が割り当てられているか）を算出して共有する。
+//        ドクター画面だけでなくナース／クラーク画面でも「医師名があれば診察あり(○)」を反映するため、
+//        ドクターのシフト公開時にこのマップを shared に載せ、他職種はこれを読んで表示に使う。
+// 形: { "YYYY-MM-DD": { "<slotId>": true } }  ＝ その日その診察室に有効な担当医が1人以上いる
+function computeDoctorPresence(asgnObj,slotsObj,manualExclObj,tmpsObj,dateList){
+  const out={};
+  (dateList||[]).forEach(d=>{
+    const dk=tdk(d), dow=d.getDay();
+    const da=asgnObj[dk]||{}, dExcl=manualExclObj[dk]||{}, dt=tmpsObj[dk]||{};
+    (slotsObj[dow]||[]).forEach(slot=>{
+      if(!isRoomSplitOutSlot(slot))return;
+      if(slotActiveIdsForCalendar(slot,da,dExcl,dt).length>0){
+        (out[dk]=out[dk]||{})[slot.id]=true;
+      }
+    });
+  });
+  return out;
+}
+function outpatientAutoMarkForCalendar(closures,dk,group,dayClosed,da,dExcl,dt,presence){
   if(!group||group.kind!=='outRooms')return '';
   return (group.slots||[]).map(slot=>{
     const rn=slot.roomNo||1;
-    const activeDoctorAssigned=(APP_UNIT==='doctor' && slotActiveIdsForCalendar(slot,da,dExcl,dt).length>0);
     // v163: ドクター画面の外来(1)/(2)表示は、配属中の医師がいる診は必ず「○」にする。
     // 旧休診フラグが残っていても、実際に医師名が表示されているのに見出しだけ「ー」になる矛盾を防ぐ。
-    if(APP_UNIT==='doctor')return '('+rn+')'+(activeDoctorAssigned?'○':'ー');
+    if(APP_UNIT==='doctor'){
+      const activeDoctorAssigned=slotActiveIdsForCalendar(slot,da,dExcl,dt).length>0;
+      return '('+rn+')'+(activeDoctorAssigned?'○':'ー');
+    }
+    // v187: ナース／クラーク画面でも「担当医が割り当てられている診察室」は自動的に○にする。
+    //        医師名（在室）は休診(ー)設定より優先。医師がいなくなれば presence が消え、
+    //        自動的に元の○/ー手動設定に戻る（手動設定のデータ自体は書き換えないので安全）。
+    const doctorPresent=!!(presence&&presence[dk]&&presence[dk][slot.id]);
     const manualClosed=outpatientRoomClosed(closures,dk,slot.id,1,dayClosed);
-    return '('+rn+')'+(manualClosed?'ー':'○');
+    return '('+rn+')'+((doctorPresent||!manualClosed)?'○':'ー');
   }).join('');
 }
 
@@ -2086,6 +2110,7 @@ function App(){
           if(sd.manualClosedDays)setManualClosedDays(sd.manualClosedDays);
           if(sd.newSlotCounter)setNewSlotCounter(sd.newSlotCounter);
           if(sd.outpatientClosures&&typeof sd.outpatientClosures==='object')setOutpatientClosures(sd.outpatientClosures);
+          if(sd.outpatientDoctorPresence&&typeof sd.outpatientDoctorPresence==='object')setOutpatientDoctorPresence(sd.outpatientDoctorPresence);
           if(sd.outpatientClosuresUpdatedAt!==undefined)setOutpatientClosuresUpdatedAt(sd.outpatientClosuresUpdatedAt||'');
         }
         // v135: 履歴は現在の編集中シフトとは別物なので、cloudWins判定に関係なく常にクラウドから読む。
@@ -2101,6 +2126,7 @@ function App(){
           if(sd.manualExclusions)setManualExclusions(sd.manualExclusions);
           if(sd.manualClosedDays)setManualClosedDays(sd.manualClosedDays);
           if(sd.outpatientClosures&&typeof sd.outpatientClosures==='object')setOutpatientClosures(sd.outpatientClosures);
+          if(sd.outpatientDoctorPresence&&typeof sd.outpatientDoctorPresence==='object')setOutpatientDoctorPresence(sd.outpatientDoctorPresence);
           if(sd.outpatientClosuresUpdatedAt!==undefined)setOutpatientClosuresUpdatedAt(sd.outpatientClosuresUpdatedAt||'');
           if(sd.baseShift)setBaseShift(sd.baseShift);
           if(sd.paidLeave)setPaidLeave(sd.paidLeave);
@@ -2148,6 +2174,7 @@ function App(){
           if(sd.tmps)setTmps(sd.tmps);
           if(sd.manualClosedDays)setManualClosedDays(sd.manualClosedDays);
           if(sd.outpatientClosures&&typeof sd.outpatientClosures==='object')setOutpatientClosures(sd.outpatientClosures);
+          if(sd.outpatientDoctorPresence&&typeof sd.outpatientDoctorPresence==='object')setOutpatientDoctorPresence(sd.outpatientDoctorPresence);
           if(sd.outpatientClosuresUpdatedAt!==undefined)setOutpatientClosuresUpdatedAt(sd.outpatientClosuresUpdatedAt||'');
           if(sd.paidLeave)setPaidLeave(sd.paidLeave);
           // 人員不足の表示に必要（必要人数・除外）
@@ -2180,6 +2207,7 @@ function App(){
         setTmps(sd.tmps||{});
         setPaidLeave(sd.paidLeave||{});
         if(sd.outpatientClosures&&typeof sd.outpatientClosures==='object')setOutpatientClosures(sd.outpatientClosures);
+          if(sd.outpatientDoctorPresence&&typeof sd.outpatientDoctorPresence==='object')setOutpatientDoctorPresence(sd.outpatientDoctorPresence);
         if(sd.outpatientClosuresUpdatedAt!==undefined)setOutpatientClosuresUpdatedAt(sd.outpatientClosuresUpdatedAt||'');
         if(Object.prototype.hasOwnProperty.call(sd,'surgeryCalUrl')){
           const cu=(sd.surgeryCalUrl||'').toString();
@@ -2255,6 +2283,8 @@ function App(){
   // ── 外来休診（診察室ごとの開閉）── v129/v130
   const [outpatientClosures,setOutpatientClosures]=useState(()=>saved?.outpatientClosures||{});
   const [outpatientClosuresUpdatedAt,setOutpatientClosuresUpdatedAt]=useState(()=>saved?.outpatientClosuresUpdatedAt||'');
+  // v187: 医師の在室マップ（診察室ごとに担当医がいるか）。ドクター画面が算出し公開時に共有、他職種は読むだけ。
+  const [outpatientDoctorPresence,setOutpatientDoctorPresence]=useState(()=>saved?.outpatientDoctorPresence||{});
   const [showOutpatientClosurePanel,setShowOutpatientClosurePanel]=useState(false);
   const [savingOutpatientClosures,setSavingOutpatientClosures]=useState(false);
   const [showTimecardCorrectionPanel,setShowTimecardCorrectionPanel]=useState(false); // 管理画面上部の打刻修正マーク
@@ -2557,7 +2587,7 @@ function App(){
   // ── 自動保存 ──
   // ローカル自動保存
   useEffect(()=>{
-    saveLS({y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,outpatientClosures,outpatientClosuresUpdatedAt});
+    saveLS({y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,outpatientClosures,outpatientClosuresUpdatedAt,outpatientDoctorPresence});
   },[y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,outpatientClosures,outpatientClosuresUpdatedAt]);
 
   // ★ v108: シフト本体は「下書き保存」と「公開」を分離する。
@@ -2572,7 +2602,7 @@ function App(){
   const [shiftHistory,setShiftHistory]=useState([]); // [{at,made,data}]（クラウドから取得）
   const [showHistory,setShowHistory]=useState(false);
   const [historyLoading,setHistoryLoading]=useState(false);
-  const FULL_RESTORE_KEYS=['y','m','clinicId','clinicLabel','unit','unitLabel','staff','asgn','tmps','weeklyReq','monthlyReq','manualExclusions','manualClosedDays','baseShift','slots','newSlotCounter','paidLeave','shiftUpdatedAt','editLog','lockedAsgn','lockedMonths','surgeryFlags','surgeryCalSnapshotAt','outpatientClosures','outpatientClosuresUpdatedAt'];
+  const FULL_RESTORE_KEYS=['y','m','clinicId','clinicLabel','unit','unitLabel','staff','asgn','tmps','weeklyReq','monthlyReq','manualExclusions','manualClosedDays','baseShift','slots','newSlotCounter','paidLeave','shiftUpdatedAt','editLog','lockedAsgn','lockedMonths','surgeryFlags','surgeryCalSnapshotAt','outpatientClosures','outpatientClosuresUpdatedAt','outpatientDoctorPresence'];
   function clonePlain(obj){try{return JSON.parse(JSON.stringify(obj));}catch(e){return obj;}}
   function currentShiftPayload(extra){
     // v170: 公開履歴から完全復元できるよう、復元に必要な全 state を固定リストで保存する。
@@ -2601,6 +2631,7 @@ function App(){
       surgeryCalSnapshotAt:surgeryCalUpdatedAt||'',
       outpatientClosures:clonePlain(outpatientClosures||{}),
       outpatientClosuresUpdatedAt:outpatientClosuresUpdatedAt||'',
+      outpatientDoctorPresence:clonePlain(outpatientDoctorPresence||{}),
       ...(extra||{})
     };
     return payload;
@@ -2753,6 +2784,7 @@ function App(){
     if(d.manualExclusions)setManualExclusions(d.manualExclusions);
     if(d.manualClosedDays)setManualClosedDays(d.manualClosedDays);
     if(d.outpatientClosures&&typeof d.outpatientClosures==='object')setOutpatientClosures(d.outpatientClosures);
+    if(d.outpatientDoctorPresence&&typeof d.outpatientDoctorPresence==='object')setOutpatientDoctorPresence(d.outpatientDoctorPresence);
     if(d.outpatientClosuresUpdatedAt!==undefined)setOutpatientClosuresUpdatedAt(d.outpatientClosuresUpdatedAt||'');
     if(d.baseShift)setBaseShift(d.baseShift);
     if(d.paidLeave)setPaidLeave(d.paidLeave);
@@ -3040,6 +3072,14 @@ function App(){
   }
 
   const dates=useMemo(()=>getWorkDates(y,m),[y,m]);
+  // v187: ドクター画面では、割り当て中の担当医から「医師在室マップ」を自動算出して保持する。
+  //        これがシフト公開時に shared へ載り、ナース／クラーク画面の外来○/ー表示に反映される。
+  //        医師を外せばマップから消えるので、他職種の表示も自動的に元の手動設定へ戻る。
+  useEffect(()=>{
+    if(APP_UNIT!=='doctor')return;
+    const next=computeDoctorPresence(asgn||{},slots||{},manualExclusions||{},tmps||{},dates||[]);
+    setOutpatientDoctorPresence(prev=>JSON.stringify(prev||{})===JSON.stringify(next)?prev:next);
+  },[asgn,slots,manualExclusions,tmps,dates]);
   const weeks=useMemo(()=>groupByWeek(dates),[dates]);
 
   // ── 当月の必要コマ数リスト（パターン適用後の空き枠算出用）──
@@ -3181,6 +3221,7 @@ function App(){
         if(d.manualExclusions)setManualExclusions(d.manualExclusions);
         if(d.manualClosedDays)setManualClosedDays(d.manualClosedDays);
         if(d.outpatientClosures&&typeof d.outpatientClosures==='object')setOutpatientClosures(d.outpatientClosures);
+    if(d.outpatientDoctorPresence&&typeof d.outpatientDoctorPresence==='object')setOutpatientDoctorPresence(d.outpatientDoctorPresence);
         if(d.outpatientClosuresUpdatedAt!==undefined)setOutpatientClosuresUpdatedAt(d.outpatientClosuresUpdatedAt||'');
         if(d.baseShift)setBaseShift(d.baseShift);
         // ── CL-2形式ベースシフトJSON（名前・ラベルベース）の変換取込 ──
@@ -3267,6 +3308,7 @@ function App(){
     const holidaysPDF=isSnapshot?(getJapaneseHolidays(py)||{}):holidays;
     const surgeryFlagsPDF=isSnapshot?(src.surgeryFlags||{}):surgeryFlags;
     const outpatientClosuresPDF=isSnapshot?(src.outpatientClosures||{}):outpatientClosures;
+    const outpatientDoctorPresencePDF=isSnapshot?(src.outpatientDoctorPresence||{}):outpatientDoctorPresence;
     const hasSurgerySnapshot=isSnapshot?!!src.surgeryFlags:!!surgeryCalUrl;
     const shiftMade=src.shiftUpdatedAt||shiftUpdatedAt||'';
     const snap=s=>s||{};
@@ -3330,7 +3372,7 @@ function App(){
             const slotBg=lbl2.includes('夜')?'#F3F0FF':lbl2.includes('昼')||lbl2.includes('午後')?'#FFF7ED':'#EFF6FF';
             const slotBd=lbl2.includes('夜')?'#7C3AED':lbl2.includes('昼')||lbl2.includes('午後')?'#C05C00':'#1D6FCC';
             const surgMark=(!roomGroup&&slot.type==='surg'&&hasSurgerySnapshot)?surgeryMarkForSlot(surgeryFlagsPDF,dk,slot):'';
-            const outMark=roomGroup?outpatientAutoMarkForCalendar(outpatientClosuresPDF,dk,group,!!isClosed2,da,dExcl,dt):(isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosuresPDF,dk,slot,req,!!isClosed2):'');
+            const outMark=roomGroup?outpatientAutoMarkForCalendar(outpatientClosuresPDF,dk,group,!!isClosed2,da,dExcl,dt,outpatientDoctorPresencePDF):(isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosuresPDF,dk,slot,req,!!isClosed2):'');
             const markHtml=(outMark?`<span class="out-mark ok">${outMark}</span>`:'')+(surgMark?`<span class="surg-mark ${surgMark==='○'?'on':'off'}">${surgMark}</span>`:'');
             const badgeHtml=(sid,sl)=>{
               const st=staffPDF.find(x=>String(x.id)===String(sid));if(!st)return '';
@@ -5831,7 +5873,7 @@ ${bodyHtml}
                                         return getReq(dk,sl.id)>0&&ids.length<getReq(dk,sl.id);
                                       })||slot;
                                       const baseLabel=roomGroup?group.label:slot.label;
-                                      const outMark=roomGroup?outpatientAutoMarkForCalendar(outpatientClosures,dk,group,staffIsClosedDay(dk),da,manualExclusions[dk]||{},dt):(isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosures,dk,slot,req,staffIsClosedDay(dk)):'');
+                                      const outMark=roomGroup?outpatientAutoMarkForCalendar(outpatientClosures,dk,group,staffIsClosedDay(dk),da,manualExclusions[dk]||{},dt,outpatientDoctorPresence):(isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosures,dk,slot,req,staffIsClosedDay(dk)):'');
                                       const surgMark=(!roomGroup&&slot.type==='surg')?surgeryMarkForSlot(surgeryFlags,dk,slot):'';
                                       const labelText=roomGroup?baseLabel:staffCompactSlotLabel(slot);
                                       return(
@@ -6966,7 +7008,7 @@ ${bodyHtml}
                                     const baseActive=uniqIds(gSlots.flatMap(sl=>(isLocked?(lockedAsgn[dk]?.[sl.id]||[]):[])));
                                     const removedSinceLock=isLocked?baseActive.filter(id=>!activeIds.includes(id)&&!allIds.includes(id)):[];
                                     const label=roomGroup?group.label:slot.label;
-                                    const outMark=roomGroup?outpatientAutoMarkForCalendar(outpatientClosures,dk,group,!!isClosedDay(dk),da,dExcl,dt):(isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosures,dk,slot,req,!!isClosedDay(dk)):'' );
+                                    const outMark=roomGroup?outpatientAutoMarkForCalendar(outpatientClosures,dk,group,!!isClosedDay(dk),da,dExcl,dt,outpatientDoctorPresence):(isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosures,dk,slot,req,!!isClosedDay(dk)):'' );
                                     const renderBadge=(sid,sl)=>{
                                       const s=staff.find(x=>x.id===sid);
                                       if(!s)return null;
