@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v187';
+const APP_VERSION = 'v188';
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -6469,6 +6469,26 @@ ${bodyHtml}
               style={{marginRight:8,padding:'4px 8px',borderRadius:6,border:K.bd,background:K.bg,color:K.text,
                 fontSize:'var(--fs-menu)',fontWeight:700,cursor:'pointer',flexShrink:0}}>
               {CLINIC_KEYS.map(c=>(<option key={c} value={c}>🏥 {CLINIC_LABELS[c]}</option>))}
+            </select>
+          )}
+
+          {/* v188: 職種切替セレクタ（管理画面のみ）。選ぶと ?clinic=<院>&unit=<職種> 付きで再読込し、その職種のシフト表を開く。
+             ・クリニック切替と同じ挙動（現在のクリニックは維持したまま職種だけ切替）
+             ・localStorageに保持しつつ URLの?unit=を明示するのでURL優先
+             ・未保存の編集が消えないよう切替前に確認 */}
+          {APP_UNIT&&(
+            <select value={APP_UNIT}
+              title="職種を切り替え（ページを再読込します）"
+              onChange={e=>{
+                const u=e.target.value;
+                if(!u||u===APP_UNIT)return;
+                if(!window.confirm('「'+(UNIT_LABELS[u]||u)+'」に切り替えます。\n保存していない編集は失われます。\n先に「下書き保存」または「公開」を済ませることをおすすめします。\n切り替えてよろしいですか？')){return;}
+                try{localStorage.setItem('fukumimi_unit',u);}catch(_){}
+                location.replace(location.pathname+'?'+(APP_CLINIC?'clinic='+APP_CLINIC+'&':'')+'unit='+u);
+              }}
+              style={{marginRight:8,padding:'4px 8px',borderRadius:6,border:K.bd,background:K.bg,color:K.text,
+                fontSize:'var(--fs-menu)',fontWeight:700,cursor:'pointer',flexShrink:0}}>
+              {['doctor','nurse','clerk'].map(u=>(<option key={u} value={u}>👤 {UNIT_LABELS[u]}</option>))}
             </select>
           )}
 
