@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v189';
+const APP_VERSION = 'v190'; // v190: クラウド保存(SB.set等)を「既存行を読めない限り書き込まない」方式に修正し、他職種/shared巻き込み消去を防止
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -1256,11 +1256,12 @@ const SB={
     const rid=this._rowId('shift_data'); const clinic=CLINIC_MODE;
     for(let a=0;a<2;a++){
       try{
-        let all={};
-        try{
-          const cur=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
-          if(cur.ok){const j=await cur.json();const ex=j[0]?.data;if(ex&&typeof ex==='object')all={...ex};}
-        }catch(_){}
+        // ★安全策：既存行を読めない限り書き込まない（下書き保存で他職種/sharedを消さない）
+        let all={}; let readOk=false;
+        const cur=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        if(cur.status===401&&a===0&&await sbReauth())continue;
+        if(cur.ok){readOk=true;const j=await cur.json();const ex=j[0]?.data;if(ex&&typeof ex==='object')all={...ex};}
+        if(!readOk){ if(a===0)continue; return false; }
         if(clinic){
           const drafts={...(all.drafts&&typeof all.drafts==='object'?all.drafts:{})};
           drafts[u]=data;
@@ -1277,7 +1278,7 @@ const SB={
         });
         if(r.status===401&&a===0&&await sbReauth())continue;
         return r.ok;
-      }catch(e){return false;}
+      }catch(e){ if(a===0)continue; return false; }
     }
     return false;
   },
@@ -1307,11 +1308,12 @@ const SB={
     const rid=this._rowId('shift_data'); const clinic=CLINIC_MODE;
     for(let a=0;a<2;a++){
       try{
-        let all={};
-        try{
-          const cur=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
-          if(cur.ok){const j=await cur.json();const ex=j[0]?.data;if(ex&&typeof ex==='object')all={...ex};}
-        }catch(_){}
+        // ★安全策：既存行を読めない限り書き込まない（PIN保存で診療枠や他職種を消さない）
+        let all={}; let readOk=false;
+        const cur=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        if(cur.status===401&&a===0&&await sbReauth())continue;
+        if(cur.ok){readOk=true;const j=await cur.json();const ex=j[0]?.data;if(ex&&typeof ex==='object')all={...ex};}
+        if(!readOk){ if(a===0)continue; return false; }
         if(clinic){
           const shared={...(all.shared&&typeof all.shared==='object'?all.shared:{})};
           shared.adminPin=p;
@@ -1328,7 +1330,7 @@ const SB={
         });
         if(r.status===401&&a===0&&await sbReauth())continue;
         return r.ok;
-      }catch(e){return false;}
+      }catch(e){ if(a===0)continue; return false; }
     }
     return false;
   },
@@ -1357,11 +1359,12 @@ const SB={
     const rid=this._rowId('shift_data'); const clinic=CLINIC_MODE;
     for(let a=0;a<2;a++){
       try{
-        let all={};
-        try{
-          const cur=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
-          if(cur.ok){const j=await cur.json();const ex=j[0]?.data;if(ex&&typeof ex==='object')all={...ex};}
-        }catch(_){}
+        // ★安全策：既存行を読めない限り書き込まない
+        let all={}; let readOk=false;
+        const cur=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        if(cur.status===401&&a===0&&await sbReauth())continue;
+        if(cur.ok){readOk=true;const j=await cur.json();const ex=j[0]?.data;if(ex&&typeof ex==='object')all={...ex};}
+        if(!readOk){ if(a===0)continue; return false; }
         if(clinic){
           const shared={...(all.shared&&typeof all.shared==='object'?all.shared:{})};
           shared.surgeryCalUrl=v;
@@ -1378,7 +1381,7 @@ const SB={
         });
         if(r.status===401&&a===0&&await sbReauth())continue;
         return r.ok;
-      }catch(e){return false;}
+      }catch(e){ if(a===0)continue; return false; }
     }
     return false;
   },
@@ -1388,14 +1391,21 @@ const SB={
     for(let a=0;a<2;a++){
       try{
         // 既存行を読み、他職種・他のsharedキーを保ったまま、該当ぶんだけ更新
-        let all={};
-        try{
-          const cur=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
-          if(cur.ok){const j=await cur.json();const ex=j[0]?.data;if(ex&&typeof ex==='object'){
+        // ★安全策：既存行の読み取りが成功しない限り書き込まない。
+        //   読み取り失敗時に書くと all={} を丸ごとPATCHして他職種/sharedを消してしまうため。
+        let all={}; let readOk=false;
+        const cur=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        if(cur.status===401&&a===0&&await sbReauth())continue;
+        if(cur.ok){
+          readOk=true;
+          const j=await cur.json();const ex=j[0]?.data;
+          if(ex&&typeof ex==='object'){
             if(clinic){ all={...ex}; }
             else { ['clerk','nurse','doctor'].forEach(k=>{if(ex[k]!==undefined)all[k]=ex[k];}); if(ex._drafts!==undefined)all._drafts=ex._drafts; if(ex.drafts!==undefined)all.drafts=ex.drafts; if(ex._adminPin!==undefined)all._adminPin=ex._adminPin; if(ex.adminPin!==undefined)all.adminPin=ex.adminPin; if(ex.surgeryCalUrl!==undefined)all.surgeryCalUrl=ex.surgeryCalUrl; if(ex.surgeryCalUrlUpdatedAt!==undefined)all.surgeryCalUrlUpdatedAt=ex.surgeryCalUrlUpdatedAt; if(ex.outpatientClosures!==undefined)all.outpatientClosures=ex.outpatientClosures; if(ex.outpatientClosuresUpdatedAt!==undefined)all.outpatientClosuresUpdatedAt=ex.outpatientClosuresUpdatedAt; }
-          }}
-        }catch(_){}
+          }
+        }
+        // 読み取りに失敗＝クラウドの現状が不明。書くと他職種/sharedを巻き込んで消す恐れ→中断。
+        if(!readOk){ if(a===0)continue; return false; }
         if(clinic){
           // 診療枠・休診日など共通キーは data.shared に、それ以外は data[職種] に格納
           const shared={...(all.shared&&typeof all.shared==='object'?all.shared:{})};
@@ -1413,7 +1423,7 @@ const SB={
         });
         if(r.status===401&&a===0&&await sbReauth())continue;
         return r.ok;
-      }catch(e){return false;}
+      }catch(e){ if(a===0)continue; return false; }
     }
     return false;
   }
