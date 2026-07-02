@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v190'; // v190: クラウド保存(SB.set等)を「既存行を読めない限り書き込まない」方式に修正し、他職種/shared巻き込み消去を防止
+const APP_VERSION = 'v191'; // v190: クラウド保存(SB.set等)を「既存行を読めない限り書き込まない」方式に修正し、他職種/shared巻き込み消去を防止
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -3164,65 +3164,6 @@ function App(){
     }else{
       alert('全データをファイル保存しました。');
     }
-  }
-
-  // ── スタッフポータル用データ出力 ──
-  async function exportForStaff(){
-    // PINは数値として保存（セキュリティ上ハッシュが理想だがローカル運用なので平文で十分）
-    const data={version:2,type:'shift_for_staff',exportedAt:new Date().toISOString(),
-      staff,slots,asgn,tmps,paidLeave,manualClosedDays,y,m};
-    const json=JSON.stringify(data,null,2);
-    const fileName='shift_data_'+(APP_UNIT_LABEL?APP_UNIT_LABEL+'_':'')+y+'_'+String(m).padStart(2,'0')+'.json';
-    if(window.showSaveFilePicker){
-      try{const fh=await window.showSaveFilePicker({suggestedName:fileName,types:[{description:'JSON',accept:{'application/json':['.json']}}]});const w=await fh.createWritable();await w.write(json);await w.close();return;}catch(e){if(e.name==='AbortError')return;}
-    }
-    const blob=new Blob([json],{type:'application/json'});
-    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fileName;a.click();URL.revokeObjectURL(a.href);
-  }
-
-  // ── スタッフ申請ファイルの取り込み ──
-  function importStaffRequests(e){
-    const file=e.target.files?.[0];if(!file)return;
-    const reader=new FileReader();
-    reader.onload=ev=>{
-      try{
-        const d=JSON.parse(ev.target.result);
-        if(d.type!=='staff_requests')throw new Error('スタッフ申請ファイルではありません');
-        const sid=d.staffId;
-        const sname=d.staffName||'不明';
-        const reqs=d.requests||{};
-        const reqList=Object.entries(reqs);
-        if(reqList.length===0){alert(sname+'さんの申請データは空です。');return;}
-
-        // 申請内容をtmpsとpaidLeaveに反映
-        let appliedCount=0;
-        const typeToTmpType={paid_full:'paid',paid_am:'paid_am',paid_pm:'paid_pm',off:'off'};
-        const typeToUnit={paid_full:'full',paid_am:'am',paid_pm:'pm'};
-
-        const newTmps={...tmps};
-        const newPL={...paidLeave};
-
-        reqList.forEach(([dk,req])=>{
-          const ttype=typeToTmpType[req.type];
-          if(!ttype)return;
-          // tmpsに追加
-          newTmps[dk]={...(newTmps[dk]||{})};
-          newTmps[dk][sid]={type:ttype,note:'',unit:typeToUnit[req.type]||''};
-          // 有給の場合はpaidLeave履歴にも追加
-          if(req.type==='paid_full'||req.type==='paid_am'||req.type==='paid_pm'){
-            const cur=newPL[sid]||{granted:0,history:[]};
-            const filtered=(cur.history||[]).filter(r=>r.dk!==dk);
-            const entry={dk,unit:typeToUnit[req.type],appliedAt:req.appliedAt||new Date().toISOString()};
-            newPL[sid]={...cur,history:[...filtered,entry]};
-          }
-          appliedCount++;
-        });
-        setTmps(newTmps);
-        setPaidLeave(newPL);
-        alert('✓ '+sname+'さんの申請を'+appliedCount+'件取り込みました。\nシフト表と有給残日数に反映されています。');
-      }catch(err){alert('取り込みに失敗しました：'+err.message);}
-    };
-    reader.readAsText(file);e.target.value='';
   }
 
   // ── データ読み込み ──
