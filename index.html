@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v191'; // v190: クラウド保存(SB.set等)を「既存行を読めない限り書き込まない」方式に修正し、他職種/shared巻き込み消去を防止
+const APP_VERSION = 'v192'; // v192: 休診日の裏に残る配置を全集計から除外（コマ数mcnt・労働時間dayHours・個人別PDF・達成レポート・労働時間パネル・条件チェック）。表示の裏にデータを残す設計は維持
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -800,6 +800,9 @@ function slotHours(dow,slotId,slotsState){
 var STAFF_OBJ_LOOKUP={};
 // 曜日→現在の診療枠 の参照表（通し手術の判定で「今あるコマ」を見るため。Appが更新する）
 var SLOTS_BY_DOW={};
+// v192: 休診日判定の参照（Appが描画ごとに同期）。休診日の裏に残る配置を集計から除外するために使う。
+// 未同期の間は「休診なし」として従来どおり動く（安全側のデフォルト）。
+var IS_CLOSED_DK=function(){return false;};
 // 実労働時間の計算：拘束時間（最早出勤〜退勤）から、6時間以上なら休憩1時間を引く
 // ・複数コマの重複は通し時間で計算（二重計上しない）
 // ・「○時まで」の退勤時刻で終わりを打ち切る
@@ -814,6 +817,8 @@ function daySpanHours(ranges, leaveLimitMin){
   return span/60;
 }
 function dayHours(dk,staffId,asgn,excl,slotsState,staffArr){
+  // v192: 休診日は「シフト表示の裏に配置が残っていても」労働時間に数えない
+  if(IS_CLOSED_DK(dk))return 0;
   const d=new Date(dk),dow=d.getDay(),da=asgn[dk]||{};
   const src=slotsState||SLOTS;
   const ranges=[];
@@ -3078,6 +3083,8 @@ function App(){
     if(manualClosedDays[dk]===true)  return true;  // 手動で休診設定
     return !!holidays[dk];                          // 祝日は自動休診
   }
+  // v192: dayHours等（React外の計算関数）から休診判定を参照できるよう描画ごとに同期
+  IS_CLOSED_DK=isClosedDay;
   function toggleClosedDay(dk){
     const cur=isClosedDay(dk);
     const isHoliday=!!holidays[dk];
@@ -3129,6 +3136,7 @@ function App(){
     const c={};staff.forEach(s=>{c[s.id]=0;});
     dates.forEach(d=>{
       const dk=tdk(d);
+      if(isClosedDay(dk))return; // v192: 休診日の裏に残る配置はコマ数に数えない
       Object.entries(asgn[dk]||{}).forEach(([slotId,ids])=>{
         ids.forEach(sid=>{
           if(!(manualExclusions[dk]?.[slotId]||[]).includes(sid)){c[sid]=(c[sid]||0)+1;}
@@ -3136,7 +3144,7 @@ function App(){
       });
     });
     return c;
-  },[asgn,dates,staff,manualExclusions]);
+  },[asgn,dates,staff,manualExclusions,manualClosedDays,holidays]); // v192: 休診切替でも再計算
 
   function saveKey(){
     const k=keyInput.trim();
@@ -3405,6 +3413,8 @@ ${snapLine}
       const cells=allDates.map((d,di)=>{
         const dk=tdk(d),dow=d.getDay(),da=asgn[dk]||{},dExcl=manualExclusions[dk]||{},dt=tmps[dk]||{};
         const isSat=dow===6,isWS=mondayIdxs.includes(di),ec=(isSat?'sat-c':'')+(isWS?' week-sep':'');
+        // v192: 休診日は裏に残る配置を印字せず「休診」と表示（全体カレンダーPDFと表示を統一）
+        if(isClosedDay(dk))return `<td class="cell-off${isSat?' sat-c':''}${isWS?' week-sep':''}"><span class="off-mark" style="color:#991B1B">休診</span></td>`;
         if(['off','paid','paid_am','paid_pm'].includes(dt[s.id]?.type||dt[String(s.id)]?.type)){const lbl=(dt[String(s.id)]||dt[s.id])?.type==='paid'?'有給':dt[s.id]?.type==='paid_am'?'有(午前)':dt[s.id]?.type==='paid_pm'?'有(午後)':'休';return `<td class="cell-off${isSat?' sat-c':''}${isWS?' week-sep':''}"><span class="off-mark">${lbl}</span></td>`;}
         const assigned=(slots[dow]||[]).filter(slot=>{
           const ids=(da[slot.id]||[]).filter(sid=>!(dExcl[slot.id]||[]).includes(sid));
@@ -3493,7 +3503,9 @@ td.cell-off{background:#fff}
         // 月間総時間とコマ数
         const totalH=monthHours(s.id,dates,asgn,manualExclusions,slots);
         const totalSlots=dates.reduce((sum,d)=>{
-          const dk=tdk(d),dayAsgn=asgn[dk]||{},dayExcl=manualExclusions[dk]||{};
+          const dk=tdk(d);
+          if(isClosedDay(dk))return sum; // v192: 休診日の裏配置は数えない
+          const dayAsgn=asgn[dk]||{},dayExcl=manualExclusions[dk]||{};
           return sum+Object.entries(dayAsgn).reduce((s2,[slotId,ids])=>
             s2+((ids||[]).filter(sid=>sid===s.id&&!(dayExcl[slotId]||[]).includes(sid)).length),0);
         },0);
@@ -8663,6 +8675,7 @@ function StaffCheckPanel({staff,dates,asgn,manualExclusions,tmps,slots,weeks,y,m
   const clinicDays=wk=>wk.filter(d=>(slots[d.getDay()]||[]).length>0 && !isClosed(tdk(d))).length;
   function buildDay(s,d){
     const dk=tdk(d),dow=d.getDay(),da=asgn[dk]||{},dExcl=manualExclusions[dk]||{};
+    if(isClosed(dk))return null; // v192: 休診日の裏配置はチェック・集計の対象外
     const tc=tmps[dk]?.[String(s.id)];
     if(tc&&['off','paid'].includes(tc.type))return null; // 終日休/有給
     const assigned=(slots[dow]||[]).filter(slot=>{
@@ -8815,7 +8828,9 @@ function HoursPanel({staff,weeks,dates,asgn,manualExclusions,slots,onClose,onAut
     const whs=weeks.map(wk=>weekHours(s.id,wk,asgn,manualExclusions,slots));
     const total=monthHours(s.id,dates,asgn,manualExclusions,slots);
     const slots_cnt=dates.reduce((sum,d)=>{
-      const dk=tdk(d),da=asgn[dk]||{},dExcl=manualExclusions[dk]||{};
+      const dk=tdk(d);
+      if(IS_CLOSED_DK(dk))return sum; // v192: 休診日の裏配置は数えない
+      const da=asgn[dk]||{},dExcl=manualExclusions[dk]||{};
       return sum+Object.entries(da).reduce((s2,[slotId,ids])=>
         s2+((ids||[]).filter(sid=>sid===s.id&&!(dExcl[slotId]||[]).includes(sid)).length),0);
     },0);
