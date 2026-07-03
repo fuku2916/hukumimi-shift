@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v192'; // v192: 休診日の裏に残る配置を全集計から除外（コマ数mcnt・労働時間dayHours・個人別PDF・達成レポート・労働時間パネル・条件チェック）。表示の裏にデータを残す設計は維持
+const APP_VERSION = 'v193'; // v193: 勤務時間・コマ数集計をカレンダー表示と同一ルールに統一（休み希望/有給を除外・通し手術キャップをv107ルールに・出勤開始条件を反映・旧コマIDを除外）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -803,13 +803,17 @@ var SLOTS_BY_DOW={};
 // v192: 休診日判定の参照（Appが描画ごとに同期）。休診日の裏に残る配置を集計から除外するために使う。
 // 未同期の間は「休診なし」として従来どおり動く（安全側のデフォルト）。
 var IS_CLOSED_DK=function(){return false;};
+// v193: 休み希望・有給の参照（Appが描画ごとに同期）。集計をカレンダー表示と同じルールに揃えるために使う。
+// 未同期の間は「休みなし」として従来どおり動く（安全側のデフォルト）。
+var TMPS_LOOKUP={};
 // 実労働時間の計算：拘束時間（最早出勤〜退勤）から、6時間以上なら休憩1時間を引く
 // ・複数コマの重複は通し時間で計算（二重計上しない）
 // ・「○時まで」の退勤時刻で終わりを打ち切る
-function daySpanHours(ranges, leaveLimitMin){
+function daySpanHours(ranges, leaveLimitMin, startLimitMin){
   if(!ranges.length)return 0;
   let start=Math.min.apply(null,ranges.map(r=>r.s));
   let end=Math.max.apply(null,ranges.map(r=>r.e));
+  if(startLimitMin!=null) start=Math.max(start, Math.min(end, startLimitMin)); // v193: 出勤開始条件（○時から）を反映
   if(leaveLimitMin!=null) end=Math.min(end, Math.max(start, leaveLimitMin));
   let span=end-start;
   if(span<=0)return 0;
@@ -819,6 +823,9 @@ function daySpanHours(ranges, leaveLimitMin){
 function dayHours(dk,staffId,asgn,excl,slotsState,staffArr){
   // v192: 休診日は「シフト表示の裏に配置が残っていても」労働時間に数えない
   if(IS_CLOSED_DK(dk))return 0;
+  // v193: 終日休・有給の日はカレンダー表示と同様に0時間として扱う
+  const tc=(TMPS_LOOKUP[dk]||{})[String(staffId)]||(TMPS_LOOKUP[dk]||{})[staffId];
+  if(tc&&(tc.type==='off'||tc.type==='paid'))return 0;
   const d=new Date(dk),dow=d.getDay(),da=asgn[dk]||{};
   const src=slotsState||SLOTS;
   const ranges=[];
@@ -827,24 +834,20 @@ function dayHours(dk,staffId,asgn,excl,slotsState,staffArr){
     if(excl&&(excl[dk]?.[slotId]||[]).includes(staffId))return;
     const slot=(src[dow]||[]).find(s=>s.id===slotId);
     const r=slot?slotRangeMin(slot):null;
-    if(r&&r.s!=null&&r.e!=null)ranges.push(r);
+    if(!(r&&r.s!=null&&r.e!=null))return;
+    // v193: 半休（午前有給/午後有給）の該当時間帯のコマは数えない
+    if(tc&&tc.type==='paid_am'&&r.s<12*60)return;
+    if(tc&&tc.type==='paid_pm'&&r.s>=12*60)return;
+    ranges.push(r);
   });
   const s=(staffArr?staffArr.find(x=>x.id===staffId):null)||STAFF_OBJ_LOOKUP[staffId]||null;
-  // 通し手術(午前手術＋午後手術)は6時間勤務＝15:30退勤として扱う。
-  // 固定IDではなく「その曜日に現在ある手術コマ」を時間帯で判定（古い割当に引っ張られない）。
+  // v193: 通し手術の15:30打ち切りを、カレンダー表示と同じv107ルール（bothSurgeryCap）に統一。
+  // 午前・午後の両手術に本人以外の在席者がいれば中抜け休憩が可能＝通し扱いせず、本人の通常退勤まで数える。
   var lv=staffEndMin(s,dow);
-  var hasAm=false,hasPm=false;
-  (src[dow]||[]).forEach(function(sl){
-    if(!sl||sl.type!=='surg')return;
-    if(!(da[sl.id]||[]).includes(staffId))return;
-    if(excl&&(excl[dk]?.[sl.id]||[]).includes(staffId))return;
-    var r=slotRangeMin(sl); if(!r||r.s==null)return;
-    if(r.s<12*60)hasAm=true; else hasPm=true;
-  });
-  if(hasAm&&hasPm&&!isDoctorStaff(s)){
-    var cap=15*60+30; lv=(lv==null)?cap:Math.min(lv,cap);
-  }
-  return daySpanHours(ranges, lv);
+  var cap=bothSurgeryCap(da,staffId,dow,excl&&excl[dk]);
+  if(cap!=null)lv=(lv==null)?cap:Math.min(lv,cap);
+  // v193: 出勤開始の勤務条件（○時から）で開始時刻を打ち切る
+  return daySpanHours(ranges, lv, staffStartMin(s,dow));
 }
 function weekHours(staffId,weekDates,asgn,excl,slotsState,staffArr){
   return weekDates.reduce((s,d)=>s+dayHours(tdk(d),staffId,asgn,excl,slotsState,staffArr),0);
@@ -2465,6 +2468,8 @@ function App(){
   const initialSlotsV155=useMemo(()=>normalizeSlotsForV155(saved?.slots||SLOTS),[saved]);
   const [asgn,setAsgn]=useState(()=>normalizeDatedSlotMapsV155(saved?.asgn||{},initialSlotsV155));
   const [tmps,setTmps]=useState(()=>saved?.tmps||{});
+  // v193: dayHours等（React外の計算関数）から休み希望・有給を参照できるよう描画ごとに同期
+  TMPS_LOOKUP=tmps||{};
   // シフト表の最終更新日時（作成・編集のたびに更新）
   const [shiftUpdatedAt,setShiftUpdatedAt]=useState(()=>saved?.shiftUpdatedAt||'');
   const [selDk,setSelDk]=useState(null);
@@ -3138,13 +3143,21 @@ function App(){
       const dk=tdk(d);
       if(isClosedDay(dk))return; // v192: 休診日の裏に残る配置はコマ数に数えない
       Object.entries(asgn[dk]||{}).forEach(([slotId,ids])=>{
+        const sl=(slots[d.getDay()]||[]).find(x=>x.id===slotId);
+        if(!sl)return; // v193: 現在の診療枠に存在しない旧コマIDは数えない
         ids.forEach(sid=>{
+          const tc=tmps[dk]?.[String(sid)];
+          if(tc&&['off','paid'].includes(tc.type))return; // v193: 終日休/有給の日は数えない
+          if(tc&&(tc.type==='paid_am'||tc.type==='paid_pm')){
+            const r=slotRangeMin(sl);
+            if(r&&r.s!=null&&((tc.type==='paid_am'&&r.s<720)||(tc.type==='paid_pm'&&r.s>=720)))return; // v193: 半休の時間帯は数えない
+          }
           if(!(manualExclusions[dk]?.[slotId]||[]).includes(sid)){c[sid]=(c[sid]||0)+1;}
         });
       });
     });
     return c;
-  },[asgn,dates,staff,manualExclusions,manualClosedDays,holidays]); // v192: 休診切替でも再計算
+  },[asgn,dates,staff,manualExclusions,manualClosedDays,holidays,tmps,slots]); // v193: 休み・診療枠の変更でも再計算
 
   function saveKey(){
     const k=keyInput.trim();
@@ -3505,9 +3518,18 @@ td.cell-off{background:#fff}
         const totalSlots=dates.reduce((sum,d)=>{
           const dk=tdk(d);
           if(isClosedDay(dk))return sum; // v192: 休診日の裏配置は数えない
-          const dayAsgn=asgn[dk]||{},dayExcl=manualExclusions[dk]||{};
-          return sum+Object.entries(dayAsgn).reduce((s2,[slotId,ids])=>
-            s2+((ids||[]).filter(sid=>sid===s.id&&!(dayExcl[slotId]||[]).includes(sid)).length),0);
+          const dayAsgn=asgn[dk]||{},dayExcl=manualExclusions[dk]||{},dow=d.getDay();
+          const tc=tmps[dk]?.[String(s.id)];
+          if(tc&&['off','paid'].includes(tc.type))return sum; // v193: 終日休/有給の日は数えない
+          return sum+Object.entries(dayAsgn).reduce((s2,[slotId,ids])=>{
+            const sl=(slots[dow]||[]).find(x=>x.id===slotId);
+            if(!sl)return s2; // v193: 現在の診療枠に存在しない旧コマIDは数えない
+            if(tc&&(tc.type==='paid_am'||tc.type==='paid_pm')){
+              const r=slotRangeMin(sl);
+              if(r&&r.s!=null&&((tc.type==='paid_am'&&r.s<720)||(tc.type==='paid_pm'&&r.s>=720)))return s2; // v193: 半休の時間帯は数えない
+            }
+            return s2+((ids||[]).filter(sid=>sid===s.id&&!(dayExcl[slotId]||[]).includes(sid)).length);
+          },0);
         },0);
 
         // 週間時間制約チェック
@@ -8830,9 +8852,18 @@ function HoursPanel({staff,weeks,dates,asgn,manualExclusions,slots,onClose,onAut
     const slots_cnt=dates.reduce((sum,d)=>{
       const dk=tdk(d);
       if(IS_CLOSED_DK(dk))return sum; // v192: 休診日の裏配置は数えない
-      const da=asgn[dk]||{},dExcl=manualExclusions[dk]||{};
-      return sum+Object.entries(da).reduce((s2,[slotId,ids])=>
-        s2+((ids||[]).filter(sid=>sid===s.id&&!(dExcl[slotId]||[]).includes(sid)).length),0);
+      const da=asgn[dk]||{},dExcl=manualExclusions[dk]||{},dow=d.getDay();
+      const tc=(TMPS_LOOKUP[dk]||{})[String(s.id)];
+      if(tc&&['off','paid'].includes(tc.type))return sum; // v193: 終日休/有給の日は数えない
+      return sum+Object.entries(da).reduce((s2,[slotId,ids])=>{
+        const sl=(slots[dow]||[]).find(x=>x.id===slotId);
+        if(!sl)return s2; // v193: 現在の診療枠に存在しない旧コマIDは数えない
+        if(tc&&(tc.type==='paid_am'||tc.type==='paid_pm')){
+          const r=slotRangeMin(sl);
+          if(r&&r.s!=null&&((tc.type==='paid_am'&&r.s<720)||(tc.type==='paid_pm'&&r.s>=720)))return s2; // v193: 半休の時間帯は数えない
+        }
+        return s2+((ids||[]).filter(sid=>sid===s.id&&!(dExcl[slotId]||[]).includes(sid)).length);
+      },0);
     },0);
     return {s,wh,whs,total,slots_cnt};
   });
