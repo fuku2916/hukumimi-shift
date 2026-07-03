@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v193'; // v193: 勤務時間・コマ数集計をカレンダー表示と同一ルールに統一（休み希望/有給を除外・通し手術キャップをv107ルールに・出勤開始条件を反映・旧コマIDを除外）
+const APP_VERSION = 'v194'; // v193: 勤務時間・コマ数集計をカレンダー表示と同一ルールに統一（休み希望/有給を除外・通し手術キャップをv107ルールに・出勤開始条件を反映・旧コマIDを除外）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2829,6 +2829,38 @@ function App(){
     if(opts.published)setPublishedAt(d.shiftUpdatedAt||'');
     if(d.draftSavedAt)setDraftSavedAt(d.draftSavedAt);
   }
+  // ===== v194: シフト予定表CSV（スタッフ×日付・略語）取り込み（動作確認用サンプル投入） =====
+  function importScheduleCSV(text){
+    try{
+      const MAP={'休':{off:1},'法':{off:1},'有':{paid:1},'朝診':{s:'09:15',e:'13:15'},'夜診':{s:'15:45',e:'19:45'},'昼診':{s:'14:00',e:'18:00'},'朝昼':{s:'09:15',e:'18:00'},'通し':{s:'09:15',e:'19:45'},'通し有':{s:'09:15',e:'19:45',half:1},'昼夜':{s:'14:00',e:'19:45'},'①':{s:'09:30',e:'15:30'},'②':{s:'13:00',e:'18:00'},'③':{s:'09:30',e:'18:00'},'⑥':{s:'09:15',e:'18:15'},'⑦':{s:'09:30',e:'19:45'},'⑧':{s:'09:15',e:'18:15'},'⑨':{s:'12:30',e:'19:45'}};
+      const rng=v=>{const m=/^(\d{1,2})-(\d{1,2})$/.exec(v);return m?{s:String(+m[1]).padStart(2,'0')+':00',e:String(+m[2]).padStart(2,'0')+':00'}:null;};
+      const P=text.replace(/^﻿/,'').split(/\r?\n/).filter(r=>r).map(r=>{const o=[];let c='',q=0;for(let i=0;i<r.length;i++){const ch=r[i];if(q){if(ch=='"'){if(r[i+1]=='"'){c+='"';i++;}else q=0;}else c+=ch;}else{if(ch=='"')q=1;else if(ch==','){o.push(c);c='';}else c+=ch;}}o.push(c);return o;});
+      const months=P[0].slice(2),days=P[1].slice(2);
+      const dates=days.map((d,i)=>'2026-'+String(+months[i]).padStart(2,'0')+'-'+String(+d).padStart(2,'0'));
+      const hm=t=>{const a=t.split(':');return (+a[0])*60+(+a[1]);};
+      const staff=[],c2i={};
+      for(let r=2;r<P.length;r++){const code=P[r][0];if(!code)continue;const full=P[r][1];const id=staff.length+1;c2i[code]=id;staff.push({id,code,name:(full||'').split(/[\s　]/)[0],fullName:full,color:'#378ADD',notes:'',pin:'',workType:'normal',cond:{emp:'parttime',days:{1:true,2:true,3:true,4:true,5:true,6:true},slot:'out',baseOnly:false,dayTimes:{},isDoctor:false,weekMaxH:'',weekMinH:''},payrollClinic:(APP_CLINIC||'ekimae'),workClinics:[(APP_CLINIC||'ekimae')]});}
+      const sbd={1:{},2:{},3:{},4:{},5:{},6:{}},asgn={},tmps={};
+      const sidf=(a,b)=>'imp_'+a.replace(':','')+'_'+b.replace(':','');
+      for(let r=2;r<P.length;r++){const code=P[r][0];if(!code)continue;const id=c2i[code];
+        P[r].slice(2).forEach((v,i)=>{v=(v||'').trim();if(!v)return;const date=dates[i];const dow=new Date(date+'T00:00').getDay();
+          const res=MAP[v]||rng(v);if(!res)return;
+          if(res.off)return;
+          if(res.paid&&!res.s){(tmps[date]=tmps[date]||{})[id]={type:'paid',note:'有給(取込)'};return;}
+          const sid=sidf(res.s,res.e);
+          if(!sbd[dow][sid])sbd[dow][sid]={id:sid,label:v,time:res.s+'-'+res.e,type:'out',h:(hm(res.e)-hm(res.s))/60,colorId:'blue'};
+          ((asgn[date]=asgn[date]||{})[sid]=asgn[date][sid]||[]).push(id);
+          if(res.half)(tmps[date]=tmps[date]||{})[id]={type:'paid_pm',note:'半日有給(取込)'};
+        });
+      }
+      const slots={};for(const d in sbd)slots[d]=Object.values(sbd[d]);
+      let nA=0;Object.values(asgn).forEach(sm=>Object.values(sm).forEach(a=>nA+=a.length));
+      if(!window.confirm('予定表CSVを取り込みます。\nスタッフ '+staff.length+'名 / 配置 '+nA+'件 / 対象 '+dates[0]+'〜'+dates[dates.length-1]+'\n\n※編集中のシフトは置き換わります（クラウドへは「公開」するまで反映されません）。'))return;
+      applyShiftPayload({y:2026,m:5,staff,slots,asgn,tmps,paidLeave:{},weeklyReq:{},monthlyReq:{},manualExclusions:{},manualClosedDays:{},baseShift:{A:{},B:{}},newSlotCounter:1},{published:false});
+      setTimeout(()=>alert('取り込み完了：スタッフ '+staff.length+'名・配置 '+nA+'件。\nカレンダーをご確認のうえ、問題なければ「公開」してください。'),80);
+    }catch(err){alert('取り込みに失敗しました：'+(err&&err.message||err));}
+  }
+  function pickScheduleCSV(){const inp=document.createElement('input');inp.type='file';inp.accept='.csv,text/csv';inp.onchange=e=>{const fl=e.target.files&&e.target.files[0];if(!fl)return;const rd=new FileReader();rd.onload=()=>importScheduleCSV(String(rd.result));rd.readAsText(fl,'utf-8');};inp.click();}
   async function saveDraftToCloud(){
     if(!SB_ENABLED){alert('クラウドが設定されていません。');return;}
     setDraftSaving(true);
@@ -6523,6 +6555,7 @@ ${bodyHtml}
                     <MenuLabel text="クラウド下書き・履歴"/>
                     {SB_ENABLED&&<MenuItem icon="💾" label={draftSaving?'下書き保存中…':'下書き保存'} onClick={()=>{saveDraftToCloud();setOpenMenu(null);}}/>}
                     {SB_ENABLED&&<MenuItem icon="📂" label={'下書き読込'+(draftSavedAt?'（'+fmtStamp(draftSavedAt)+'）':'')} onClick={()=>{loadDraftFromCloud();setOpenMenu(null);}}/>}
+              {SB_ENABLED&&<MenuItem icon="📥" label="予定表CSV取込" onClick={()=>{setOpenMenu(null);pickScheduleCSV();}}/>}
                     {SB_ENABLED&&<MenuItem icon="🕘" label={'履歴'+(shiftHistory.length>0?'('+shiftHistory.length+')':'')} onClick={()=>{openHistoryPanel();setOpenMenu(null);}}/>}
                     <MenuDivider/>
                     <MenuLabel text="危険操作"/>
@@ -6615,6 +6648,7 @@ ${bodyHtml}
               <MenuItem icon="📂" label="全データ読み込み" isFile accept=".json" onChange={e=>{loadData(e);setOpenMenu(null);}}/>
               {SB_ENABLED&&<MenuItem icon="💾" label={draftSaving?'下書き保存中…':'下書き保存'} onClick={()=>{saveDraftToCloud();setOpenMenu(null);}}/>}
               {SB_ENABLED&&<MenuItem icon="📂" label={'下書き読込'+(draftSavedAt?'（'+fmtStamp(draftSavedAt)+'）':'')} onClick={()=>{loadDraftFromCloud();setOpenMenu(null);}}/>}
+              {SB_ENABLED&&<MenuItem icon="📥" label="予定表CSV取込" onClick={()=>{setOpenMenu(null);pickScheduleCSV();}}/>}
               {SB_ENABLED&&<MenuItem icon="🕘" label={'履歴'+(shiftHistory.length>0?'('+shiftHistory.length+')':'')} onClick={()=>{openHistoryPanel();setOpenMenu(null);}}/>}
               <MenuItem icon="⚠️" label="初期化..." danger onClick={()=>{setOpenMenu(null);const choice=window.prompt('1→今月 2→全月 3→完全リセット');if(choice==='1'){if(window.confirm('今月をリセット？')){setAsgn(p=>{const n={...p};dates.forEach(d=>{delete n[tdk(d)];});return n;});setTmps(p=>{const n={...p};dates.forEach(d=>{delete n[tdk(d)];});return n;});}}else if(choice==='2'){if(window.confirm('全月リセット？')){setAsgn({});setTmps({});}}else if(choice==='3'){if(window.confirm('完全リセット？')){localStorage.removeItem(LS_KEY);window.location.reload();}}}}/>
               {CLINIC_MODE&&APP_CLINIC==='ekimae'&&<MenuItem icon="🔁" label="駅前データを移行(初回のみ)" onClick={()=>{setOpenMenu(null);migrateEkimaeFromMain();}}/>}
