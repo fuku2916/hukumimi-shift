@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v194'; // v193: 勤務時間・コマ数集計をカレンダー表示と同一ルールに統一（休み希望/有給を除外・通し手術キャップをv107ルールに・出勤開始条件を反映・旧コマIDを除外）
+const APP_VERSION = 'v195'; // v195: 未定義変数3件(fillFulltimeMinHours/rebalanceDayCoverage/compactDaySpans)修正・申請履歴PDF対象月の初期値修正・有給残の二重減算修正
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -2344,7 +2344,7 @@ function App(){
   const [avatars,setAvatars]=useState({});
   const [corrections,setCorrections]=useState([]);
   const [requestFilter,setRequestFilter]=useState('active'); // active|month|prev|custom|all
-  const [requestExportYm,setRequestExportYm]=useState(()=>String(y)+'-'+String(m).padStart(2,'0'));
+  const [requestExportYm,setRequestExportYm]=useState(()=>{const t=new Date();return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0');}); // 【v195修正】宣言前のy,m参照でundefined-undefinedになっていた
   const avatarsRef=React.useRef({}); const correctionsRef=React.useRef([]);
   useEffect(()=>{avatarsRef.current=avatars;},[avatars]);
   useEffect(()=>{correctionsRef.current=corrections;},[corrections]);
@@ -4405,7 +4405,7 @@ ${bodyHtml}
             if(sh<=0) return;
             // 日の合計がDAILY_LIMITを超えないか確認
             const dh=dayHours(dk,ft.id,na,{},slots);
-            if(!isDoctorStaff(s)&&dh+sh>DAILY_LIMIT) return;
+            if(!isDoctorStaff(ft)&&dh+sh>DAILY_LIMIT) return; // 【v195修正】s(未定義)→ft
             if(wTotal+sh>maxH) return;
             const req=getReq(dk,slot.id);
             const curActive=curIds.filter(sid=>!(manualExclusions[dk]?.[slot.id]||[]).includes(sid)).length;
@@ -4656,7 +4656,7 @@ ${bodyHtml}
               // 移動を試算：Aから外しBへ入れて、8時間以内・週上限以内か
               const trial={...na,[dk]:{...na[dk],[A.id]:(na[dk][A.id]||[]).filter(x=>x!==sid),[B.id]:[...(na[dk][B.id]||[]),sid]}};
               if((!isDoctorStaff(staff.find(x=>x.id===sid))&&dayHours(dk,sid,trial,manualExclusions,slots,staff)>DAILY_LIMIT))return false;
-              const wh=parseWeeklyHours(notes);
+              const wh=parseWeeklyHours(so.notes); // 【v195修正】notes(未定義)→so.notes
               if(wh&&wh.max>0&&week.length>0){
                 const wkH=week.reduce((s2,d3)=>s2+dayHours(tdk(d3),sid,trial,manualExclusions,slots,staff),0);
                 if(!isDoctorStaff(staff.find(x=>x.id===sid))&&wkH>Math.min(wh.max,WEEKLY_LIMIT))return false;
@@ -4997,7 +4997,7 @@ ${bodyHtml}
                       const wh=parseWeeklyHours(so.notes);
                       if(wh&&wh.max>0){
                         const wkH=week.reduce((s2,d3)=>s2+dayHours(tdk(d3),sid,trial,manualExclusions,slots,staff),0);
-                        if(!isDoctorStaff(s)&&wkH>Math.min(wh.max,WEEKLY_LIMIT)){wkOK=false;break;}
+                        if(!isDoctorStaff(so)&&wkH>Math.min(wh.max,WEEKLY_LIMIT)){wkOK=false;break;} // 【v195修正】s(未定義)→so
                       }
                     }
                   }
@@ -5289,8 +5289,17 @@ ${bodyHtml}
   const staffHolidays=useMemo(()=>getJapaneseHolidays(staffY),[staffY]);
   const staffMyPL=useMemo(()=>paidLeave[staffMyId]||{granted:0,history:[]},[paidLeave,staffMyId]);
   const staffUsed=useMemo(()=>{
-    const adminUsed=(staffMyPL.history||[]).reduce((s,r)=>s+(r.unit==='full'?1:0.5),0);
-    const portalUsed=calcUsedDaysFromRequests(requests,staffMyId);
+    const hist=staffMyPL.history||[];
+    const adminUsed=hist.reduce((s,r)=>s+(r.unit==='full'?1:0.5),0);
+    // 【v195修正】管理者側で履歴(history)に反映済みの日(dk)の申請は除外し、同じ有給の二重減算を防ぐ
+    const histDk=new Set(hist.map(r=>r.dk));
+    let portalUsed=0;
+    Object.entries(requests||{}).forEach(([dk,dayMap])=>{
+      if(histDk.has(dk))return;
+      const req=dayMap&&dayMap[staffMyId];if(!req)return;
+      if(req.type==='paid_full')portalUsed+=1;
+      else if(req.type==='paid_am'||req.type==='paid_pm')portalUsed+=0.5;
+    });
     return adminUsed+portalUsed;
   },[staffMyPL,requests,staffMyId]);
   const staffRemain=useMemo(()=>Math.max(0,(staffMyPL.granted||0)-staffUsed),[staffMyPL,staffUsed]);
