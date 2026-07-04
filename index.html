@@ -1452,7 +1452,7 @@ const ADMIN_OK_KEY='fukumimi_admin_ok'+_LSC;
 function loadAdminOk(){try{return sessionStorage.getItem(ADMIN_OK_KEY)==='1';}catch(e){return false;}}
 function saveAdminOk(v){try{if(v)sessionStorage.setItem(ADMIN_OK_KEY,'1');else sessionStorage.removeItem(ADMIN_OK_KEY);}catch(e){}}
 function loadLS(){try{const r=localStorage.getItem(LS_KEY);return r?JSON.parse(r):null;}catch(e){return null;}}
-function saveLS(d){try{localStorage.setItem(LS_KEY,JSON.stringify(d));}catch(e){}}
+function saveLS(d){try{if(!window.__hsCT){window.__hsCT=true;try{window.addEventListener('storage',function(e){try{if(!e.key||e.key!==LS_KEY)return;var nv=e.newValue&&JSON.parse(e.newValue);var nt=nv&&nv.shiftUpdatedAt;if(nt&&window.__hsLastTs&&new Date(nt).getTime()>new Date(window.__hsLastTs).getTime()){window.__hsStale=true;alert('別のタブ／端末でシフトが更新されました。最新にするにはこのページを再読み込みしてください（この画面の未保存の変更は反映されません）');}}catch(_e){}});}catch(_e0){}}if(window.__hsStale){try{localStorage.setItem(LS_KEY+'__conflict_'+Date.now(),JSON.stringify(d));}catch(_e1){}return;}var _prev=localStorage.getItem(LS_KEY);if(_prev){try{var _n=(parseInt(localStorage.getItem(LS_KEY+'__bakIdx')||'0',10)+1)%8;localStorage.setItem(LS_KEY+'__bak'+_n,_prev);localStorage.setItem(LS_KEY+'__bakIdx',String(_n));}catch(_e2){}}window.__hsLastTs=(d&&d.shiftUpdatedAt)||window.__hsLastTs;localStorage.setItem(LS_KEY,JSON.stringify(d));}catch(e){}}
 function loadRequests(){try{const r=localStorage.getItem(LS_REQ);return r?JSON.parse(r):{};}catch(e){return {};}}
 function saveRequests(d){try{localStorage.setItem(LS_REQ,JSON.stringify(d));}catch(e){}}
 // 管理者→スタッフ返信の「既読」状態（端末ローカルのみ・クラウド非書込で競合ゼロ）。
