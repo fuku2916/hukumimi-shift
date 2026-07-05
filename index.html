@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v198'; // v198: 在籍ステータス管理（Phase2）：対象月に在職以外（産休・育休・休職・退職）の期間が重なる職員をグレー表示＋自動配置から除外。手動配置は警告のみ（禁止しない）
+const APP_VERSION = 'v199'; // v199: 在籍ステータス管理（Phase3）：公開ペイロードに staffStatus:{職員コード:[{status,from,to}]} を同梱（タイムカードはshift_data経由で受信し、欠勤カウントから除外する）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -1160,7 +1160,7 @@ function defaultWorkClinics(){return APP_CLINIC?[APP_CLINIC]:['ekimae','iguchi',
 function normalizeWorkClinics(v){const a=Array.isArray(v)?v:[];const out=a.filter(x=>CLINIC_KEYS.includes(x));return out.length?out:defaultWorkClinics();}
 function clinicFullLabel(k){return CLINIC_FULL_LABELS[k]||CLINIC_LABELS[k]||k;}
 // data.shared に置く共通キー（クリニック内の全職種で共有）
-const SHARED_KEYS=['clinicName','slots','newSlotCounter','manualClosedDays','surgeryCalUrl','surgeryCalUrlUpdatedAt','outpatientClosures','outpatientClosuresUpdatedAt','outpatientDoctorPresence'];
+const SHARED_KEYS=['clinicName','slots','newSlotCounter','manualClosedDays','surgeryCalUrl','surgeryCalUrlUpdatedAt','outpatientClosures','outpatientClosuresUpdatedAt','outpatientDoctorPresence','staffStatus']; // v199: staffStatus（在籍ステータス）は全職種共通なのでsharedに格納
 try{ document.title='シフト管理'+(APP_UNIT_LABEL?'（'+APP_UNIT_LABEL+'）':'')+' '+APP_VERSION; }catch(e){}
 // ================================================================
 
@@ -3178,7 +3178,29 @@ function App(){
         additions.push({at:new Date().toISOString(),made:prev.shiftUpdatedAt||'',kind:'auto_publish',label:'公開前バックアップ',data:prevNoHist});
       }
       hist=pruneShiftHistory([...additions,...hist]);
-      const data=currentShiftPayload({history:hist});
+      // ── v199 Phase3: 在籍ステータス（在職以外の行だけ）を公開ペイロードに同梱 ──
+      // タイムカードアプリは staff_status テーブルを直接読まず、この shift_data 経由で受け取る設計。
+      // 形式: staffStatus = { "0001167": [{status:'休職', from:'2026-05-17', to:''}], ... }（to空欄＝継続中）
+      let statusPayload=null;
+      try{
+        const st=await sbStatusList();
+        if(st.ok){
+          statusPayload={};
+          (st.rows||[]).forEach(r=>{
+            if(r.status==='在職')return; // 在職は通常勤務なので同梱しない
+            (statusPayload[r.staff_code]=statusPayload[r.staff_code]||[]).push({status:r.status,from:r.start_date||'',to:r.end_date||''});
+          });
+        }
+      }catch(e){}
+      if(statusPayload===null){
+        // 取得に失敗したときは、画面が保持している読み込み済みデータから作る（それも無ければ空＝全員在職扱い）
+        statusPayload={};
+        (staffStatusRows||[]).forEach(r=>{
+          if(r.status==='在職')return;
+          (statusPayload[r.staff_code]=statusPayload[r.staff_code]||[]).push({status:r.status,from:r.start_date||'',to:r.end_date||''});
+        });
+      }
+      const data=currentShiftPayload({history:hist,staffStatus:statusPayload});
       const ok=await SB.set('shift_data',data);
       if(ok){try{localStorage.removeItem('fukumimi_restore_lock');}catch(_){ }setPublishedAt(shiftUpdatedAt);setShiftHistory(hist);alert('スタッフへ公開しました。\n（作成: '+fmtStamp(shiftUpdatedAt)+'）\n公開時点スナップショットを保存しました。\n保存名: '+currentArchive.archiveName);}
       else alert('保存に失敗しました。もう一度お試しください。');
