@@ -2703,13 +2703,15 @@ function App(){
   // 実労働時間の退勤時刻判定に使う参照表を、描画前に同期更新（dayHoursから参照）
   STAFF_OBJ_LOOKUP={};(staff||[]).forEach(s=>{STAFF_OBJ_LOOKUP[s.id]=s;});
   // ── v198 Phase2: 在籍ステータスを読み込み、対象月に在職以外の期間が重なる職員を把握 ──
+  // 管理者のシフト画面表示中に、月やタブが変わるたび読み直す（スタッフ画面で登録した直後にシフト画面へ戻っても反映される）
   const [staffStatusRows,setStaffStatusRows]=useState([]);
   React.useEffect(()=>{
-    if(!SB_ENABLED||appMode!=='admin')return; // 管理者モードでだけ読む（合言葉ログイン済み前提）
+    console.log('[v198dbg] status effect run',{appMode,tab,y,m,SB_ENABLED});
+    if(!SB_ENABLED||appMode!=='admin'||tab!=='shift')return;
     let stop=false;
-    (async()=>{const r=await sbStatusList();if(!stop&&r.ok)setStaffStatusRows(r.rows||[]);})();
+    (async()=>{const r=await sbStatusList();console.log('[v198dbg] status loaded ok='+r.ok+' rows='+((r.rows||[]).length)+' stop='+stop);if(!stop&&r.ok)setStaffStatusRows(r.rows||[]);})();
     return()=>{stop=true;};
-  },[appMode]);
+  },[appMode,tab,y,m]);
   // 対象月(y,m)に在職以外の期間が重なる職員 → {職員コード:[該当行,...]}
   const inactiveStatusByCode=useMemo(()=>{
     const map={};
