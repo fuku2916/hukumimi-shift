@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v195'; // v195: 未定義変数3件(fillFulltimeMinHours/rebalanceDayCoverage/compactDaySpans)修正・申請履歴PDF対象月の初期値修正・有給残の二重減算修正
+const APP_VERSION = 'v196'; // v195: 未定義変数3件(fillFulltimeMinHours/rebalanceDayCoverage/compactDaySpans)修正・申請履歴PDF対象月の初期値修正・有給残の二重減算修正
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -1974,6 +1974,10 @@ function CondEditor({cond,onCond,memo,onMemo}){
       <div><label style={lbl}>雇用形態</label><div style={{display:'flex',gap:6}}>
         {[['','指定なし'],['fulltime','常勤'],['parttime','パート']].map(([v,t])=>(<button key={v} onClick={()=>set('emp',v)} style={chip((c.emp||'')===v)}>{t}</button>))}
       </div></div>
+      {/* v196: 遅刻・早退の判定除外（手術担当など、勤務時間がシフト表と一致しない職員用）。タイムカードアプリが cond.noLateEarly を受け取り集計から除外する */}
+      <div><label style={lbl}>遅刻・早退の判定（タイムカード集計）</label><div style={{display:'flex',gap:6}}>
+        {[[false,'判定する'],[true,'判定しない']].map(([v,t])=>(<button key={String(v)} onClick={()=>set('noLateEarly',v)} style={chip(!!c.noLateEarly===v)}>{t}</button>))}
+      </div><div style={{fontSize:11,color:'#64748B',marginTop:4}}>「判定しない」は手術担当など勤務時間がシフト表どおりでない職員向け。医師ユニットはタイムカード側で自動的に判定しません。</div></div>
       <div style={{padding:'8px 10px',background:c.isDoctor?'#EEF2FF':'#fff',border:'1px solid '+(c.isDoctor?'#818CF8':'#E2E8F0'),borderRadius:8}}>
         <label style={{display:'flex',alignItems:'flex-start',gap:8,cursor:'pointer'}}>
           <input type="checkbox" checked={!!c.isDoctor} onChange={e=>set('isDoctor',e.target.checked)} style={{marginTop:2,width:16,height:16,flexShrink:0}}/>
