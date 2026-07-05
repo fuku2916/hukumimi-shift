@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v197'; // v197: 在籍ステータス管理（Phase1）追加（staff_status履歴テーブル・変更履歴の自動記録）・未使用関数calcUsedDaysFromRequestsを削除
+const APP_VERSION = 'v198'; // v198: 在籍ステータス管理（Phase2）：対象月に在職以外（産休・育休・休職・退職）の期間が重なる職員をグレー表示＋自動配置から除外。手動配置は警告のみ（禁止しない）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -1442,6 +1442,17 @@ const SB_ENABLED=SUPABASE_URL!=='YOUR_SUPABASE_URL';
 // 「1行=1つの状態期間」の履歴テーブル。削除は不可（DBにdeleteポリシーを作っていない）。
 // 訂正（update）と追加（insert）は staff_status_log に自動で変更履歴を残す。
 const STATUS_KINDS=['在職','産休','育休','休職','退職'];
+// ── v198 Phase2: 在籍ステータスの1行(row)が、対象月(y年m月)と期間が重なるかを判定 ──
+// 「在職」は通常勤務なので対象外。日付はISO文字列(YYYY-MM-DD)同士の比較で判定できる。
+function statusOverlapsMonth(row,y,m){
+  if(!row||row.status==='在職')return false;
+  const mm=String(m).padStart(2,'0');
+  const mStart=y+'-'+mm+'-01';
+  const mEnd=y+'-'+mm+'-'+String(new Date(y,m,0).getDate()).padStart(2,'0');
+  const from=row.start_date||'0000-01-01';
+  const to=row.end_date||'9999-12-31'; // 終了日が空欄＝継続中
+  return from<=mEnd&&to>=mStart;
+}
 async function sbStatusList(){
   for(let a=0;a<2;a++){
     try{
@@ -2691,6 +2702,39 @@ function App(){
   const [staff,setStaff]=useState(()=>Array.isArray(saved?.staff)&&saved.staff.length?saved.staff:STAFF0);
   // 実労働時間の退勤時刻判定に使う参照表を、描画前に同期更新（dayHoursから参照）
   STAFF_OBJ_LOOKUP={};(staff||[]).forEach(s=>{STAFF_OBJ_LOOKUP[s.id]=s;});
+  // ── v198 Phase2: 在籍ステータスを読み込み、対象月に在職以外の期間が重なる職員を把握 ──
+  // 管理者のシフト画面表示中に、月やタブが変わるたび読み直す（スタッフ画面で登録した直後にシフト画面へ戻っても反映される）
+  const [staffStatusRows,setStaffStatusRows]=useState([]);
+  React.useEffect(()=>{
+    if(!SB_ENABLED||appMode!=='admin'||tab!=='shift')return;
+    let stop=false;
+    (async()=>{
+      // 注意: サインイン完了前に読むと、RLSにより「エラーではなく0件」が返ってしまう（401にならず再ログインも走らない）。
+      // そのためトークンが無ければ先に合言葉で再サインインしてから読む。
+      if(!SB_ACCESS_TOKEN&&!(await sbReauth()))return;
+      if(stop)return;
+      const r=await sbStatusList();
+      if(!stop&&r.ok)setStaffStatusRows(r.rows||[]);
+    })();
+    return()=>{stop=true;};
+  },[appMode,tab,y,m]);
+  // 対象月(y,m)に在職以外の期間が重なる職員 → {職員コード:[該当行,...]}
+  const inactiveStatusByCode=useMemo(()=>{
+    const map={};
+    (staffStatusRows||[]).forEach(r=>{if(statusOverlapsMonth(r,y,m)){(map[r.staff_code]=map[r.staff_code]||[]).push(r);}});
+    return map;
+  },[staffStatusRows,y,m]);
+  // この職員は対象月に在職以外の期間があるか（該当行の配列 or null）
+  function staffInactiveRows(s){return s&&s.code&&inactiveStatusByCode[s.code]?inactiveStatusByCode[s.code]:null;}
+  function isInactiveThisMonth(sid){return !!staffInactiveRows((staff||[]).find(x=>x.id===sid));}
+  function inactiveLabel(s){const rows=staffInactiveRows(s);return rows?rows.map(r=>r.status+' '+r.start_date+'〜'+(r.end_date||'継続中')).join('、'):'';}
+  // 手動配置時の警告文（配置は禁止しない。急な復帰対応のため）
+  function inactivePlaceWarn(sid){
+    const s=(staff||[]).find(x=>x.id===sid);
+    const rows=s?staffInactiveRows(s):null;
+    if(!rows)return null;
+    return s.name+'さんはこの月に「'+inactiveLabel(s)+'」の期間があります。\nこのまま配置しますか？';
+  }
   const initialSlotsV155=useMemo(()=>normalizeSlotsForV155(saved?.slots||SLOTS),[saved]);
   const [asgn,setAsgn]=useState(()=>normalizeDatedSlotMapsV155(saved?.asgn||{},initialSlotsV155));
   const [tmps,setTmps]=useState(()=>saved?.tmps||{});
@@ -4032,7 +4076,7 @@ ${bodyHtml}
         // これにより、外来だけ既存割当がある日でも、午前手術など空欄のベースシフトが反映される。
         const hasSlotExisting=(newAsgn[dk][slotId]||[]).length>0;
         if(hasSlotExisting) return;
-        const validIds=ids.filter(sid=>staff.some(s=>s.id===sid));
+        const validIds=ids.filter(sid=>staff.some(s=>s.id===sid)&&!isInactiveThisMonth(sid)); // v198: 在職以外の月の職員は展開しない
         if(validIds.length>0){
           newAsgn[dk][slotId]=validIds;
           appliedThisDay=true;
@@ -4109,6 +4153,7 @@ ${bodyHtml}
 
     if(isExcluded){
       // ① このコマの除外を解除（コマに戻す）
+      {const w=inactivePlaceWarn(sid);if(w&&!window.confirm(w))return;} // v198: 在職以外の月は警告（禁止はしない）
       setManualExclusions(p=>{const d2=p[dk]||{},sl=(d2[s2]||[]).filter(x=>x!==sid);return{...p,[dk]:{...d2,[s2]:sl}};});
       setAsgn(p=>{const d2={...(p[dk]||{})};const sl=d2[s2]||[];if(!sl.includes(sid))d2[s2]=[...sl,sid];return{...p,[dk]:d2};});
       pushEditLog(dk,s2,'add',sid);
@@ -4118,6 +4163,7 @@ ${bodyHtml}
       pushEditLog(dk,s2,'remove',sid);
     } else {
       // ③ 未配置 → このコマに追加
+      {const w=inactivePlaceWarn(sid);if(w&&!window.confirm(w))return;} // v198: 在職以外の月は警告（禁止はしない）
       setAsgn(p=>{const d2={...(p[dk]||{})};const sl=d2[s2]||[];if(!sl.includes(sid))d2[s2]=[...sl,sid];return{...p,[dk]:d2};});
       pushEditLog(dk,s2,'add',sid);
     }
@@ -4403,7 +4449,7 @@ ${bodyHtml}
         ...staff.filter(s=>parseEmploymentType(s.notes)==='fulltime'),
         ...staff.filter(s=>parseEmploymentType(s.notes)==='parttime'),
         ...staff.filter(s=>!parseEmploymentType(s.notes)),
-      ];
+      ].filter(s=>!staffInactiveRows(s)); // v198: 在職以外の月の職員は自動補完から除外
 
       sortedStaff.forEach(s=>{
         const wh=parseWeeklyHours(s.notes);
@@ -4595,7 +4641,9 @@ ${bodyHtml}
       });
       return lines.join('\n')+'\n';
     })();
-    try{setARes(await autoGenerate(staff,y,m,dates,apiKey,weeklyReq,manualExclusions,slots,asgn,tmps,holidays,manualClosedDays,bsDesc,requests));}
+    // v198: 在職以外の月の職員はAIに渡すスタッフ一覧から外す（自動シフト作成の対象外にする）
+    const activeStaff=staff.filter(s=>!staffInactiveRows(s));
+    try{setARes(await autoGenerate(activeStaff,y,m,dates,apiKey,weeklyReq,manualExclusions,slots,asgn,tmps,holidays,manualClosedDays,bsDesc,requests));}
     catch(e){if(e.message==='AUTH_ERROR'){setAErr('AUTH_ERROR');setShowKeyPanel(true);setKeyInput(apiKey);}else{setAErr(e.message);}}
     finally{setALoad(false);}
   }
@@ -4607,7 +4655,7 @@ ${bodyHtml}
       Object.entries(sm).forEach(([slotId,ids])=>{na[dk][slotId]=[...(ids||[])];});
     });
 
-    const fulltimeStaff=staff.filter(s=>parseEmploymentType(s.notes)==='fulltime');
+    const fulltimeStaff=staff.filter(s=>parseEmploymentType(s.notes)==='fulltime'&&!staffInactiveRows(s)); // v198: 在職以外の月の職員は対象外
 
     fulltimeStaff.forEach(ft=>{
       const wh=parseWeeklyHours(ft.notes);
@@ -4728,6 +4776,7 @@ ${bodyHtml}
 
     // コマ数制約を持つ全スタッフを対象
     staff.forEach(s=>{
+      if(staffInactiveRows(s))return; // v198: 在職以外の月の職員は対象外
       const notesN=(s.notes||'').replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0));
       const m1=notesN.match(/週\s*(\d+)\s*[〜~～]\s*(\d+)\s*コマ/);
       const m2=notesN.match(/週\s*(\d+)\s*コマ/);
@@ -4780,7 +4829,7 @@ ${bodyHtml}
       const pattern=getABPatternForDate(d);
       const baseForDay=(baseShift[pattern]||{})[dow]||{};
       Object.entries(baseForDay).forEach(([slotId,ids])=>{
-        const valid=(ids||[]).filter(sid=>staff.some(s=>s.id===sid)&&!(manualExclusions[dk]?.[slotId]||[]).includes(sid));
+        const valid=(ids||[]).filter(sid=>staff.some(s=>s.id===sid)&&!(manualExclusions[dk]?.[slotId]||[]).includes(sid)&&!isInactiveThisMonth(sid)); // v198: 在職以外の月の職員は展開しない
         if(valid.length===0)return;
         if(!base[dk])base[dk]={};
         base[dk][slotId]=[...valid];
@@ -4810,6 +4859,12 @@ ${bodyHtml}
   // ── 最終仕上げ：①ベースシフトを土台に配置 → ②AI結果を重ねる →
   //   ③労働時間調整（ベース分は削らない） → ④常勤最低時間/最低コマ補完 → ⑤ベース被覆の最終保証 ──
   function finalizeAsgn(aiAsgn){
+    // v198: 念のためAI結果からも在職以外(対象月)の職員を取り除く（二重の安全策）
+    if(aiAsgn){
+      const cleaned={};
+      Object.entries(aiAsgn).forEach(([dk,sm])=>{cleaned[dk]={};Object.entries(sm||{}).forEach(([slotId,ids])=>{cleaned[dk][slotId]=(ids||[]).filter(sid=>!isInactiveThisMonth(sid));});});
+      aiAsgn=cleaned;
+    }
     const base=buildBaseAsgn();
     const pinned=pinnedFromBase(base);
     // 必要人数マップ（dk|slotId→必要数）：時間調整で必要数を下回らせない
@@ -4948,6 +5003,7 @@ ${bodyHtml}
           if((na[dk][slot.id]||[]).includes(s.id))return false;
           if(isOffOrExcl(dk,slot.id,s.id))return false;
           if(isBaseOnly(s))return false; // ベースシフト固定の人は延長配置しない
+          if(staffInactiveRows(s))return false; // v198: 在職以外の月の職員は延長配置しない
           if(!canCoverSlot(s,slot,dow))return false; // そのコマの半分も在席できない人は延長させない
           const sp=staffRanges(dk,s.id); if(sp.length===0)return false; // その日出勤していない人は呼ばない
           const cs=Math.min.apply(null,sp.map(x=>x.s)), ce=Math.max.apply(null,sp.map(x=>x.e));
@@ -5065,6 +5121,7 @@ ${bodyHtml}
           // ② その日まだ未出勤の有資格者を新規配置（応援出勤）
           const working=sid=>Object.values(na[dk]||{}).some(ids=>(ids||[]).includes(sid));
           const fresh=staff.find(s=>
+            !staffInactiveRows(s)&& // v198: 在職以外の月の職員は応援出勤に呼ばない
             !working(s.id)&&!isOffOrExcl(dk,B.id,s.id)&&worksThisDay(s,dow)&&
             qualified(dk,s.id,B,dow)&&canCoverBand(dk,s.id,B,dow,gap.s,gap.e)&&
             trialOK(dk,s.id,{...na,[dk]:{...na[dk],[B.id]:[...(na[dk][B.id]||[]),s.id]}},week));
@@ -7207,13 +7264,17 @@ ${bodyHtml}
             {staff.map(s=>{
               const mh=monthHours(s.id,dates,asgn,manualExclusions,slots);
               const hasWeekViolation=!isDoctorStaff(s)&&weeks.some(wk=>weekHours(s.id,wk,asgn,manualExclusions,slots)>WEEKLY_LIMIT);
+              // v198: 対象月に在職以外の期間がある人は凡例をグレー表示＋ステータス名を表示
+              const inactiveRows=staffInactiveRows(s);
+              const chipColor=inactiveRows?'#94A3B8':(hasWeekViolation?'#D85A30':s.color);
               return(
-                <span key={s.id} style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 10px',borderRadius:20,border:'1px solid '+(hasWeekViolation?'#D85A30':s.color),background:(hasWeekViolation?'#D85A30':s.color)+'18',fontSize:11}}>
-                  <span style={{width:6,height:6,borderRadius:'50%',background:hasWeekViolation?'#D85A30':s.color,flexShrink:0}}/>
+                <span key={s.id} title={inactiveRows?('在籍ステータス: '+inactiveLabel(s)+'（自動配置の対象外）'):''} style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 10px',borderRadius:20,border:'1px solid '+chipColor,background:inactiveRows?'#F1F5F9':(hasWeekViolation?'#D85A30':s.color)+'18',fontSize:11,color:inactiveRows?'#94A3B8':undefined}}>
+                  <span style={{width:6,height:6,borderRadius:'50%',background:chipColor,flexShrink:0}}/>
                   {s.name}
-                  <span style={{color:K.textS,fontSize:13}}>{mcnt[s.id]||0}コマ</span>
-                  <span style={{color:hasWeekViolation?'#D85A30':K.textS,fontSize:13}}>{mh.toFixed(1)}h</span>
-                  {hasWeekViolation&&<span style={{color:'#D85A30',fontSize:10}}>⚠</span>}
+                  {inactiveRows&&<span style={{color:'#64748B',fontSize:10,fontWeight:600}}>{inactiveRows[0].status}</span>}
+                  <span style={{color:inactiveRows?'#94A3B8':K.textS,fontSize:13}}>{mcnt[s.id]||0}コマ</span>
+                  <span style={{color:inactiveRows?'#94A3B8':(hasWeekViolation?'#D85A30':K.textS),fontSize:13}}>{mh.toFixed(1)}h</span>
+                  {hasWeekViolation&&!inactiveRows&&<span style={{color:'#D85A30',fontSize:10}}>⚠</span>}
                 </span>
               );
             })}
@@ -7411,18 +7472,21 @@ ${bodyHtml}
                                 const isOn=here.includes(s.id)&&!isExcl;
                                 // 勤務条件（曜日＋時間帯）からこのコマに本来出勤できるか
                                 const eligible=staffEligibleForSlot(s,slot,sd.getDay());
-                                // 未割り当てで条件的に勤務不可 → グレー（臨時で割当は可能）
-                                const grayOut=!isOn&&!isOff&&!eligible;
+                                // v198: 対象月に在職以外（産休・育休・休職・退職）の期間がある人はグレー表示
+                                const inactiveRows=staffInactiveRows(s);
+                                const okColor=eligible&&!inactiveRows; // 通常色で表示してよいか
+                                // 未割り当てで条件的に勤務不可 or 在職以外 → グレー（割当自体は可能）
+                                const grayOut=!isOn&&!isOff&&(!eligible||!!inactiveRows);
                                 return(
                                   <button key={s.id} onClick={()=>{if(!isOff)tog(selDk,slot.id,s.id);}}
-                                    title={isExcl?'除外中（クリックで再割当）':grayOut?'勤務条件ではこの時間帯は勤務不可（臨時で割当は可能）':''}
+                                    title={isExcl?'除外中（クリックで再割当）':inactiveRows?('在籍ステータス: '+inactiveLabel(s)+'（配置すると警告が出ます）'):grayOut?'勤務条件ではこの時間帯は勤務不可（臨時で割当は可能）':''}
                                     style={{padding:'3px 9px',borderRadius:20,fontSize:11,cursor:isOff?'not-allowed':'pointer',
-                                      border:'1.5px solid '+(isOn||(!isOff&&eligible)?s.color:'#CBD5E1'),
+                                      border:'1.5px solid '+(isOn||(!isOff&&okColor)?s.color:'#CBD5E1'),
                                       background:isOn?s.color:(grayOut?'#F1F5F9':K.bg),
-                                      color:isOn?'#fff':isOff?K.textS:eligible?s.color:'#94A3B8',
+                                      color:isOn?'#fff':isOff?K.textS:okColor?s.color:'#94A3B8',
                                       opacity:(isOff||isExcl)?.45:1,fontWeight:isOn?500:400,
                                       textDecoration:(isOff||isExcl)?'line-through':'none'}}>
-                                    {s.name}{['paid','off'].includes(dT[String(s.id)]?.type)?'(有給)':dT[String(s.id)]?.type==='paid_am'?'(有/午前)':dT[String(s.id)]?.type==='paid_pm'?'(有/午後)':isOff?'(休)':isExcl?'(除)':''}
+                                    {s.name}{['paid','off'].includes(dT[String(s.id)]?.type)?'(有給)':dT[String(s.id)]?.type==='paid_am'?'(有/午前)':dT[String(s.id)]?.type==='paid_pm'?'(有/午後)':isOff?'(休)':isExcl?'(除)':''}{!isOn&&!isOff&&!isExcl&&inactiveRows?'('+inactiveRows[0].status+')':''}
                                   </button>
                                 );
                               })}
