@@ -2706,12 +2706,17 @@ function App(){
   // 管理者のシフト画面表示中に、月やタブが変わるたび読み直す（スタッフ画面で登録した直後にシフト画面へ戻っても反映される）
   const [staffStatusRows,setStaffStatusRows]=useState([]);
   React.useEffect(()=>{
-    const dbg=t=>{try{sessionStorage.setItem('v198dbg',(sessionStorage.getItem('v198dbg')||'')+Date.now()%100000+' '+t+'\n');}catch(e){}};
-    dbg('run appMode='+appMode+' tab='+tab+' y='+y+' m='+m);
     if(!SB_ENABLED||appMode!=='admin'||tab!=='shift')return;
     let stop=false;
-    (async()=>{const r=await sbStatusList();dbg('loaded ok='+r.ok+' rows='+((r.rows||[]).length)+' stop='+stop);if(!stop&&r.ok){setStaffStatusRows(r.rows||[]);dbg('set done');}})();
-    return()=>{stop=true;dbg('cleanup');};
+    (async()=>{
+      // 注意: サインイン完了前に読むと、RLSにより「エラーではなく0件」が返ってしまう（401にならず再ログインも走らない）。
+      // そのためトークンが無ければ先に合言葉で再サインインしてから読む。
+      if(!SB_ACCESS_TOKEN&&!(await sbReauth()))return;
+      if(stop)return;
+      const r=await sbStatusList();
+      if(!stop&&r.ok)setStaffStatusRows(r.rows||[]);
+    })();
+    return()=>{stop=true;};
   },[appMode,tab,y,m]);
   // 対象月(y,m)に在職以外の期間が重なる職員 → {職員コード:[該当行,...]}
   const inactiveStatusByCode=useMemo(()=>{
