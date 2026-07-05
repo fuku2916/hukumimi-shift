@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v200'; // v200: 在籍ステータスの開始日を空欄で登録可能に（開始日が入るまで休眠＝シフト・欠勤に影響しない）。DBのstart_dateがNOT NULLのため空欄は番兵日9999-12-31で保存し「未定（休眠）」表示。判明後に✏訂正で実日付に置き換える
+const APP_VERSION = 'v201'; // v201: 各スタッフの編集画面に「🗂 在籍ステータス」ボタン追加（その職員を選択済みで在籍ステータス欄が開く）。スタッフ一覧に在籍ステータスのバッジ（現在有効/開始予定/未定のみ・非在職者だけ）を表示
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -1442,6 +1442,8 @@ const SB_ENABLED=SUPABASE_URL!=='YOUR_SUPABASE_URL';
 // 「1行=1つの状態期間」の履歴テーブル。削除は不可（DBにdeleteポリシーを作っていない）。
 // 訂正（update）と追加（insert）は staff_status_log に自動で変更履歴を残す。
 const STATUS_KINDS=['在職','産休','育休','休職','退職'];
+// v201: スタッフ一覧バッジ用の色（状態→背景/枠/文字）
+const STATUS_BADGE={'産休':{bg:'#FDF2F8',bd:'#F9A8D4',tx:'#86198F'},'育休':{bg:'#FDF2F8',bd:'#F9A8D4',tx:'#86198F'},'休職':{bg:'#FFF7ED',bd:'#FDBA74',tx:'#9A3412'},'退職':{bg:'#F1F5F9',bd:'#CBD5E1',tx:'#475569'}};
 // ── v198 Phase2: 在籍ステータスの1行(row)が、対象月(y年m月)と期間が重なるかを判定 ──
 // 「在職」は通常勤務なので対象外。日付はISO文字列(YYYY-MM-DD)同士の比較で判定できる。
 // v200: 「未定（休眠）」を表す番兵の開始日。DBのstaff_status.start_dateがNOT NULLのため、
@@ -1994,7 +1996,8 @@ function RequestSheet({dk,mySlots,allDaySlots,selReq,remainDays,onApply,onApplyW
 // ── 在籍ステータス管理セクション（設計書v1.1 Phase1）──
 // スタッフ画面の下部に表示。一覧・行追加・訂正（直接書き換え）ができる。
 // 行の削除ボタンは意図的に無い（過去は消さない）。訂正はDBの staff_status_log に自動記録される。
-function StaffStatusSection({staff}){
+function StaffStatusSection({staff,jumpTo,onJumpDone}){
+  const secRef=React.useRef(null);
   const [rows,setRows]=useState([]);
   const [loading,setLoading]=useState(false);
   const [err,setErr]=useState('');
@@ -2013,6 +2016,14 @@ function StaffStatusSection({staff}){
     setRows(Array.isArray(r.rows)?r.rows:[]);
   }
   useEffect(()=>{reload();},[]);
+  // v201: 編集画面の「🗂 在籍ステータス」ボタンから、この職員を選択済みで追加フォームを開き、欄までスクロール
+  React.useEffect(()=>{
+    if(jumpTo==null)return;
+    setShowAdd(true);
+    setAddForm({...emptyAdd,staff_code:(jumpTo||'')});
+    setTimeout(()=>{try{secRef.current&&secRef.current.scrollIntoView({behavior:'smooth',block:'start'});}catch(e){}},60);
+    onJumpDone&&onJumpDone();
+  },[jumpTo]);
 
   // 職員コード→氏名（この職種に登録がある職員のみ引ける。他職種はコードのまま表示）
   function nameOf(code){
@@ -2070,7 +2081,7 @@ function StaffStatusSection({staff}){
   const inp={padding:'4px 8px',border:K.bd2,borderRadius:K.rmd,fontSize:13,background:K.bg,color:K.text};
   const codedStaff=(staff||[]).filter(s=>s.code);
   return(
-    <div style={{marginTop:24,background:K.bg,border:K.bd,borderRadius:K.rlg,padding:14}}>
+    <div ref={secRef} style={{marginTop:24,background:K.bg,border:K.bd,borderRadius:K.rlg,padding:14}}>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
         <div style={{fontWeight:600,fontSize:15}}>🗂 在籍ステータス（産休・育休・休職・退職の履歴）</div>
         <div style={{display:'flex',gap:8}}>
@@ -2715,7 +2726,8 @@ function App(){
   // 管理者のシフト画面表示中に、月やタブが変わるたび読み直す（スタッフ画面で登録した直後にシフト画面へ戻っても反映される）
   const [staffStatusRows,setStaffStatusRows]=useState([]);
   React.useEffect(()=>{
-    if(!SB_ENABLED||appMode!=='admin'||tab!=='shift')return;
+    // v201: シフト画面に加え、スタッフ画面（カードのバッジ表示）でも読む
+    if(!SB_ENABLED||appMode!=='admin'||(tab!=='shift'&&tab!=='staff'))return;
     let stop=false;
     (async()=>{
       // 注意: サインイン完了前に読むと、RLSにより「エラーではなく0件」が返ってしまう（401にならず再ログインも走らない）。
@@ -2727,6 +2739,22 @@ function App(){
     })();
     return()=>{stop=true;};
   },[appMode,tab,y,m]);
+  // v201: 編集画面から在籍ステータス欄へ「この職員を選択済み」でジャンプするための受け渡し
+  const [statusJump,setStatusJump]=useState(null);
+  // v201: スタッフ一覧カード用のバッジ。現在有効／開始予定／未定(休眠)のみ表示（終了済みの過去は出さない）。
+  function staffStatusBadge(s){
+    if(!s||!s.code)return null;
+    const rows=(staffStatusRows||[]).filter(r=>r.staff_code===s.code&&r.status!=='在職');
+    if(!rows.length)return null;
+    const d=new Date();const today=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    const active=rows.find(r=>!isDormantStatus(r)&&r.start_date<=today&&(r.end_date||'9999-12-31')>=today);
+    if(active)return {status:active.status,label:active.status,kind:'active'};
+    const upcoming=rows.find(r=>!isDormantStatus(r)&&r.start_date>today);
+    if(upcoming)return {status:upcoming.status,label:upcoming.status+'（'+upcoming.start_date+'〜予定）',kind:'upcoming'};
+    const dormant=rows.find(isDormantStatus);
+    if(dormant)return {status:dormant.status,label:dormant.status+'（予定・未定）',kind:'dormant'};
+    return null;
+  }
   // 対象月(y,m)に在職以外の期間が重なる職員 → {職員コード:[該当行,...]}
   const inactiveStatusByCode=useMemo(()=>{
     const map={};
@@ -7943,9 +7971,12 @@ ${bodyHtml}
                         <span style={{fontSize:12,fontWeight:600,color:calcRemaining(paidLeave[s.id]?.granted||0,paidLeave[s.id]?.history||[])<=3?K.textD:K.textG,marginLeft:4}}>残: {calcRemaining(paidLeave[s.id]?.granted||0,paidLeave[s.id]?.history||[])}日</span>
                       </div>
                     </div>
-                    <div style={{display:'flex',gap:6}}>
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
                       <button onClick={svEdit} style={{padding:'5px 14px',background:K.bgI,color:K.textI,border:K.bdI,borderRadius:K.rmd,cursor:'pointer',fontWeight:500,fontSize:12}}>保存</button>
                       <button onClick={()=>setEid(null)} style={{padding:'5px 14px',background:K.bgS,color:K.textS,border:K.bd,borderRadius:K.rmd,cursor:'pointer',fontSize:12}}>キャンセル</button>
+                      {/* v201: この職員を選択済みで在籍ステータス欄を開く */}
+                      <button onClick={()=>setStatusJump(s.code||'')} title="この職員の産休・育休・休職・退職などの在籍ステータスを追加・確認します（下の一覧が開きます）" style={{padding:'5px 14px',background:'#FDF2F8',color:'#86198F',border:'1px solid #F9A8D4',borderRadius:K.rmd,cursor:'pointer',fontSize:12}}>🗂 在籍ステータス</button>
+                      <span style={{fontSize:11,color:K.textS}}>産休・育休・休職・退職はこちら</span>
                     </div>
                   </div>
                 ):(
@@ -7957,6 +7988,7 @@ ${bodyHtml}
                         {s.workType==='work_wish'&&<span style={{fontSize:10,color:'#065F46',background:'#ECFDF5',borderRadius:10,padding:'1px 6px',marginRight:3}}>🙋 出勤希望</span>}
                         {s.pin&&s.pin.length===4?<span style={{fontSize:10,color:K.textG,background:K.bgG,borderRadius:10,padding:'1px 6px'}}>🔐 PIN設定済</span>:<span style={{fontSize:10,color:K.textD,background:K.bgD,borderRadius:10,padding:'1px 6px'}}>⚠ PIN未設定</span>}
                         <span style={{fontSize:10,color:'#86198F',background:'#FDF2F8',borderRadius:10,padding:'1px 6px'}}>🌸 有給残{calcRemaining(paidLeave[s.id]?.granted||0,paidLeave[s.id]?.history||[])}日</span>
+                        {(()=>{const b=staffStatusBadge(s);if(!b)return null;const col=b.kind==='active'?(STATUS_BADGE[b.status]||STATUS_BADGE['退職']):{bg:'#F1F5F9',bd:'#CBD5E1',tx:'#64748B'};return <span key="stbadge" title="在籍ステータス（下の一覧、または編集の🗂ボタンから変更できます）" style={{fontSize:10,color:col.tx,background:col.bg,border:'1px solid '+col.bd,borderRadius:10,padding:'1px 6px'}}>🗂 {b.label}</span>;})()}
                       </div>
                       <div style={{fontSize:12,color:K.textS,whiteSpace:'pre-wrap',lineHeight:1.6}}>{s.notes}</div>
                       {s.email?(
@@ -7982,8 +8014,8 @@ ${bodyHtml}
             ))}
           </div>
 
-          {/* 在籍ステータス管理（設計書v1.1 Phase1） */}
-          <StaffStatusSection staff={staff}/>
+          {/* 在籍ステータス管理（設計書v1.1 Phase1）／v201: 編集画面からのジャンプ受け口 */}
+          <StaffStatusSection staff={staff} jumpTo={statusJump} onJumpDone={()=>setStatusJump(null)}/>
         </div>
       )}
 
