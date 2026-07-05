@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v199'; // v199: 在籍ステータス管理（Phase3）：公開ペイロードに staffStatus:{職員コード:[{status,from,to}]} を同梱（タイムカードはshift_data経由で受信し、欠勤カウントから除外する）
+const APP_VERSION = 'v200'; // v200: 在籍ステータスの開始日を空欄で登録可能に（開始日が入るまで休眠＝シフト・欠勤に影響しない）。DBのstart_dateがNOT NULLのため空欄は番兵日9999-12-31で保存し「未定（休眠）」表示。判明後に✏訂正で実日付に置き換える
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -1444,12 +1444,17 @@ const SB_ENABLED=SUPABASE_URL!=='YOUR_SUPABASE_URL';
 const STATUS_KINDS=['在職','産休','育休','休職','退職'];
 // ── v198 Phase2: 在籍ステータスの1行(row)が、対象月(y年m月)と期間が重なるかを判定 ──
 // 「在職」は通常勤務なので対象外。日付はISO文字列(YYYY-MM-DD)同士の比較で判定できる。
+// v200: 「未定（休眠）」を表す番兵の開始日。DBのstaff_status.start_dateがNOT NULLのため、
+// 空欄の代わりにこの遠い未来日を保存する。文字列比較で常に未来＝どの月とも重ならない＝休眠。判明したら✏訂正で実日付に置き換える。
+const DORMANT_START='9999-12-31';
+function isDormantStatus(row){return !row||!row.start_date||row.start_date>='9999-01-01';}
 function statusOverlapsMonth(row,y,m){
   if(!row||row.status==='在職')return false;
+  if(isDormantStatus(row))return false; // v200: 開始日が未定（番兵）＝まだ有効化されていない（休眠）。開始日が入るまでシフトに影響しない
   const mm=String(m).padStart(2,'0');
   const mStart=y+'-'+mm+'-01';
   const mEnd=y+'-'+mm+'-'+String(new Date(y,m,0).getDate()).padStart(2,'0');
-  const from=row.start_date||'0000-01-01';
+  const from=row.start_date;
   const to=row.end_date||'9999-12-31'; // 終了日が空欄＝継続中
   return from<=mEnd&&to>=mStart;
 }
@@ -2032,12 +2037,14 @@ function StaffStatusSection({staff}){
     const code=(addForm.staff_code||'').replace(/[^0-9]/g,'');
     if(!code){alert('職員コード（数字）を入力するか、職員を選択してください');return;}
     const f={...addForm,staff_code:code.padStart(7,'0')};
-    if(!f.start_date){alert('開始日を入力してください');return;}
+    // v200: 開始日は空欄でも登録可。空欄の行は「開始日が入るまでシフトに影響しない（休眠）」。判明したら✏訂正で開始日を記入する。
+    if(!f.start_date&&!window.confirm('開始日が空欄です。\nこの行は開始日を記入するまでシフト・欠勤集計に反映されません（休眠状態）。\n（例：産休の予定日が未定のとき）\nこのまま登録しますか？'))return;
     const de=dateOrderError(f); if(de){alert(de);return;}
     const ov=findOverlap(f.staff_code,f.start_date,f.end_date,null);
     if(ov&&!window.confirm('⚠ 同じ職員の既存の期間と重なっています。\n既存: '+ov.status+' '+ov.start_date+'〜'+(ov.end_date||'継続中')+'\nこのまま追加しますか？'))return;
     setBusy(true);
-    const r=await sbStatusInsert({staff_code:f.staff_code,status:f.status,start_date:f.start_date,end_date:f.end_date||null,memo:f.memo||''});
+    // v200: 開始日が空欄なら番兵日(DORMANT_START)で保存＝休眠。判明したら✏訂正で実日付に置き換える。
+    const r=await sbStatusInsert({staff_code:f.staff_code,status:f.status,start_date:f.start_date||DORMANT_START,end_date:f.end_date||null,memo:f.memo||''});
     setBusy(false);
     if(!r.ok){alert(r.error);return;}
     setShowAdd(false);setAddForm(emptyAdd);
@@ -2046,12 +2053,14 @@ function StaffStatusSection({staff}){
   async function doSaveEdit(){
     const before=(rows||[]).find(r=>r.id===editId); if(!before||!editForm)return;
     const f=editForm;
-    if(!f.start_date){alert('開始日を入力してください');return;}
+    // v200: 訂正でも開始日は空欄可（休眠のまま）。開始日を記入すると、その日から有効化される。
+    if(!f.start_date&&!window.confirm('開始日が空欄です。\nこの行は開始日を記入するまでシフト・欠勤集計に反映されません（休眠状態）。\nこのまま保存しますか？'))return;
     const de=dateOrderError(f); if(de){alert(de);return;}
     const ov=findOverlap(before.staff_code,f.start_date,f.end_date,editId);
     if(ov&&!window.confirm('⚠ 同じ職員の既存の期間と重なっています。\n既存: '+ov.status+' '+ov.start_date+'〜'+(ov.end_date||'継続中')+'\nこのまま保存しますか？'))return;
     setBusy(true);
-    const r=await sbStatusUpdate(editId,{status:f.status,start_date:f.start_date,end_date:f.end_date||null,memo:f.memo||''},before);
+    // v200: 開始日が空欄なら番兵日(DORMANT_START)で保存＝休眠。
+    const r=await sbStatusUpdate(editId,{status:f.status,start_date:f.start_date||DORMANT_START,end_date:f.end_date||null,memo:f.memo||''},before);
     setBusy(false);
     if(!r.ok){alert(r.error);return;}
     setEditId(null);setEditForm(null);
@@ -2133,7 +2142,7 @@ function StaffStatusSection({staff}){
                         :<span style={{background:c.bg,border:'1px solid '+c.bd,color:c.tx,borderRadius:10,padding:'2px 10px',fontWeight:600,whiteSpace:'nowrap'}}>{r.status}</span>}
                     </td>
                     <td style={{padding:'6px 8px',whiteSpace:'nowrap'}}>
-                      {editing?<input type="date" value={editForm.start_date} onChange={e=>setEditForm({...editForm,start_date:e.target.value})} style={inp}/>:r.start_date}
+                      {editing?<input type="date" value={editForm.start_date||''} onChange={e=>setEditForm({...editForm,start_date:e.target.value})} style={inp}/>:(isDormantStatus(r)?<span style={{color:'#B45309',fontWeight:600}}>未定（休眠）</span>:r.start_date)}
                     </td>
                     <td style={{padding:'6px 8px',whiteSpace:'nowrap'}}>
                       {editing
@@ -2150,7 +2159,7 @@ function StaffStatusSection({staff}){
                           <button onClick={()=>{setEditId(null);setEditForm(null);}} style={{padding:'3px 10px',border:K.bd2,borderRadius:K.rmd,background:K.bg,cursor:'pointer',fontSize:12}}>やめる</button>
                         </span>
                       ):(
-                        <button onClick={()=>{setEditId(r.id);setEditForm({status:r.status,start_date:r.start_date,end_date:r.end_date||'',memo:r.memo||''});}} style={{padding:'3px 10px',border:K.bd2,borderRadius:K.rmd,background:K.bg,cursor:'pointer',fontSize:12}}>✏ 訂正</button>
+                        <button onClick={()=>{setEditId(r.id);setEditForm({status:r.status,start_date:isDormantStatus(r)?'':r.start_date,end_date:r.end_date||'',memo:r.memo||''});}} style={{padding:'3px 10px',border:K.bd2,borderRadius:K.rmd,background:K.bg,cursor:'pointer',fontSize:12}}>✏ 訂正</button>
                       )}
                     </td>
                   </tr>
@@ -3188,7 +3197,7 @@ function App(){
           statusPayload={};
           (st.rows||[]).forEach(r=>{
             if(r.status==='在職')return; // 在職は通常勤務なので同梱しない
-            (statusPayload[r.staff_code]=statusPayload[r.staff_code]||[]).push({status:r.status,from:r.start_date||'',to:r.end_date||''});
+            (statusPayload[r.staff_code]=statusPayload[r.staff_code]||[]).push({status:r.status,from:isDormantStatus(r)?'':r.start_date,to:r.end_date||''}); // v200: 休眠(番兵日)はfrom空欄で送る＝タイムカード側でも休眠扱い
           });
         }
       }catch(e){}
