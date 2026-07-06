@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v201'; // v201: 各スタッフの編集画面に「🗂 在籍ステータス」ボタン追加（その職員を選択済みで在籍ステータス欄が開く）。スタッフ一覧に在籍ステータスのバッジ（現在有効/開始予定/未定のみ・非在職者だけ）を表示
+const APP_VERSION = 'v202'; // v201: 各スタッフの編集画面に「🗂 在籍ステータス」ボタン追加（その職員を選択済みで在籍ステータス欄が開く）。スタッフ一覧に在籍ステータスのバッジ（現在有効/開始予定/未定のみ・非在職者だけ）を表示
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
@@ -4417,6 +4417,31 @@ ${bodyHtml}
       const history=(cur.history||[]).filter(r=>r.dk!==dk);
       return{...prev,[sid]:{...cur,history}};
     });
+    // v202: 全日有給の反映時に追加された手動除外(配置禁止)も解除する。
+    //       これが残ると、有給を取り消してもその日はずっと配置不可のままになる。
+    setManualExclusions(prev=>{
+      const d2={...(prev[dk]||{})};
+      Object.keys(d2).forEach(slotId=>{d2[slotId]=(d2[slotId]||[]).filter(x=>x!==sid);});
+      return{...prev,[dk]:d2};
+    });
+    // v202: 申請レコード(requests)も削除する。
+    //       残っていると「requests→tmpsの自動反映」(同期・再読込のたびに実行)で有給が復活し、
+    //       管理者が何度消しても消えない状態になる（今回の不具合の根本原因）。
+    removePaidOffRequest(dk,sid);
+  }
+  // v202: 休み・有給の申請レコードを削除（墓標を立ててクラウド同期での復活も防ぐ）
+  function removePaidOffRequest(dk,sid){
+    const r=(requests[dk]||{})[String(sid)];
+    if(!r||!['paid_full','paid_am','paid_pm','off'].includes(r.type))return;
+    markReqDeleted(dk,String(sid));
+    touchReqEdit();
+    setRequests(prev=>{
+      const day=prev[dk];if(!day||!day[String(sid)])return prev;
+      const d2={...day};delete d2[String(sid)];
+      const n={...prev};
+      if(Object.keys(d2).length===0){delete n[dk];}else{n[dk]=d2;}
+      return n;
+    });
   }
   function setPaidGranted(sid,val){
     setPaidLeave(prev=>{const cur=prev[sid]||{granted:0,history:[]};return{...prev,[sid]:{...cur,granted:Math.max(0,Number(val)||0)}};});
@@ -7614,7 +7639,7 @@ ${bodyHtml}
                               {/* 区切り線 */}
                               <div style={{width:'100%',height:0,borderTop:K.bd,margin:'2px 0'}}/>
                               {/* 希望休 */}
-                              <button onClick={()=>setTmp(selDk,s.id,isOff2?null:'off','')}
+                              <button onClick={()=>{if(isOff2){setTmp(selDk,s.id,null,'');removePaidOffRequest(selDk,s.id);/* v202: 希望休解除時も申請レコードを消して復活を防ぐ */}else{setTmp(selDk,s.id,'off','');}}}
                                 style={{padding:'4px 10px',fontSize:11,borderRadius:6,cursor:'pointer',
                                   border:'1px solid #F97316',background:isOff2?'#FFF7ED':K.bg,
                                   color:'#C2410C',fontWeight:isOff2?700:400}}>
@@ -7633,7 +7658,7 @@ ${bodyHtml}
                                   style={{fontSize:11,width:90,padding:'3px 7px',border:K.bd2,borderRadius:6,background:K.bg,color:K.text}}/>
                               )}
                               {/* クリア */}
-                              {cond&&<button onClick={()=>{if(isPaid){cancelPaidLeave(selDk,s.id);}else{setTmp(selDk,s.id,null,'');// manualExclusionsからも除外解除
+                              {cond&&<button onClick={()=>{if(isPaid){cancelPaidLeave(selDk,s.id);}else{setTmp(selDk,s.id,null,'');removePaidOffRequest(selDk,s.id);// v202: 申請レコードも削除。manualExclusionsからも除外解除
                               setManualExclusions(prev=>{
                                 const dk=selDk;const sid=s.id;
                                 const d2={...(prev[dk]||{})};
@@ -8167,6 +8192,13 @@ ${bodyHtml}
                             setTmps(newTmps);setPaidLeave(newPL);
                           }} style={{padding:'3px 9px',border:'1px solid #D946A8',borderRadius:6,background:'#FDF2F8',color:'#86198F',cursor:'pointer',fontSize:11,whiteSpace:'nowrap',fontWeight:500}}>反映する</button>
                         }
+                        {/* v202: 反映済み・未反映を問わず申請を取り消せる。反映済みならシフト・有給残・配置禁止も連動して元に戻す */}
+                        <button onClick={()=>{
+                          const d2=new Date(dk);
+                          if(!window.confirm(staffName+'さんの「'+rt.label+'」('+(d2.getMonth()+1)+'/'+d2.getDate()+')を取り消しますか？\n'+(alreadyApplied?'シフト上の反映・有給残日数・配置禁止も元に戻ります。':'申請レコードを削除します。')))return;
+                          if(alreadyApplied){cancelPaidLeave(dk,sid);}
+                          else{removePaidOffRequest(dk,sid);}
+                        }} style={{padding:'3px 9px',border:'1px solid #FCA5A5',borderRadius:6,background:'#FEF2F2',color:'#B91C1C',cursor:'pointer',fontSize:11,whiteSpace:'nowrap',marginLeft:4}}>🗑 取消</button>
                        </div>
                        <RepliesView replies={req.replies}/>
                        <ReplyBox dk={dk} rkey={String(sid)} draft={replyDraft} setDraft={setReplyDraft} onSend={sendReply} defaultText={alreadyApplied?'反映されました':''}/>
@@ -9845,5 +9877,18 @@ CHANGELOG v167
 
 <!-- v169 changelog: 公開履歴を完全復元用スナップショットとして保存し、履歴復元では現在画面の配置・設定を全消去して履歴データのみで完全置換するよう修正。 -->
 <!-- v172 changelog: 履歴の「表示」と「この版に戻す」で参照するスナップショット元を統一。復元は表示されているsnap.dataを正本にし、restoreDataは補助に限定。 -->
+<!--
+CHANGELOG v202
+- 【不具合修正】一度設定・申請した有給休暇が削除できない問題を修正。
+  原因: 申請レコード(requests)が残ったままだと「requests→tmps自動反映」(クラウド同期・再読込のたびに実行)で
+        有給がカレンダーに復活するため、管理者がカレンダー側だけ消しても次の同期で戻ってしまっていた。
+- cancelPaidLeave を拡張: ①カレンダー(tmps) ②申請レコード(requests＋墓標) ③有給残日数の履歴(paidLeave.history)
+  ④全日有給時の配置禁止(manualExclusions) の4か所を連動して削除するようにした。
+- 「申請の承認」画面の休み・有給の各申請に「🗑 取消」ボタンを追加（反映済み/未反映どちらも取消可能）。
+- 希望休のトグル解除・クリア時も申請レコードを削除し、同様の復活を防止。
+- 注意: 申請削除の墓標(reqTomb)は2分間有効。別端末が古いrequestsを2分以上あとに同期すると理論上復活し得る
+  （既存の申請削除と同じ挙動）。復活した場合はもう一度取消すれば消える。
+- アプリ表示バージョンを v201 から v202 に更新。
+-->
 </body>
 </html>
