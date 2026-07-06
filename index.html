@@ -81,8 +81,9 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v202'; // v201: 各スタッフの編集画面に「🗂 在籍ステータス」ボタン追加（その職員を選択済みで在籍ステータス欄が開く）。スタッフ一覧に在籍ステータスのバッジ（現在有効/開始予定/未定のみ・非在職者だけ）を表示
+const APP_VERSION = 'v203'; // v201: 各スタッフの編集画面に「🗂 在籍ステータス」ボタン追加（その職員を選択済みで在籍ステータス欄が開く）。スタッフ一覧に在籍ステータスのバッジ（現在有効/開始予定/未定のみ・非在職者だけ）を表示
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
+let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
 // ── アプリ自動更新（GitHub Pages/ブラウザのキャッシュで古い版が端末ごとに固定化するのを防ぐ）──
 // 現在URLにユニークなクエリを付けて再読込し、キャッシュを必ずバイパスして最新HTMLを取得する。
@@ -1207,7 +1208,7 @@ const SB={
     const rid=this._rowId(table); const clinic=(table==='shift_data'&&CLINIC_MODE);
     for(let a=0;a<2;a++){
       try{
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${rid}&select=data`,{cache:'no-store',headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer(),'Cache-Control':'no-cache','Pragma':'no-cache'}});
         if(r.status===401&&a===0&&await sbReauth())continue;
         if(!r.ok)return null;
         const d=await r.json(); const all=d[0]?.data; const u=APP_UNIT||'main';
@@ -1222,7 +1223,7 @@ const SB={
     const rid=this._rowId(table); const clinic=(table==='shift_data'&&CLINIC_MODE);
     for(let a=0;a<2;a++){
       try{
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${rid}&select=data`,{cache:'no-store',headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer(),'Cache-Control':'no-cache','Pragma':'no-cache'}});
         if(r.status===401&&a===0&&await sbReauth())continue;
         if(!r.ok)return {ok:false,data:null};
         const d=await r.json(); const all=d[0]?.data; const u=APP_UNIT||'main';
@@ -1236,7 +1237,7 @@ const SB={
   async getFull(table){
     for(let a=0;a<2;a++){
       try{
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.main&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.main&select=data`,{cache:'no-store',headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer(),'Cache-Control':'no-cache','Pragma':'no-cache'}});
         if(r.status===401&&a===0&&await sbReauth())continue;
         if(!r.ok)return null;
         const d=await r.json(); return d[0]?.data||null;
@@ -1249,7 +1250,7 @@ const SB={
     const rid=this._rowId('shift_data'); const clinic=CLINIC_MODE;
     for(let a=0;a<2;a++){
       try{
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{cache:'no-store',headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer(),'Cache-Control':'no-cache','Pragma':'no-cache'}});
         if(r.status===401&&a===0&&await sbReauth())continue;
         if(!r.ok)return {ok:false,data:null};
         const j=await r.json(); const all=j[0]?.data||{};
@@ -1266,7 +1267,7 @@ const SB={
       try{
         // ★安全策：既存行を読めない限り書き込まない（下書き保存で他職種/sharedを消さない）
         let all={}; let readOk=false;
-        const cur=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        const cur=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{cache:'no-store',headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer(),'Cache-Control':'no-cache','Pragma':'no-cache'}});
         if(cur.status===401&&a===0&&await sbReauth())continue;
         if(cur.ok){readOk=true;const j=await cur.json();const ex=j[0]?.data;if(ex&&typeof ex==='object')all={...ex};}
         if(!readOk){ if(a===0)continue; return false; }
@@ -1294,7 +1295,7 @@ const SB={
     const rid=this._rowId('shift_data'); const clinic=CLINIC_MODE;
     for(let a=0;a<2;a++){
       try{
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{cache:'no-store',headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer(),'Cache-Control':'no-cache','Pragma':'no-cache'}});
         if(r.status===401&&a===0&&await sbReauth())continue;
         if(!r.ok)return {ok:false,pin:''};
         const j=await r.json(); const all=j[0]?.data||{};
@@ -1318,7 +1319,7 @@ const SB={
       try{
         // ★安全策：既存行を読めない限り書き込まない（PIN保存で診療枠や他職種を消さない）
         let all={}; let readOk=false;
-        const cur=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        const cur=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{cache:'no-store',headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer(),'Cache-Control':'no-cache','Pragma':'no-cache'}});
         if(cur.status===401&&a===0&&await sbReauth())continue;
         if(cur.ok){readOk=true;const j=await cur.json();const ex=j[0]?.data;if(ex&&typeof ex==='object')all={...ex};}
         if(!readOk){ if(a===0)continue; return false; }
@@ -1346,7 +1347,7 @@ const SB={
     const rid=this._rowId('shift_data'); const clinic=CLINIC_MODE;
     for(let a=0;a<2;a++){
       try{
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{cache:'no-store',headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer(),'Cache-Control':'no-cache','Pragma':'no-cache'}});
         if(r.status===401&&a===0&&await sbReauth())continue;
         if(!r.ok)return {ok:false,url:''};
         const j=await r.json(); const all=j[0]?.data||{};
@@ -1369,7 +1370,7 @@ const SB={
       try{
         // ★安全策：既存行を読めない限り書き込まない
         let all={}; let readOk=false;
-        const cur=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        const cur=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{cache:'no-store',headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer(),'Cache-Control':'no-cache','Pragma':'no-cache'}});
         if(cur.status===401&&a===0&&await sbReauth())continue;
         if(cur.ok){readOk=true;const j=await cur.json();const ex=j[0]?.data;if(ex&&typeof ex==='object')all={...ex};}
         if(!readOk){ if(a===0)continue; return false; }
@@ -1402,7 +1403,7 @@ const SB={
         // ★安全策：既存行の読み取りが成功しない限り書き込まない。
         //   読み取り失敗時に書くと all={} を丸ごとPATCHして他職種/sharedを消してしまうため。
         let all={}; let readOk=false;
-        const cur=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        const cur=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${rid}&select=data`,{cache:'no-store',headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer(),'Cache-Control':'no-cache','Pragma':'no-cache'}});
         if(cur.status===401&&a===0&&await sbReauth())continue;
         if(cur.ok){
           readOk=true;
@@ -1463,7 +1464,7 @@ function statusOverlapsMonth(row,y,m){
 async function sbStatusList(){
   for(let a=0;a<2;a++){
     try{
-      const r=await fetch(`${SUPABASE_URL}/rest/v1/staff_status?select=*&order=staff_code.asc,start_date.asc`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/staff_status?select=*&order=staff_code.asc,start_date.asc`,{cache:'no-store',headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer(),'Cache-Control':'no-cache','Pragma':'no-cache'}});
       if(r.status===401&&a===0&&await sbReauth())continue;
       if(!r.ok)return {ok:false,rows:[],error:'読み込みに失敗しました('+r.status+')'};
       return {ok:true,rows:await r.json()};
@@ -2317,7 +2318,18 @@ function App(){
     const check=async()=>{
       const now=Date.now(); if(now-last<30000)return; last=now; // 30秒以内の重複確認はスキップ
       const latest=await fetchLatestAppVersion();
-      if(!stop&&latest&&latest!==APP_VERSION)setUpdateVer(latest);
+      if(!stop&&latest&&latest!==APP_VERSION){
+        // v203: スタッフ系画面（閲覧・申請のみで編集消失の心配がない）は自動で最新版へ再読込。
+        //       管理者画面は編集中の可能性があるため従来どおりバナー表示（タップで更新）。
+        if(CUR_APP_MODE!=='admin'){
+          let already='';try{already=sessionStorage.getItem('fukumimi_autoReloadedTo')||'';}catch(e){}
+          if(already!==latest){
+            try{sessionStorage.setItem('fukumimi_autoReloadedTo',latest);}catch(e){}
+            forceReloadLatest();return;
+          }
+        }
+        setUpdateVer(latest);
+      }
     };
     const id=setInterval(check,120000); // 2分ごとに最新版を確認
     const t=setTimeout(check,15000);    // 初回は起動15秒後にも確認
@@ -2722,6 +2734,7 @@ function App(){
   const [staff,setStaff]=useState(()=>Array.isArray(saved?.staff)&&saved.staff.length?saved.staff:STAFF0);
   // 実労働時間の退勤時刻判定に使う参照表を、描画前に同期更新（dayHoursから参照）
   STAFF_OBJ_LOOKUP={};(staff||[]).forEach(s=>{STAFF_OBJ_LOOKUP[s.id]=s;});
+  CUR_APP_MODE=appMode; // v203: バージョン監視から現在モードを参照するため同期
   // ── v198 Phase2: 在籍ステータスを読み込み、対象月に在職以外の期間が重なる職員を把握 ──
   // 管理者のシフト画面表示中に、月やタブが変わるたび読み直す（スタッフ画面で登録した直後にシフト画面へ戻っても反映される）
   const [staffStatusRows,setStaffStatusRows]=useState([]);
@@ -3057,7 +3070,7 @@ function App(){
     if(CLINIC_MODE){
       try{
         const rid=SB._rowId('shift_data');
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer()}});
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/shift_data?id=eq.${rid}&select=data`,{cache:'no-store',headers:{'apikey':SUPABASE_KEY,'Authorization':sbBearer(),'Cache-Control':'no-cache','Pragma':'no-cache'}});
         if(r.ok){
           const j=await r.json(); const all=j[0]?.data||{};
           const unitData=(all&&all[APP_UNIT]&&typeof all[APP_UNIT]==='object')?all[APP_UNIT]:{};
@@ -9889,6 +9902,18 @@ CHANGELOG v202
 - 注意: 申請削除の墓標(reqTomb)は2分間有効。別端末が古いrequestsを2分以上あとに同期すると理論上復活し得る
   （既存の申請削除と同じ挙動）。復活した場合はもう一度取消すれば消える。
 - アプリ表示バージョンを v201 から v202 に更新。
+-->
+<!--
+CHANGELOG v203
+- 【古い端末のキャッシュ対策】一部の古いスマホで、アプリは最新版なのに表示されるシフトデータが
+  古いまま更新されない問題への対策。
+- クラウド(Supabase)からのデータ取得12箇所すべてに cache:'no-store'＋Cache-Control/Pragmaヘッダを追加し、
+  ブラウザキャッシュを使わず毎回必ず最新データを取得するようにした。
+  ※URLに &_ts= を付けるキャッシュバスター方式はPostgRESTが400エラーで拒否するため使用不可（実測確認済み）。
+- スタッフ系画面では、新しいアプリ版を検知したら自動で最新版へ再読込するようにした
+  （従来はバナーをタップする方式。管理者画面は編集中の消失を避けるため従来どおりバナー）。
+  無限ループ防止のため同じ版への自動再読込は1セッション1回（fukumimi_autoReloadedTo を共用）。
+- アプリ表示バージョンを v202 から v203 に更新。
 -->
 </body>
 </html>
