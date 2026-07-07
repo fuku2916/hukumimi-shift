@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v203'; // v201: 各スタッフの編集画面に「🗂 在籍ステータス」ボタン追加（その職員を選択済みで在籍ステータス欄が開く）。スタッフ一覧に在籍ステータスのバッジ（現在有効/開始予定/未定のみ・非在職者だけ）を表示
+const APP_VERSION = 'v204'; // v201: 各スタッフの編集画面に「🗂 在籍ステータス」ボタン追加（その職員を選択済みで在籍ステータス欄が開く）。スタッフ一覧に在籍ステータスのバッジ（現在有効/開始予定/未定のみ・非在職者だけ）を表示
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -2413,6 +2413,7 @@ function App(){
         // v135: 履歴は現在の編集中シフトとは別物なので、cloudWins判定に関係なく常にクラウドから読む。
         // これにより、外来枠設定などを変更した直後でも「公開」しなくても履歴一覧が見える。
         if(sd&&Array.isArray(sd.history))setShiftHistory(sd.history);
+        if(sd&&sd.decisionSnap&&typeof sd.decisionSnap==='object')setDecisionSnap(sd.decisionSnap); // v204
         if(sd&&Object.keys(sd).length>0 && cloudWins && !skipCloudShift){
           if(sd.staff)setStaff(sd.staff);
           if(sd.slots)setSlots(sd.slots);
@@ -2474,6 +2475,7 @@ function App(){
           if(sd.outpatientDoctorPresence&&typeof sd.outpatientDoctorPresence==='object')setOutpatientDoctorPresence(sd.outpatientDoctorPresence);
           if(sd.outpatientClosuresUpdatedAt!==undefined)setOutpatientClosuresUpdatedAt(sd.outpatientClosuresUpdatedAt||'');
           if(sd.paidLeave)setPaidLeave(sd.paidLeave);
+          if(sd.decisionSnap&&typeof sd.decisionSnap==='object')setDecisionSnap(sd.decisionSnap); // v204: 決定版
           // 人員不足の表示に必要（必要人数・除外）
           if(sd.weeklyReq)setWeeklyReq(sd.weeklyReq);
           if(sd.monthlyReq)setMonthlyReq(sd.monthlyReq);
@@ -2503,6 +2505,7 @@ function App(){
         setAsgn(sd.asgn);
         setTmps(sd.tmps||{});
         setPaidLeave(sd.paidLeave||{});
+        if(sd.decisionSnap&&typeof sd.decisionSnap==='object')setDecisionSnap(sd.decisionSnap); // v204
         if(sd.outpatientClosures&&typeof sd.outpatientClosures==='object')setOutpatientClosures(sd.outpatientClosures);
           if(sd.outpatientDoctorPresence&&typeof sd.outpatientDoctorPresence==='object')setOutpatientDoctorPresence(sd.outpatientDoctorPresence);
         if(sd.outpatientClosuresUpdatedAt!==undefined)setOutpatientClosuresUpdatedAt(sd.outpatientClosuresUpdatedAt||'');
@@ -2608,6 +2611,9 @@ function App(){
   const [reqReadMap,setReqReadMap]=useState(()=>loadReqRead());
   // 「申請一覧」を今回開いたときに未読だった申請（ck->true）。個別ハイライト用。開いている間は保持。
   const [unreadSnapshot,setUnreadSnapshot]=useState({});
+  // v204: 決定版シフト（管理者が確定した凍結スナップショット。スタッフの「📌 決定版シフト表」で表示）
+  const [decisionSnap,setDecisionSnap]=useState(null);
+  const [markingDecision,setMarkingDecision]=useState(false);
   const prevStaffTabRef=React.useRef(null);
   // スタッフのアイコン設定（codeごと）と打刻修正の申告（配列）。requests_data の包みに同居。
   const [avatars,setAvatars]=useState({});
@@ -3250,12 +3256,35 @@ function App(){
           (statusPayload[r.staff_code]=statusPayload[r.staff_code]||[]).push({status:r.status,from:r.start_date||'',to:r.end_date||''});
         });
       }
-      const data=currentShiftPayload({history:hist,staffStatus:statusPayload});
+      const data=currentShiftPayload({history:hist,staffStatus:statusPayload,...(prev&&prev.decisionSnap?{decisionSnap:prev.decisionSnap}:{})}); // v204: 公開で決定版を消さない
       const ok=await SB.set('shift_data',data);
       if(ok){try{localStorage.removeItem('fukumimi_restore_lock');}catch(_){ }setPublishedAt(shiftUpdatedAt);setShiftHistory(hist);alert('スタッフへ公開しました。\n（作成: '+fmtStamp(shiftUpdatedAt)+'）\n公開時点スナップショットを保存しました。\n保存名: '+currentArchive.archiveName);}
       else alert('保存に失敗しました。もう一度お試しください。');
     }catch(e){alert('保存に失敗しました：'+(e&&e.message||e));}
     setPublishing(false);
+  }
+  // ── v204: 決定版シフト ──
+  // 「現在スタッフに公開中のシフト」（最新の公開時点スナップショット）を決定版として確定する。
+  // スタッフ画面の「📌 決定版シフト表」ボタンはこの凍結データだけを描画し、以後の編集・再公開では一切変わらない。
+  async function markDecision(){
+    if(!SB_ENABLED){alert('クラウドが設定されていません。');return;}
+    setMarkingDecision(true);
+    try{
+      const cloud=await SB.getSafe('shift_data');
+      if(!cloud.ok||!cloud.data){alert('クラウドに接続できませんでした。');setMarkingDecision(false);return;}
+      const prev=cloud.data;
+      const hist=Array.isArray(prev.history)?prev.history:[];
+      const arch=hist.find(h=>h&&h.kind==='published_archive'&&(h.data||h.restoreData));
+      if(!arch){alert('公開時点スナップショットが見つかりません。\n先に「☁ 公開」でスタッフへ公開してください。');setMarkingDecision(false);return;}
+      const snapData=clonePlain(arch.data||arch.restoreData);
+      const ymLabel=(snapData&&snapData.y&&snapData.m)?(snapData.y+'年'+snapData.m+'月分'):'';
+      if(!window.confirm('現在スタッフに公開中のシフト'+(ymLabel?'（'+ymLabel+'）':'')+'\n公開日時: '+fmtStamp(arch.publishedAt||arch.at)+'\n\nこれを「📌 決定版」として確定しますか？\nスタッフ画面の「決定版シフト表」ボタンにこの内容が固定表示されます（前回の決定版は上書きされます）。')){setMarkingDecision(false);return;}
+      const nextDecision={decidedAt:new Date().toISOString(),publishedAt:arch.publishedAt||arch.at||'',ymLabel,data:snapData};
+      const ok=await SB.set('shift_data',{...prev,decisionSnap:nextDecision});
+      if(ok){setDecisionSnap(nextDecision);alert('📌 決定版として保存しました。\n'+(ymLabel?ymLabel+'・':'')+'公開 '+fmtStamp(nextDecision.publishedAt)+'\nスタッフ画面に「決定版シフト表」ボタンが表示されます。');}
+      else alert('決定版の保存に失敗しました。もう一度お試しください。');
+    }catch(e){alert('決定版の保存に失敗しました：'+(e&&e.message||e));}
+    setMarkingDecision(false);
   }
   // v170: 履歴スナップショットの data は時期により形が異なる。
   // ただし「この版に戻す」は、履歴内の完全スナップショットだけを正本とし、現在画面の state は参照しない。
@@ -6091,6 +6120,18 @@ ${bodyHtml}
               {/* 手動で最新を取得（キャッシュを完全に回避して再読込） */}
               <button onClick={forceReloadLatest} title="アプリとシフトを最新に更新します"
                 style={{border:'1px solid #93C5FD',borderRadius:8,padding:'4px 10px',background:'#EBF4FF',color:'#185FA5',cursor:'pointer',fontSize:12,fontWeight:700,whiteSpace:'nowrap',flexShrink:0}}>🔄 最新に更新</button>
+              {/* v204: 決定版シフト表（管理者が確定した凍結版。以後の変更は反映されない） */}
+              {decisionSnap&&decisionSnap.data&&(
+                <button onClick={()=>{
+                    const p=snapshotPayloadForCurrentUnit(decisionSnap.data);
+                    if(!p){alert('決定版データを読み込めませんでした。');return;}
+                    exportPDF(p,{snapshot:{label:'📌 決定版シフト表'+(decisionSnap.ymLabel?'（'+decisionSnap.ymLabel+'）':''),at:decisionSnap.decidedAt,made:decisionSnap.publishedAt,archiveName:'決定版'},mode:'view'});
+                  }}
+                  title={'確定 '+fmtStamp(decisionSnap.decidedAt)+'／公開 '+fmtStamp(decisionSnap.publishedAt)+' 時点の内容を固定表示します。以後のシフト変更はここには反映されません。'}
+                  style={{border:'1px solid #FBBF24',borderRadius:8,padding:'4px 10px',background:'#FFFBEB',color:'#92400E',cursor:'pointer',fontSize:12,fontWeight:700,whiteSpace:'nowrap',flexShrink:0}}>
+                  📌 決定版シフト表{decisionSnap.ymLabel?'（'+decisionSnap.ymLabel+'）':''}
+                </button>
+              )}
               {/* クラウド同期ステータス（管理PIN不要で自動取得していることを明示） */}
               {SB_ENABLED&&(
                 <span style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:5,fontSize:11,padding:'3px 9px',borderRadius:8,
@@ -7115,6 +7156,14 @@ ${bodyHtml}
                     background:hasUnpublished?'#16A34A':'#EBF4FF',
                     color:hasUnpublished?'#fff':'#185FA5'}}>
                   {publishing?'公開中…':hasUnpublished?'☁ 公開（未公開あり）':'☁ 公開済み'}
+                </button>
+              )}
+              {SB_ENABLED&&(
+                <button onClick={markDecision} disabled={markingDecision}
+                  title={'現在スタッフに公開中のシフトを「決定版」として確定します。スタッフはいつでもこの凍結版を見返せます。'+(decisionSnap?'\n現在の決定版: '+(decisionSnap.ymLabel||'')+'（確定 '+fmtStamp(decisionSnap.decidedAt)+'）':'')}
+                  style={{padding:'5px 14px',borderRadius:K.rmd,fontSize:12,fontWeight:700,cursor:markingDecision?'wait':'pointer',whiteSpace:'nowrap',
+                    border:'1px solid #FBBF24',background:'#FFFBEB',color:'#92400E'}}>
+                  {markingDecision?'確定中…':'📌 決定版にする'}
                 </button>
               )}
               {totalExclusions>0&&(
@@ -9914,6 +9963,18 @@ CHANGELOG v203
   （従来はバナーをタップする方式。管理者画面は編集中の消失を避けるため従来どおりバナー）。
   無限ループ防止のため同じ版への自動再読込は1セッション1回（fukumimi_autoReloadedTo を共用）。
 - アプリ表示バージョンを v202 から v203 に更新。
+-->
+<!--
+CHANGELOG v204
+- 【新機能】決定版シフト表。シフトを随時変更できる反面「元のシフトが分からなくなる」不安への対策。
+- 管理者: 「☁ 公開」の隣に「📌 決定版にする」ボタンを追加。現在公開中のシフト
+  （最新の公開時点スナップショット）を決定版としてクラウドに凍結保存する（decisionSnap。最新1件のみ保持・上書き式）。
+- スタッフ: 「🔄 最新に更新」の隣に「📌 決定版シフト表（YYYY年M月分）」ボタンを表示。
+  押すと決定版の凍結データから閲覧専用のシフト表（既存のスナップショット表示 exportPDF mode:'view'）を開く。
+  確定日時・公開日時付き。以後の編集・再公開では一切変化しない＝全員が同じものを見られる。
+- 公開処理(publishToCloud)が決定版を消さないよう、公開ペイロードに decisionSnap を引き継ぐ修正を同時に実施
+  （他の保存系 saveOutpatientClosures/saveCurrentSnapshotToHistory/saveStaffMaster は {...base} 展開のため元々保持される）。
+- アプリ表示バージョンを v203 から v204 に更新。
 -->
 </body>
 </html>
