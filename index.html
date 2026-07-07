@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v208'; // v201: 各スタッフの編集画面に「🗂 在籍ステータス」ボタン追加（その職員を選択済みで在籍ステータス欄が開く）。スタッフ一覧に在籍ステータスのバッジ（現在有効/開始予定/未定のみ・非在職者だけ）を表示
+const APP_VERSION = 'v209'; // v201: 各スタッフの編集画面に「🗂 在籍ステータス」ボタン追加（その職員を選択済みで在籍ステータス欄が開く）。スタッフ一覧に在籍ステータスのバッジ（現在有効/開始予定/未定のみ・非在職者だけ）を表示
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -7331,6 +7331,7 @@ ${bodyHtml}
               <MenuItem icon="🌸" label="有給の申請" onClick={()=>openRequestSection('paid')} active={tab==='paid'}/>
               <MenuItem icon="🙋" label="出勤希望の挙手" onClick={()=>openRequestSection('wish')} active={tab==='paid'}/>
               <MenuItem icon="🚩" label="管理者へのメッセージ" onClick={()=>openRequestSection('msg')} active={tab==='paid'}/>
+              <MenuItem icon="📢" label="連絡板" onClick={()=>{openBoard();setOpenMenu(null);}}/>{/* v209: スマホ用メニューにも追加 */}
               <MenuItem icon="🕒" label={'打刻修正申請'+(pendingTimecardCorrections().length?'（'+pendingTimecardCorrections().length+'件）':'')} onClick={openTimecardCorrectionPanelFromMenu} active={showTimecardCorrectionPanel}/>
               <MenuItem icon="🖨" label="月次申請履歴PDF" onClick={openRequestDisplayPanel}/>
               <MenuDivider/>
@@ -10270,6 +10271,13 @@ CHANGELOG v208
 - 同期: スタッフは既存の10秒ポーリングに同乗。連絡板を開いた瞬間にもクラウドから最新化（管理者もこれで最新を取得）。
 - ★注意: wrapReq は必ず4引数（board含む）で呼ぶこと。3引数で呼ぶと連絡板がクラウドから消える。
 - アプリ表示バージョンを v207 から v208 に更新。
+-->
+<!--
+CHANGELOG v209
+- 【不具合修正】管理者の「📢 連絡板」メニューがスマホ用ハンバーガー（☰）メニューに無かった問題を修正。
+  v208ではPC用の「申請」ドロップダウンにしか追加していなかったため、スマホの管理者画面から
+  連絡板を開けなかった。スマホ用メニューの「申請」セクション（🚩管理者へのメッセージの下）にも追加。
+- アプリ表示バージョンを v208 から v209 に更新。
 -->
 </body>
 </html>
