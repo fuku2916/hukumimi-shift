@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v206'; // v201: 各スタッフの編集画面に「🗂 在籍ステータス」ボタン追加（その職員を選択済みで在籍ステータス欄が開く）。スタッフ一覧に在籍ステータスのバッジ（現在有効/開始予定/未定のみ・非在職者だけ）を表示
+const APP_VERSION = 'v207'; // v201: 各スタッフの編集画面に「🗂 在籍ステータス」ボタン追加（その職員を選択済みで在籍ステータス欄が開く）。スタッフ一覧に在籍ステータスのバッジ（現在有効/開始予定/未定のみ・非在職者だけ）を表示
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -357,7 +357,7 @@ function injectPrintButton(printWin){
     const saveBtn=printWin.document.createElement('button');
     saveBtn.textContent='💾 保存';
     saveBtn.className='__noprint';
-    saveBtn.setAttribute('style','position:fixed;top:10px;right:104px;z-index:99999;padding:10px 16px;font-size:15px;font-weight:700;background:#166534;color:#fff;border:none;border-radius:10px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25)');
+    saveBtn.setAttribute('style','position:fixed;top:10px;right:208px;z-index:99999;padding:10px 16px;font-size:15px;font-weight:700;background:#166534;color:#fff;border:none;border-radius:10px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25)');
     saveBtn.onclick=function(){
       try{
         const clone=printWin.document.documentElement.cloneNode(true);
@@ -379,9 +379,18 @@ function injectPrintButton(printWin){
     const btn=printWin.document.createElement('button');
     btn.textContent='🖨 印刷';
     btn.className='__noprint';
-    btn.setAttribute('style','position:fixed;top:10px;right:10px;z-index:99999;padding:10px 16px;font-size:15px;font-weight:700;background:#185FA5;color:#fff;border:none;border-radius:10px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25)');
+    btn.setAttribute('style','position:fixed;top:10px;right:114px;z-index:99999;padding:10px 16px;font-size:15px;font-weight:700;background:#185FA5;color:#fff;border:none;border-radius:10px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25)');
     btn.onclick=function(){printWin.print();};
     printWin.document.body.appendChild(btn);
+
+    // v207: スマホ等で新しいタブとして開いた場合、タブ切替を知らなくても戻れるように
+    //       大きな「✕ 閉じる」ボタンを右上に追加（window.openで開いたタブは close() で閉じられる）
+    const closeBtn=printWin.document.createElement('button');
+    closeBtn.textContent='✕ 閉じる';
+    closeBtn.className='__noprint';
+    closeBtn.setAttribute('style','position:fixed;top:10px;right:10px;z-index:99999;padding:10px 18px;font-size:15px;font-weight:700;background:#DC2626;color:#fff;border:none;border-radius:10px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25)');
+    closeBtn.onclick=function(){try{printWin.close();}catch(e){}};
+    printWin.document.body.appendChild(closeBtn);
   }catch(e){}
 }
 
@@ -3767,7 +3776,9 @@ function App(){
       if(wr[slotId]!=null)return Number(wr[slotId])||0;
       return 1;
     }
-    const printWin=window.open('','_blank','width=900,height=1200');
+    // v207: opts.inlineOnly=true なら別タブ/別ウィンドウを一切開かず、常に画面内ビューアで表示
+    //       （スタッフのスマホでタブが増えて戻れなくなる問題の対策）
+    const printWin=opts.inlineOnly?null:window.open('','_blank','width=900,height=1200');
     // v205: printWinがnull（ポップアップ不可の端末）でも中断せず、画面内ビューアで表示する
     const allDates=getWorkDates(py,pm),allWeeks=groupByWeek(allDates);
     const printTitle=['医療法人 福耳会',CLINIC_LABEL,APP_UNIT_LABEL,isSnapshot?'公開時点スナップショット':'シフト表'].filter(Boolean).join('　');
@@ -6193,7 +6204,7 @@ ${bodyHtml}
                     <button onClick={()=>{
                         const p=snapshotPayloadForCurrentUnit(dec.data);
                         if(!p){alert('決定版データを読み込めませんでした。');return;}
-                        exportPDF(p,{snapshot:{label:'📌 決定版シフト表（'+(dec.ymLabel||ymKey)+'）',at:dec.decidedAt,made:dec.publishedAt,archiveName:'決定版'},mode:'view'});
+                        exportPDF(p,{snapshot:{label:'📌 決定版シフト表（'+(dec.ymLabel||ymKey)+'）',at:dec.decidedAt,made:dec.publishedAt,archiveName:'決定版'},mode:'view',inlineOnly:true});// v207: 常に画面内表示（タブを開かない）
                       }}
                       title={'確定 '+fmtStamp(dec.decidedAt)+'／公開 '+fmtStamp(dec.publishedAt)+' 時点の内容を固定表示します。以後のシフト変更はここには反映されません。'}
                       style={{border:'1px solid #FBBF24',borderRadius:8,padding:'4px 10px',background:'#FFFBEB',color:'#92400E',cursor:'pointer',fontSize:12,fontWeight:700,whiteSpace:'nowrap',flexShrink:0}}>
@@ -10078,6 +10089,15 @@ CHANGELOG v206
   次回「決定版にする」実行時にクラウド上も新形式へ書き換え、旧フィールドは削除。
 - 決定版の保存時に slimSnapshotToMonth() で対象月以外の日付データ（asgn/tmps等）を間引き、クラウド肥大化を防止。
 - アプリ表示バージョンを v205 から v206 に更新。
+-->
+<!--
+CHANGELOG v207
+- 【改良】決定版シフト表が新しいタブで開くと、タブ切替を知らないスタッフが元の画面に戻れない問題への対策。
+- スタッフの「📌 決定版シフト表」は exportPDF に inlineOnly:true を指定し、
+  端末を問わず**常に画面内の全画面ビューア**（✕閉じるで同じ画面に戻る）で表示。タブは一切増えない。
+- 別ウィンドウ/タブで開く残りの画面（管理者の👁表示・🖨印刷・シフト表PDF等）には、
+  右上に赤い「✕ 閉じる」ボタンを追加（window.close()でタブごと閉じる）。💾保存・🖨印刷は左へ移動。
+- アプリ表示バージョンを v206 から v207 に更新。
 -->
 </body>
 </html>
