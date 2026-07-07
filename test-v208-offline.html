@@ -2739,9 +2739,9 @@ function App(){
   useEffect(()=>{avatarsRef.current=avatars;},[avatars]);
   useEffect(()=>{correctionsRef.current=corrections;},[corrections]);
   // ── v208: 連絡板 state ──
-  const [board,setBoard]=useState([]);
+  const [board,setBoard]=useState(()=>{try{const t=localStorage.getItem('__test_board');return t?JSON.parse(t):[];}catch(e){return [];}}); // ★テスト用シード
   const boardRef=React.useRef([]);
-  useEffect(()=>{boardRef.current=board;},[board]);
+  useEffect(()=>{boardRef.current=board;try{localStorage.setItem('__test_board',JSON.stringify(board));}catch(e){}},[board]); // ★テスト用保存
   const boardTomb=React.useRef({}); // 削除した投稿id → 復活禁止期限
   const markBoardDeleted=(id)=>{boardTomb.current[String(id)]=Date.now()+120000;};
   const [showBoard,setShowBoard]=useState(false);
