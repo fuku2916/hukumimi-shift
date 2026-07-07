@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v207'; // v201: 各スタッフの編集画面に「🗂 在籍ステータス」ボタン追加（その職員を選択済みで在籍ステータス欄が開く）。スタッフ一覧に在籍ステータスのバッジ（現在有効/開始予定/未定のみ・非在職者だけ）を表示
+const APP_VERSION = 'v208'; // v201: 各スタッフの編集画面に「🗂 在籍ステータス」ボタン追加（その職員を選択済みで在籍ステータス欄が開く）。スタッフ一覧に在籍ステータスのバッジ（現在有効/開始予定/未定のみ・非在職者だけ）を表示
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -1764,6 +1764,25 @@ function calcUnreadReplies(requests,sid,seen){
   return {count,byReq,latest};
 }
 // requestsのマージ保存用：他端末が追加した申請・メッセージを消さずに統合する。
+// ── v208: 連絡板（職種ごとの掲示板）──
+// board: [{id, at(ISO), author, authorType:'staff'|'admin', text}] を新しい順で保持。
+const BOARD_MAX=100; // 保持件数（超過分は古い順に自動削除）
+function mergeBoard(local,cloud,tomb){
+  const out=[]; const seen={}; const now=Date.now(); tomb=tomb||{};
+  [...(Array.isArray(local)?local:[]),...(Array.isArray(cloud)?cloud:[])].forEach(m=>{
+    if(!m||!m.id||!m.text)return;
+    if(seen[m.id])return;
+    if(tomb[m.id]&&tomb[m.id]>now)return; // 最近ローカルで削除→復活させない
+    seen[m.id]=true; out.push(m);
+  });
+  out.sort((a,b)=>String(b.at||'').localeCompare(String(a.at||'')));
+  return out.slice(0,BOARD_MAX);
+}
+function fmtBoardTime(at){
+  try{const d=new Date(at);return (d.getMonth()+1)+'/'+d.getDate()+' '+d.getHours()+':'+String(d.getMinutes()).padStart(2,'0');}catch(e){return '';}
+}
+const LS_BOARD_READ='fukumimi_board_read_v1'+_LSC+_LSU; // 連絡板の既読時刻（端末ローカル）
+
 // localを基準に、cloudにしか無いキー（他端末の追加）を取り込む。ただし最近ローカルで削除したキー(tomb)は復活させない。
 function mergeRequests(local,cloud,tomb){
   local=local||{}; cloud=cloud||{}; tomb=tomb||{};
@@ -1785,17 +1804,19 @@ function mergeRequests(local,cloud,tomb){
 // requests_data の各職種の値を {requests(日付マップ), avatars(codeごと), timecardCorrections(配列)} にまとめる。
 // 旧形式（値が日付マップそのもの）も読めるよう後方互換。
 function unwrapReq(d){
-  if(!d||typeof d!=='object')return {requests:{},avatars:{},corrections:[]};
-  const wrapped=('requests'in d)||('avatars'in d)||('timecardCorrections'in d);
+  if(!d||typeof d!=='object')return {requests:{},avatars:{},corrections:[],board:[]};
+  const wrapped=('requests'in d)||('avatars'in d)||('timecardCorrections'in d)||('board'in d);
   if(wrapped)return {
     requests:(d.requests&&typeof d.requests==='object')?d.requests:{},
     avatars:(d.avatars&&typeof d.avatars==='object')?d.avatars:{},
-    corrections:Array.isArray(d.timecardCorrections)?d.timecardCorrections:[]
+    corrections:Array.isArray(d.timecardCorrections)?d.timecardCorrections:[],
+    board:Array.isArray(d.board)?d.board:[] // v208: 連絡板
   };
-  return {requests:d,avatars:{},corrections:[]}; // 旧：全体が日付マップ
+  return {requests:d,avatars:{},corrections:[],board:[]}; // 旧：全体が日付マップ
 }
-function wrapReq(requests,avatars,corrections){
-  return {requests:requests||{},avatars:avatars||{},timecardCorrections:corrections||[]};
+// v208: wrapReqは必ず4引数で呼ぶこと（boardを渡し忘れると連絡板がクラウドから消えるため）
+function wrapReq(requests,avatars,corrections,board){
+  return {requests:requests||{},avatars:avatars||{},timecardCorrections:corrections||[],board:Array.isArray(board)?board:[]};
 }
 // avatars: 自分のkeyはlocal優先、それ以外はcloudを残す
 function mergeAvatars(local,cloud){ return {...(cloud||{}),...(local||{})}; }
@@ -1859,6 +1880,67 @@ const REQ_TYPES={
   off:      {label:'希望休',         short:'希望休',   color:'#C2410C',bg:'#FFF7ED',border:'#F97316',days:0,  icon:'📅'},
   work_wish:{label:'出勤希望',        short:'出勤希望', color:'#065F46',bg:'#ECFDF5',border:'#10B981',days:0,  icon:'🙋'},
 };
+
+// ── v208: 連絡板モーダル（スタッフ・管理者共用） ──
+function BoardModal({board,meName,isAdmin,placeLabel,helpText,onPost,onDelete,onClose}){
+  const [draft,setDraft]=React.useState('');
+  const [busy,setBusy]=React.useState(false);
+  const doPost=async()=>{
+    const t=(draft||'').trim();
+    if(!t)return;
+    if(t.length>500){alert('メッセージは500文字以内でお願いします。');return;}
+    setBusy(true);
+    const ok=await onPost(t);
+    setBusy(false);
+    if(ok)setDraft(''); else alert('投稿を保存できませんでした。通信状況をご確認のうえ、もう一度お試しください。');
+  };
+  return (
+    <div onClick={onClose} style={{position:'fixed',inset:0,zIndex:99990,background:'rgba(15,23,42,0.45)',display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:'#fff',width:'100%',maxWidth:680,maxHeight:'88vh',borderRadius:'16px 16px 0 0',display:'flex',flexDirection:'column',overflow:'hidden',boxShadow:'0 -8px 32px rgba(0,0,0,0.25)'}}>
+        <div style={{display:'flex',alignItems:'center',gap:8,padding:'12px 16px',background:'#185FA5',color:'#fff',flexShrink:0}}>
+          <span style={{fontWeight:800,fontSize:15,flex:1}}>📢 連絡板{placeLabel?'（'+placeLabel+'）':''}</span>
+          <button onClick={onClose} style={{border:'none',borderRadius:8,padding:'7px 14px',background:'#fff',color:'#185FA5',fontWeight:700,fontSize:13,cursor:'pointer',flexShrink:0}}>✕ 閉じる</button>
+        </div>
+        <div style={{padding:'10px 14px',borderBottom:'1px solid #E2E8F0',flexShrink:0,background:'#F8FAFC'}}>
+          <textarea value={draft} onChange={e=>setDraft(e.target.value)} rows={2}
+            placeholder={'例：熱が出たため明日お休みします／◯日の勉強会に参加してください'}
+            style={{width:'100%',boxSizing:'border-box',border:'1px solid #CBD5E1',borderRadius:8,padding:'8px 10px',fontSize:13,resize:'vertical',background:'#fff',color:'#0F172A'}}/>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginTop:6}}>
+            <span style={{fontSize:11,color:'#64748B',flex:1}}>「{meName}」として投稿されます（この職種のスタッフと管理者に表示）</span>
+            <button onClick={doPost} disabled={busy||!(draft||'').trim()}
+              style={{border:'none',borderRadius:8,padding:'8px 18px',background:busy||!(draft||'').trim()?'#CBD5E1':'#185FA5',color:'#fff',fontWeight:700,fontSize:13,cursor:busy?'wait':'pointer',flexShrink:0}}>
+              {busy?'投稿中…':'投稿する'}
+            </button>
+          </div>
+        </div>
+        <div style={{flex:1,overflowY:'auto',padding:'10px 14px'}}>
+          {(!board||board.length===0)&&<div style={{fontSize:13,color:'#94A3B8',textAlign:'center',padding:'24px 0'}}>まだ投稿はありません。最初のお知らせを書いてみましょう。</div>}
+          {(board||[]).map(m=>{
+            const isAdminPost=m.authorType==='admin';
+            const canDel=isAdmin||(m.authorType==='staff'&&m.author===meName);
+            return (
+              <div key={m.id} style={{marginBottom:8,padding:'8px 11px',borderRadius:10,background:isAdminPost?'#FFFBEB':'#F1F5F9',border:'1px solid '+(isAdminPost?'#FDE68A':'#E2E8F0')}}>
+                <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:3}}>
+                  <span style={{fontWeight:700,fontSize:12,color:isAdminPost?'#92400E':'#185FA5'}}>{isAdminPost?'🏥 ':''}{m.author}</span>
+                  <span style={{fontSize:10,color:'#94A3B8'}}>{fmtBoardTime(m.at)}</span>
+                  <span style={{flex:1}}/>
+                  {canDel&&<button onClick={()=>{if(window.confirm('この投稿を削除しますか？'))onDelete(m.id);}}
+                    style={{border:'1px solid #E2E8F0',borderRadius:6,padding:'1px 8px',background:'#fff',color:'#94A3B8',fontSize:10,cursor:'pointer',flexShrink:0}}>削除</button>}
+                </div>
+                <div style={{fontSize:13,color:'#0F172A',whiteSpace:'pre-wrap',lineHeight:1.6,overflowWrap:'anywhere'}}>{m.text}</div>
+              </div>
+            );
+          })}
+          {helpText&&(
+            <div style={{marginTop:14,padding:'8px 11px',borderRadius:8,background:'#EBF4FF',border:'1px solid #BFDBFE',fontSize:11,color:'#185FA5',lineHeight:1.6}}>
+              💡 シフト画面の使い方：{helpText}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ── PINダイアログ ──
 function PinDialog({staffName,onSuccess,onCancel}){
@@ -2472,7 +2554,7 @@ function App(){
         if(draftR&&draftR.ok&&draftR.data&&draftR.data.draftSavedAt)setDraftSavedAt(draftR.data.draftSavedAt);
         // 手元が新しい場合は、その手元の版を「未公開」として扱う（クラウドより新しい）
         if(sd&&!cloudWins){setPublishedAt(cloudTs);}
-        if(rd){const _u=unwrapReq(rd);setRequests(_u.requests);setAvatars(_u.avatars);setCorrections(_u.corrections);}
+        if(rd){const _u=unwrapReq(rd);setRequests(_u.requests);setAvatars(_u.avatars);setCorrections(_u.corrections);setBoard(prev=>mergeBoard(prev,_u.board,boardTomb.current));/* v208 */}
         sbReadyRef.current=true; // クラウド読み込み成功 → これ以降のみ自動保存を許可
         setSbStatus('ok');
       }catch(e){setSbStatus('error');}
@@ -2514,7 +2596,7 @@ function App(){
           if(sd.manualExclusions)setManualExclusions(sd.manualExclusions);
           if(sd.y)setY(sd.y);if(sd.m)setM(sd.m);
         }
-        if(rd){const _u=unwrapReq(rd);setRequests(_u.requests);setAvatars(_u.avatars);setCorrections(_u.corrections);}
+        if(rd){const _u=unwrapReq(rd);setRequests(_u.requests);setAvatars(_u.avatars);setCorrections(_u.corrections);setBoard(prev=>mergeBoard(prev,_u.board,boardTomb.current));/* v208 */}
         sbReadyRef.current=true; // クラウド読み込み成功 → これ以降のみ自動保存を許可
         setSbStatus('ok');
       }catch(e){setSbStatus('error');}
@@ -2525,7 +2607,7 @@ function App(){
   // スタッフモード：requestsが変わったらSupabaseに即保存
   React.useEffect(()=>{
     if(appMode!=='staff'||!SB_ENABLED||!sbReadyRef.current)return;
-    (async()=>{const cloud=await SB.get('requests_data');const _c=unwrapReq(cloud);SB.set('requests_data',wrapReq(mergeRequests(requests,_c.requests,reqTomb.current),mergeAvatars(avatarsRef.current,_c.avatars),mergeCorrections(correctionsRef.current,_c.corrections)));})();
+    (async()=>{const cloud=await SB.get('requests_data');const _c=unwrapReq(cloud);SB.set('requests_data',wrapReq(mergeRequests(requests,_c.requests,reqTomb.current),mergeAvatars(avatarsRef.current,_c.avatars),mergeCorrections(correctionsRef.current,_c.corrections),mergeBoard(boardRef.current,_c.board,boardTomb.current)));})();
   },[requests,appMode]);
 
   // ポーリング（スタッフモード：10秒ごとにシフト更新を確認）
@@ -2547,7 +2629,7 @@ function App(){
         }
       }
       const rd=await SB.get('requests_data');
-      if(rd){const _u=unwrapReq(rd);setRequests(_u.requests);
+      if(rd){const _u=unwrapReq(rd);setRequests(_u.requests);setBoard(prev=>mergeBoard(prev,_u.board,boardTomb.current));/* v208 */
         // 申告直後でクラウド反映前のものを消さないようマージ
         setAvatars(prev=>mergeAvatars(prev,_u.avatars));
         setCorrections(prev=>mergeCorrections(prev,_u.corrections));
@@ -2656,6 +2738,56 @@ function App(){
   const avatarsRef=React.useRef({}); const correctionsRef=React.useRef([]);
   useEffect(()=>{avatarsRef.current=avatars;},[avatars]);
   useEffect(()=>{correctionsRef.current=corrections;},[corrections]);
+  // ── v208: 連絡板 state ──
+  const [board,setBoard]=useState([]);
+  const boardRef=React.useRef([]);
+  useEffect(()=>{boardRef.current=board;},[board]);
+  const boardTomb=React.useRef({}); // 削除した投稿id → 復活禁止期限
+  const markBoardDeleted=(id)=>{boardTomb.current[String(id)]=Date.now()+120000;};
+  const [showBoard,setShowBoard]=useState(false);
+  const [boardReadAt,setBoardReadAt]=useState(()=>{try{return localStorage.getItem(LS_BOARD_READ)||'';}catch(e){return '';}});
+  // 連絡板をクラウドへ保存（requests_dataに同乗。他の欄はクラウドとマージして壊さない）
+  async function pushBoardToCloud(nextBoard){
+    if(!SB_ENABLED)return true; // クラウド未設定時はローカルのみ（テスト環境含む）
+    try{
+      const cloud=await SB.get('requests_data');const _c=unwrapReq(cloud);
+      return await SB.set('requests_data',wrapReq(
+        mergeRequests(requests,_c.requests,reqTomb.current),
+        mergeAvatars(avatarsRef.current,_c.avatars),
+        mergeCorrections(correctionsRef.current,_c.corrections),
+        mergeBoard(nextBoard,_c.board,boardTomb.current)
+      ));
+    }catch(e){return false;}
+  }
+  // 連絡板をクラウドから読み直す（モーダルを開いた瞬間に最新化）
+  async function refreshBoardFromCloud(){
+    if(!SB_ENABLED)return;
+    try{const cloud=await SB.get('requests_data');const _c=unwrapReq(cloud);
+      setBoard(prev=>mergeBoard(prev,_c.board,boardTomb.current));}catch(e){}
+  }
+  async function postBoardMessage(text){
+    const author=appMode==='admin'?'管理者':((staffMe&&staffMe.name)||'スタッフ');
+    const entry={id:Date.now()+'_'+Math.random().toString(36).slice(2,8),at:new Date().toISOString(),author,authorType:appMode==='admin'?'admin':'staff',text:String(text).slice(0,500)};
+    const next=mergeBoard([entry,...boardRef.current],[],{});
+    setBoard(next);
+    const ok=await pushBoardToCloud(next);
+    return ok!==false;
+  }
+  function deleteBoardMessage(id){
+    markBoardDeleted(id);
+    const next=(boardRef.current||[]).filter(m=>m.id!==id);
+    setBoard(next);
+    pushBoardToCloud(next);
+  }
+  function openBoard(){
+    setShowBoard(true);
+    refreshBoardFromCloud();
+    const latest=(boardRef.current||[])[0];
+    const at=latest?latest.at:new Date().toISOString();
+    setBoardReadAt(at);
+    try{localStorage.setItem(LS_BOARD_READ,at);}catch(e){}
+  }
+  const BOARD_HELP='日付をダブルタップすると、その日の休み希望・挙手・管理者へのメッセージを申請できます（青枠が自分の出番）。⚠は人員不足のコマで、タップすると挙手できます。';
   // 削除した申請の墓標（クラウドのマージ保存で復活させないため。2分間有効）
   const reqTomb=React.useRef({});
   const markReqDeleted=(dk,key)=>{reqTomb.current[dk+'|'+String(key)]=Date.now()+120000;};
@@ -2718,7 +2850,8 @@ function App(){
       await SB.set('requests_data',wrapReq(
         mergeRequests(requests,_c.requests,reqTomb.current),
         mergeAvatars(avatarsRef.current,_c.avatars),
-        mergeCorrections(correctionsRef.current,_c.corrections)
+        mergeCorrections(correctionsRef.current,_c.corrections),
+        mergeBoard(boardRef.current,_c.board,boardTomb.current)
       ));
     })();
   },[requests,appMode]);
@@ -3545,7 +3678,7 @@ function App(){
     if(sbReqSaveTimer.current)clearTimeout(sbReqSaveTimer.current);
     sbReqSaveTimer.current=setTimeout(async()=>{
       const cloud=await SB.get('requests_data');const _c=unwrapReq(cloud);
-      await SB.set('requests_data',wrapReq(mergeRequests(requests,_c.requests,reqTomb.current),mergeAvatars(avatarsRef.current,_c.avatars),mergeCorrections(correctionsRef.current,_c.corrections)));
+      await SB.set('requests_data',wrapReq(mergeRequests(requests,_c.requests,reqTomb.current),mergeAvatars(avatarsRef.current,_c.avatars),mergeCorrections(correctionsRef.current,_c.corrections),mergeBoard(boardRef.current,_c.board,boardTomb.current)));
     },1000);
   },[requests]);
 
@@ -5743,7 +5876,7 @@ ${bodyHtml}
     if(SB_ENABLED){
       const raw=await SB.get('requests_data'); const u=unwrapReq(raw);
       u.avatars[code]=av;
-      await SB.set('requests_data',wrapReq(u.requests,u.avatars,u.corrections));
+      await SB.set('requests_data',wrapReq(u.requests,u.avatars,u.corrections,u.board));
     }
     alert('アイコンを保存しました。');
   }
@@ -5754,7 +5887,7 @@ ${bodyHtml}
     if(SB_ENABLED){
       const raw=await SB.get('requests_data'); const u=unwrapReq(raw);
       u.corrections=[rec,...(u.corrections||[])];
-      await SB.set('requests_data',wrapReq(u.requests,u.avatars,u.corrections));
+      await SB.set('requests_data',wrapReq(u.requests,u.avatars,u.corrections,u.board));
     }
     return true;
   }
@@ -5763,7 +5896,7 @@ ${bodyHtml}
     if(!SB_ENABLED)return true;
     try{
       const cloud=await SB.get('requests_data'); const _c=unwrapReq(cloud);
-      await SB.set('requests_data',wrapReq(mergeRequests(requests,_c.requests,reqTomb.current),mergeAvatars(avatarsRef.current,_c.avatars),mergeCorrections(correctionsRef.current,_c.corrections)));
+      await SB.set('requests_data',wrapReq(mergeRequests(requests,_c.requests,reqTomb.current),mergeAvatars(avatarsRef.current,_c.avatars),mergeCorrections(correctionsRef.current,_c.corrections),mergeBoard(boardRef.current,_c.board,boardTomb.current)));
       return true;
     }catch(e){return false;}
   }
@@ -6097,6 +6230,10 @@ ${bodyHtml}
             🔄 新しいシフト表があります（{updateVer}）。タップして最新に更新
           </div>
         )}
+        {/* v208: 連絡板モーダル */}
+        {showBoard&&<BoardModal board={board} meName={(staffMe&&staffMe.name)||'スタッフ'} isAdmin={false}
+          placeLabel={[CLINIC_LABEL,APP_UNIT_LABEL].filter(Boolean).join('・')} helpText={BOARD_HELP}
+          onPost={postBoardMessage} onDelete={deleteBoardMessage} onClose={()=>setShowBoard(false)}/>}
         {/* PINダイアログ */}
         {(pinTarget?.mode==='request'||pinTarget?.mode==='work_wish')&&(
           <PinDialog staffName={staffMe?.name||''} onSuccess={handleRequestPin} onCancel={()=>setPinTarget(null)}/>
@@ -6230,6 +6367,22 @@ ${bodyHtml}
                 </span>
               )}
             </div>
+            {/* v208: 連絡板（説明文の代わり。最新1件だけ表示、タップで履歴と投稿） */}
+            {(()=>{
+              const latest=(board&&board.length)?board[0]:null;
+              const unread=!!(latest&&latest.at&&latest.at>boardReadAt);
+              return (
+                <div onClick={openBoard}
+                  style={{margin:'0 8px 10px',padding:'8px 12px',background:'#EBF4FF',border:'1px solid #93C5FD',borderRadius:8,fontSize:12,color:'#185FA5',cursor:'pointer',display:'flex',alignItems:'center',gap:8,lineHeight:1.5}}>
+                  <span style={{flexShrink:0,fontWeight:700}}>📢 連絡板</span>
+                  {unread&&<span style={{flexShrink:0,background:'#DC2626',color:'#fff',borderRadius:10,fontSize:10,fontWeight:700,padding:'1px 7px'}}>新着</span>}
+                  <span style={{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:'#334155'}}>
+                    {latest?(<><b>{latest.author}</b>：{latest.text}（{fmtBoardTime(latest.at)}）</>):'お知らせ・代打募集はこちら。タップで表示・投稿できます。'}
+                  </span>
+                  <span style={{flexShrink:0,color:'#64748B'}}>▶</span>
+                </div>
+              );
+            })()}
             {staffShiftView==='table'&&(<>
             <div style={{fontSize:12,color:'#9A3412',background:'#FFF7ED',border:'1px solid #FDBA74',borderRadius:8,padding:'8px 12px',margin:'0 8px 10px',lineHeight:1.6}}>
               ※ <strong>⚠</strong> のところはスタッフが不足しています。勤務できる方は、その<strong>⚠を直接タップ</strong>して「挙手」を押すと管理者に伝わります（自分の行の日付からも申請できます）。
@@ -6362,9 +6515,7 @@ ${bodyHtml}
             {/* ── 閲覧専用カレンダー表示（管理画面のカレンダーに近い見た目・編集不可） ── */}
             {staffShiftView==='calendar'&&(
               <div style={{padding:'0 8px'}}>
-                <div style={{fontSize:12,color:'#185FA5',background:'#EBF4FF',border:'1px solid #93C5FD',borderRadius:8,padding:'8px 12px',marginBottom:10,lineHeight:1.6}}>
-                  🗓 閲覧専用です。<strong>日付をダブルタップ</strong>すると、その日の休み希望・挙手・管理者へのメッセージを申請できます（<span style={{color:'#185FA5',fontWeight:700}}>青枠</span>が自分の出番）。<span style={{color:'#C2410C',fontWeight:700}}>⚠</span>は人員不足のコマです。タップすると挙手できます。
-                </div>
+                {/* v208: 説明文は連絡板モーダル下部に移設（説明はいつでも読める） */}
                 <table style={{borderCollapse:'collapse',width:'100%',tableLayout:'fixed'}}>
                   <thead>
                     <tr>{['月','火','水','木','金','土'].map((wd,i)=>(
@@ -7043,6 +7194,10 @@ ${bodyHtml}
           {(()=>{const nr=pendingStaffMessageCount();return nr>0?<span onClick={()=>{setTab('paid');setRequestFilter('active');setOpenMenu(null);setTimeout(()=>{const el=document.getElementById('paidsec-msg');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},120);}} title="クリックで未対応のメッセージ欄へ" style={{fontSize:13,background:'#FFF7ED',color:'#9A3412',border:'1px solid #FDBA74',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🚩 {nr}件</span>:null;})()}
           {(()=>{const nc=pendingTimecardCorrections().length;return nc>0?<span onClick={()=>openTimecardCorrectionPanelFromMenu()} title="クリックで打刻修正申請へ" style={{fontSize:13,background:'#EEF2FF',color:'#3730A3',border:'1px solid #A5B4FC',borderRadius:10,padding:'2px 8px',fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',marginRight:6,flexShrink:0}}>🕒 {nc}件</span>:null;})()}
 
+          {/* v208: 連絡板モーダル（管理者） */}
+          {showBoard&&<BoardModal board={board} meName={'管理者'} isAdmin={true}
+            placeLabel={[CLINIC_LABEL,APP_UNIT_LABEL].filter(Boolean).join('・')} helpText={''}
+            onPost={postBoardMessage} onDelete={deleteBoardMessage} onClose={()=>setShowBoard(false)}/>}
           {/* PC：メニュー項目 / スマホ：ハンバーガー */}
           <div className="pc-menu" style={{display:'flex',alignItems:'center',flex:1}}>
             {[
@@ -7092,6 +7247,7 @@ ${bodyHtml}
                     <MenuItem icon="🌸" label="有給の申請" onClick={()=>openRequestSection('paid')} active={tab==='paid'}/>
                     <MenuItem icon="🙋" label="出勤希望の挙手" onClick={()=>openRequestSection('wish')} active={tab==='paid'}/>
                     <MenuItem icon="🚩" label="管理者へのメッセージ" onClick={()=>openRequestSection('msg')} active={tab==='paid'}/>
+                    <MenuItem icon="📢" label="連絡板" onClick={()=>{openBoard();setOpenMenu(null);}}/>
                     <MenuItem icon="🕒" label={'打刻修正申請'+(pendingTimecardCorrections().length?'（'+pendingTimecardCorrections().length+'件）':'')} onClick={openTimecardCorrectionPanelFromMenu} active={showTimecardCorrectionPanel}/>
               <MenuItem icon="🖨" label="月次申請履歴PDF" onClick={openRequestDisplayPanel}/>
                   </>}
@@ -10098,6 +10254,22 @@ CHANGELOG v207
 - 別ウィンドウ/タブで開く残りの画面（管理者の👁表示・🖨印刷・シフト表PDF等）には、
   右上に赤い「✕ 閉じる」ボタンを追加（window.close()でタブごと閉じる）。💾保存・🖨印刷は左へ移動。
 - アプリ表示バージョンを v206 から v207 に更新。
+-->
+<!--
+CHANGELOG v208
+- 【新機能】📢 連絡板。スタッフ画面の青い説明文（1回読めば十分）を、職種ごとの連絡板に置き換えた。
+  用途例: 「熱が出たため明日休みます」→「代わりに出られます」のやりとり、管理者からの勉強会告知など。
+- スタッフ画面: ヘッダ下に最新1件だけを1行表示（新着は赤い「新着」バッジ）。タップで全画面の履歴＋投稿欄。
+  投稿はログイン中のスタッフ名で自動署名。削除は自分の投稿のみ可。
+- 管理者画面: メニュー「申請」→「📢 連絡板」から同じ連絡板を開ける。「管理者」名義で投稿（🏥アイコン＋黄色背景で区別）。
+  管理者は全投稿を削除可能。
+- 旧説明文は連絡板を開いた画面の下部に「💡シフト画面の使い方」として移設（新人向けにいつでも読める）。
+- データ: requests_data のラッパーに board:[{id,at,author,authorType,text}] を追加（最新100件保持・職種ごと）。
+  読み書きの全経路（wrapReq呼び出し6箇所）にマージを追加し、既存の申請・アバター・打刻修正を壊さない。
+  削除は墓標(boardTomb・2分)方式でクラウド同期での復活を防止。
+- 同期: スタッフは既存の10秒ポーリングに同乗。連絡板を開いた瞬間にもクラウドから最新化（管理者もこれで最新を取得）。
+- ★注意: wrapReq は必ず4引数（board含む）で呼ぶこと。3引数で呼ぶと連絡板がクラウドから消える。
+- アプリ表示バージョンを v207 から v208 に更新。
 -->
 </body>
 </html>
