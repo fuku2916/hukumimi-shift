@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v205'; // v201: 各スタッフの編集画面に「🗂 在籍ステータス」ボタン追加（その職員を選択済みで在籍ステータス欄が開く）。スタッフ一覧に在籍ステータスのバッジ（現在有効/開始予定/未定のみ・非在職者だけ）を表示
+const APP_VERSION = 'v206'; // v201: 各スタッフの編集画面に「🗂 在籍ステータス」ボタン追加（その職員を選択済みで在籍ステータス欄が開く）。スタッフ一覧に在籍ステータスのバッジ（現在有効/開始予定/未定のみ・非在職者だけ）を表示
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -2436,7 +2436,7 @@ function App(){
         // v135: 履歴は現在の編集中シフトとは別物なので、cloudWins判定に関係なく常にクラウドから読む。
         // これにより、外来枠設定などを変更した直後でも「公開」しなくても履歴一覧が見える。
         if(sd&&Array.isArray(sd.history))setShiftHistory(sd.history);
-        if(sd&&sd.decisionSnap&&typeof sd.decisionSnap==='object')setDecisionSnap(sd.decisionSnap); // v204
+        {const _dn=normalizeDecisions(sd); if(_dn)setDecisionSnaps(_dn);} // v206: 月別決定版
         if(sd&&Object.keys(sd).length>0 && cloudWins && !skipCloudShift){
           if(sd.staff)setStaff(sd.staff);
           if(sd.slots)setSlots(sd.slots);
@@ -2498,7 +2498,7 @@ function App(){
           if(sd.outpatientDoctorPresence&&typeof sd.outpatientDoctorPresence==='object')setOutpatientDoctorPresence(sd.outpatientDoctorPresence);
           if(sd.outpatientClosuresUpdatedAt!==undefined)setOutpatientClosuresUpdatedAt(sd.outpatientClosuresUpdatedAt||'');
           if(sd.paidLeave)setPaidLeave(sd.paidLeave);
-          if(sd.decisionSnap&&typeof sd.decisionSnap==='object')setDecisionSnap(sd.decisionSnap); // v204: 決定版
+          {const _dn=normalizeDecisions(sd); if(_dn)setDecisionSnaps(_dn);} // v206: 月別決定版
           // 人員不足の表示に必要（必要人数・除外）
           if(sd.weeklyReq)setWeeklyReq(sd.weeklyReq);
           if(sd.monthlyReq)setMonthlyReq(sd.monthlyReq);
@@ -2528,7 +2528,7 @@ function App(){
         setAsgn(sd.asgn);
         setTmps(sd.tmps||{});
         setPaidLeave(sd.paidLeave||{});
-        if(sd.decisionSnap&&typeof sd.decisionSnap==='object')setDecisionSnap(sd.decisionSnap); // v204
+        {const _dn=normalizeDecisions(sd); if(_dn)setDecisionSnaps(_dn);} // v206: 月別決定版
         if(sd.outpatientClosures&&typeof sd.outpatientClosures==='object')setOutpatientClosures(sd.outpatientClosures);
           if(sd.outpatientDoctorPresence&&typeof sd.outpatientDoctorPresence==='object')setOutpatientDoctorPresence(sd.outpatientDoctorPresence);
         if(sd.outpatientClosuresUpdatedAt!==undefined)setOutpatientClosuresUpdatedAt(sd.outpatientClosuresUpdatedAt||'');
@@ -2634,8 +2634,9 @@ function App(){
   const [reqReadMap,setReqReadMap]=useState(()=>loadReqRead());
   // 「申請一覧」を今回開いたときに未読だった申請（ck->true）。個別ハイライト用。開いている間は保持。
   const [unreadSnapshot,setUnreadSnapshot]=useState({});
-  // v204: 決定版シフト（管理者が確定した凍結スナップショット。スタッフの「📌 決定版シフト表」で表示）
-  const [decisionSnap,setDecisionSnap]=useState(null);
+  // v206: 月別決定版 {'YYYY-MM':{decidedAt,publishedAt,ymLabel,data}}。
+  //       旧v204/v205の単一 decisionSnap は normalizeDecisions() で月別マップに変換して吸収する。
+  const [decisionSnaps,setDecisionSnaps]=useState(null);
   const [markingDecision,setMarkingDecision]=useState(false);
   const prevStaffTabRef=React.useRef(null);
   // スタッフのアイコン設定（codeごと）と打刻修正の申告（配列）。requests_data の包みに同居。
@@ -3279,16 +3280,40 @@ function App(){
           (statusPayload[r.staff_code]=statusPayload[r.staff_code]||[]).push({status:r.status,from:r.start_date||'',to:r.end_date||''});
         });
       }
-      const data=currentShiftPayload({history:hist,staffStatus:statusPayload,...(prev&&prev.decisionSnap?{decisionSnap:prev.decisionSnap}:{})}); // v204: 公開で決定版を消さない
+      const data=currentShiftPayload({history:hist,staffStatus:statusPayload,...(prev&&prev.decisionSnaps?{decisionSnaps:prev.decisionSnaps}:{}),...(prev&&prev.decisionSnap?{decisionSnap:prev.decisionSnap}:{})}); // v206: 公開で月別決定版を消さない（旧形式も引き継ぐ）
       const ok=await SB.set('shift_data',data);
       if(ok){try{localStorage.removeItem('fukumimi_restore_lock');}catch(_){ }setPublishedAt(shiftUpdatedAt);setShiftHistory(hist);alert('スタッフへ公開しました。\n（作成: '+fmtStamp(shiftUpdatedAt)+'）\n公開時点スナップショットを保存しました。\n保存名: '+currentArchive.archiveName);}
       else alert('保存に失敗しました。もう一度お試しください。');
     }catch(e){alert('保存に失敗しました：'+(e&&e.message||e));}
     setPublishing(false);
   }
-  // ── v204: 決定版シフト ──
-  // 「現在スタッフに公開中のシフト」（最新の公開時点スナップショット）を決定版として確定する。
-  // スタッフ画面の「📌 決定版シフト表」ボタンはこの凍結データだけを描画し、以後の編集・再公開では一切変わらない。
+  // ── v206: 月別決定版シフト ──
+  // 旧v204/v205形式（単一decisionSnap）→ 月別マップへの変換。読み込み時に必ずこれを通す。
+  function normalizeDecisions(sd){
+    if(!sd||typeof sd!=='object')return null;
+    if(sd.decisionSnaps&&typeof sd.decisionSnaps==='object'&&Object.keys(sd.decisionSnaps).length)return sd.decisionSnaps;
+    const d=sd.decisionSnap;
+    if(d&&d.data&&d.data.y&&d.data.m){
+      return {[d.data.y+'-'+String(d.data.m).padStart(2,'0')]:d};
+    }
+    return null;
+  }
+  // 決定版の保存サイズ削減: 日付キーのデータを対象月のぶんだけに間引く（表示は対象月しかしないため安全）
+  function slimSnapshotToMonth(snap,ymKey){
+    const out=clonePlain(snap)||{};
+    const pref=ymKey+'-';
+    ['asgn','tmps','manualExclusions','manualClosedDays','surgeryFlags','outpatientClosures','outpatientDoctorPresence','lockedAsgn'].forEach(k=>{
+      const v=out[k];
+      if(v&&typeof v==='object'&&!Array.isArray(v)){
+        const f={};Object.keys(v).forEach(dk=>{if(typeof dk==='string'&&dk.indexOf(pref)===0)f[dk]=v[dk];});
+        out[k]=f;
+      }
+    });
+    delete out.editLog;
+    return out;
+  }
+  // 「現在スタッフに公開中のシフト」（最新の公開時点スナップショット）を、その対象月の決定版として確定する。
+  // 月ごとに独立して保存（直近4か月分保持）。同じ月を再確定すると、その月だけ上書きされる。
   async function markDecision(){
     if(!SB_ENABLED){alert('クラウドが設定されていません。');return;}
     setMarkingDecision(true);
@@ -3299,12 +3324,21 @@ function App(){
       const hist=Array.isArray(prev.history)?prev.history:[];
       const arch=hist.find(h=>h&&h.kind==='published_archive'&&(h.data||h.restoreData));
       if(!arch){alert('公開時点スナップショットが見つかりません。\n先に「☁ 公開」でスタッフへ公開してください。');setMarkingDecision(false);return;}
-      const snapData=clonePlain(arch.data||arch.restoreData);
-      const ymLabel=(snapData&&snapData.y&&snapData.m)?(snapData.y+'年'+snapData.m+'月分'):'';
-      if(!window.confirm('現在スタッフに公開中のシフト'+(ymLabel?'（'+ymLabel+'）':'')+'\n公開日時: '+fmtStamp(arch.publishedAt||arch.at)+'\n\nこれを「📌 決定版」として確定しますか？\nスタッフ画面の「決定版シフト表」ボタンにこの内容が固定表示されます（前回の決定版は上書きされます）。')){setMarkingDecision(false);return;}
-      const nextDecision={decidedAt:new Date().toISOString(),publishedAt:arch.publishedAt||arch.at||'',ymLabel,data:snapData};
-      const ok=await SB.set('shift_data',{...prev,decisionSnap:nextDecision});
-      if(ok){setDecisionSnap(nextDecision);alert('📌 決定版として保存しました。\n'+(ymLabel?ymLabel+'・':'')+'公開 '+fmtStamp(nextDecision.publishedAt)+'\nスタッフ画面に「決定版シフト表」ボタンが表示されます。');}
+      const snapFull=clonePlain(arch.data||arch.restoreData);
+      const sy=snapFull&&snapFull.y, sm=snapFull&&snapFull.m;
+      if(!sy||!sm){alert('スナップショットの対象月が判定できませんでした。');setMarkingDecision(false);return;}
+      const ymKey=sy+'-'+String(sm).padStart(2,'0');
+      const ymLabel=sy+'年'+sm+'月分';
+      const curMap=normalizeDecisions(prev)||{};
+      const already=curMap[ymKey];
+      if(!window.confirm('現在スタッフに公開中のシフト（'+ymLabel+'）\n公開日時: '+fmtStamp(arch.publishedAt||arch.at)+'\n\nこれを「📌 '+ymLabel+'の決定版」として確定しますか？\n'+(already?'※ '+ymLabel+'の決定版（確定 '+fmtStamp(already.decidedAt)+'）を上書きします。他の月の決定版はそのまま残ります。':'スタッフ画面で'+sm+'月を表示中に「決定版シフト表」ボタンから見られるようになります。'))){setMarkingDecision(false);return;}
+      const snapData=slimSnapshotToMonth(snapFull,ymKey);
+      const next={...curMap,[ymKey]:{decidedAt:new Date().toISOString(),publishedAt:arch.publishedAt||arch.at||'',ymLabel,data:snapData}};
+      // 直近4か月分だけ保持（キーの新しい順）
+      const pruned={};Object.keys(next).sort().reverse().slice(0,4).forEach(k=>{pruned[k]=next[k];});
+      const upd={...prev,decisionSnaps:pruned}; delete upd.decisionSnap; // 旧形式は月別へ統合済みなので削除
+      const ok=await SB.set('shift_data',upd);
+      if(ok){setDecisionSnaps(pruned);alert('📌 '+ymLabel+'の決定版として保存しました。\n保持中の決定版: '+Object.keys(pruned).sort().join(' / '));}
       else alert('決定版の保存に失敗しました。もう一度お試しください。');
     }catch(e){alert('決定版の保存に失敗しました：'+(e&&e.message||e));}
     setMarkingDecision(false);
@@ -6150,18 +6184,31 @@ ${bodyHtml}
               {/* 手動で最新を取得（キャッシュを完全に回避して再読込） */}
               <button onClick={forceReloadLatest} title="アプリとシフトを最新に更新します"
                 style={{border:'1px solid #93C5FD',borderRadius:8,padding:'4px 10px',background:'#EBF4FF',color:'#185FA5',cursor:'pointer',fontSize:12,fontWeight:700,whiteSpace:'nowrap',flexShrink:0}}>🔄 最新に更新</button>
-              {/* v204: 決定版シフト表（管理者が確定した凍結版。以後の変更は反映されない） */}
-              {decisionSnap&&decisionSnap.data&&(
-                <button onClick={()=>{
-                    const p=snapshotPayloadForCurrentUnit(decisionSnap.data);
-                    if(!p){alert('決定版データを読み込めませんでした。');return;}
-                    exportPDF(p,{snapshot:{label:'📌 決定版シフト表'+(decisionSnap.ymLabel?'（'+decisionSnap.ymLabel+'）':''),at:decisionSnap.decidedAt,made:decisionSnap.publishedAt,archiveName:'決定版'},mode:'view'});
-                  }}
-                  title={'確定 '+fmtStamp(decisionSnap.decidedAt)+'／公開 '+fmtStamp(decisionSnap.publishedAt)+' 時点の内容を固定表示します。以後のシフト変更はここには反映されません。'}
-                  style={{border:'1px solid #FBBF24',borderRadius:8,padding:'4px 10px',background:'#FFFBEB',color:'#92400E',cursor:'pointer',fontSize:12,fontWeight:700,whiteSpace:'nowrap',flexShrink:0}}>
-                  📌 決定版シフト表{decisionSnap.ymLabel?'（'+decisionSnap.ymLabel+'）':''}
-                </button>
-              )}
+              {/* v206: 決定版シフト表（表示中の月に連動。管理者が確定した凍結版で、以後の変更は反映されない） */}
+              {(()=>{
+                const ymKey=staffY+'-'+String(staffM).padStart(2,'0');
+                const dec=decisionSnaps&&decisionSnaps[ymKey];
+                if(dec&&dec.data){
+                  return (
+                    <button onClick={()=>{
+                        const p=snapshotPayloadForCurrentUnit(dec.data);
+                        if(!p){alert('決定版データを読み込めませんでした。');return;}
+                        exportPDF(p,{snapshot:{label:'📌 決定版シフト表（'+(dec.ymLabel||ymKey)+'）',at:dec.decidedAt,made:dec.publishedAt,archiveName:'決定版'},mode:'view'});
+                      }}
+                      title={'確定 '+fmtStamp(dec.decidedAt)+'／公開 '+fmtStamp(dec.publishedAt)+' 時点の内容を固定表示します。以後のシフト変更はここには反映されません。'}
+                      style={{border:'1px solid #FBBF24',borderRadius:8,padding:'4px 10px',background:'#FFFBEB',color:'#92400E',cursor:'pointer',fontSize:12,fontWeight:700,whiteSpace:'nowrap',flexShrink:0}}>
+                      📌 決定版シフト表（{staffM}月分）
+                    </button>
+                  );
+                }
+                return (
+                  <button onClick={()=>alert(staffY+'年'+staffM+'月の決定版はまだ確定されていません。\n管理者がシフト確定時に「📌 決定版にする」を押すと、ここから見られるようになります。')}
+                    title={staffY+'年'+staffM+'月の決定版は未確定です'}
+                    style={{border:'1px dashed #CBD5E1',borderRadius:8,padding:'4px 10px',background:'#F8FAFC',color:'#94A3B8',cursor:'pointer',fontSize:12,fontWeight:500,whiteSpace:'nowrap',flexShrink:0}}>
+                    📌 決定版（{staffM}月分・未確定）
+                  </button>
+                );
+              })()}
               {/* クラウド同期ステータス（管理PIN不要で自動取得していることを明示） */}
               {SB_ENABLED&&(
                 <span style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:5,fontSize:11,padding:'3px 9px',borderRadius:8,
@@ -7190,7 +7237,7 @@ ${bodyHtml}
               )}
               {SB_ENABLED&&(
                 <button onClick={markDecision} disabled={markingDecision}
-                  title={'現在スタッフに公開中のシフトを「決定版」として確定します。スタッフはいつでもこの凍結版を見返せます。'+(decisionSnap?'\n現在の決定版: '+(decisionSnap.ymLabel||'')+'（確定 '+fmtStamp(decisionSnap.decidedAt)+'）':'')}
+                  title={'現在スタッフに公開中のシフトを、その対象月の「決定版」として確定します（月ごとに保存・直近4か月保持）。'+(decisionSnaps?'\n確定済み: '+Object.keys(decisionSnaps).sort().join(' / '):'')}
                   style={{padding:'5px 14px',borderRadius:K.rmd,fontSize:12,fontWeight:700,cursor:markingDecision?'wait':'pointer',whiteSpace:'nowrap',
                     border:'1px solid #FBBF24',background:'#FFFBEB',color:'#92400E'}}>
                   {markingDecision?'確定中…':'📌 決定版にする'}
@@ -10019,6 +10066,18 @@ CHANGELOG v205
   「☁ 公開」→「📌 決定版にする」を実行して初めてその職種のスタッフ画面にボタンが出る
   （今回の調査時点で確定済みはクラークのみ。ナース・ドクターは未確定＝ボタン非表示は正常動作）。
 - アプリ表示バージョンを v204 から v205 に更新。
+-->
+<!--
+CHANGELOG v206
+- 【改良】決定版シフト表を「月別」に対応。従来は最新1件のみ（8月を確定すると7月の決定版が消える）だったが、
+  月ごとに独立して保存し（decisionSnaps={'YYYY-MM':…}・直近4か月保持）、
+  スタッフ画面のボタンは表示中の月に連動（7月表示中→7月の決定版、8月に切替→8月の決定版）。
+- 未確定の月はグレーの「📌 決定版（M月分・未確定）」を表示し、押すと案内が出る
+  （「ボタンが無い＝故障？」という混乱の防止。v205までの非表示仕様を変更）。
+- 旧v204/v205の単一 decisionSnap は normalizeDecisions() が月別マップへ自動変換（クラーク7月分は移行される）。
+  次回「決定版にする」実行時にクラウド上も新形式へ書き換え、旧フィールドは削除。
+- 決定版の保存時に slimSnapshotToMonth() で対象月以外の日付データ（asgn/tmps等）を間引き、クラウド肥大化を防止。
+- アプリ表示バージョンを v205 から v206 に更新。
 -->
 </body>
 </html>
