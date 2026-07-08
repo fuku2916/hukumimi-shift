@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v210'; // v201: 各スタッフの編集画面に「🗂 在籍ステータス」ボタン追加（その職員を選択済みで在籍ステータス欄が開く）。スタッフ一覧に在籍ステータスのバッジ（現在有効/開始予定/未定のみ・非在職者だけ）を表示
+const APP_VERSION = 'v211'; // v211: 決定版シフト表を「凍結HTML」方式に変更（確定した瞬間の完成品HTMLを保存し、スタッフは全端末でそれをそのまま表示。端末差が原理的に消える）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -3475,12 +3475,33 @@ function App(){
       const already=curMap[ymKey];
       if(!window.confirm('現在スタッフに公開中のシフト（'+ymLabel+'）\n公開日時: '+fmtStamp(arch.publishedAt||arch.at)+'\n\nこれを「📌 '+ymLabel+'の決定版」として確定しますか？\n'+(already?'※ '+ymLabel+'の決定版（確定 '+fmtStamp(already.decidedAt)+'）を上書きします。他の月の決定版はそのまま残ります。':'スタッフ画面で'+sm+'月を表示中に「決定版シフト表」ボタンから見られるようになります。'))){setMarkingDecision(false);return;}
       const snapData=slimSnapshotToMonth(snapFull,ymKey);
-      const next={...curMap,[ymKey]:{decidedAt:new Date().toISOString(),publishedAt:arch.publishedAt||arch.at||'',ymLabel,data:snapData}};
+      const decidedAtIso=new Date().toISOString();
+      // v211: 確定した瞬間の「完成品HTML」をその場で生成して一緒に保存する（凍結HTML方式）。
+      // スタッフ側は保存されたHTMLをそのまま表示するだけになるため、端末やバージョンによる表示差が原理的に無くなる。
+      // 生成にはスタッフ画面と同じ経路（snapshotPayloadForCurrentUnit → exportPDF）を使い、内容の同一性を保証する。
+      let frozenHtml=null;
+      try{
+        const p=snapshotPayloadForCurrentUnit(snapData);
+        if(p)frozenHtml=exportPDF(p,{snapshot:{label:'📌 決定版シフト表（'+ymLabel+'）',at:decidedAtIso,made:arch.publishedAt||arch.at,archiveName:'決定版'},mode:'view',returnHtml:true})||null;
+      }catch(_){frozenHtml=null;}
+      const entry={decidedAt:decidedAtIso,publishedAt:arch.publishedAt||arch.at||'',ymLabel,data:snapData};
+      if(frozenHtml)entry.html=frozenHtml;
+      const next={...curMap,[ymKey]:entry};
       // 直近4か月分だけ保持（キーの新しい順）
       const pruned={};Object.keys(next).sort().reverse().slice(0,4).forEach(k=>{pruned[k]=next[k];});
+      // v211: 保存サイズの安全弁。凍結HTML込みの decisionSnaps 全体が約1.5MBを超える場合、
+      // 古い月から順に html だけを落として節約する（data は残るため従来方式の表示は引き続き可能）。
+      try{
+        const MAX_BYTES=1500000;
+        let total=JSON.stringify(pruned).length;
+        for(const k of Object.keys(pruned).sort()){ // 古い月から
+          if(total<=MAX_BYTES)break;
+          if(k!==ymKey&&pruned[k]&&pruned[k].html){delete pruned[k].html;total=JSON.stringify(pruned).length;}
+        }
+      }catch(_){ }
       const upd={...prev,decisionSnaps:pruned}; delete upd.decisionSnap; // 旧形式は月別へ統合済みなので削除
       const ok=await SB.set('shift_data',upd);
-      if(ok){setDecisionSnaps(pruned);alert('📌 '+ymLabel+'の決定版として保存しました。\n保持中の決定版: '+Object.keys(pruned).sort().join(' / '));}
+      if(ok){setDecisionSnaps(pruned);alert('📌 '+ymLabel+'の決定版として保存しました。\n保持中の決定版: '+Object.keys(pruned).sort().join(' / ')+(frozenHtml?'\n凍結HTML: 約'+Math.round(frozenHtml.length/1024)+'KB（全端末で完全に同じ表示になります）':'\n※ 凍結HTMLの生成に失敗したため、この月は従来方式（端末側で組み立て）で表示されます'));}
       else alert('決定版の保存に失敗しました。もう一度お試しください。');
     }catch(e){alert('決定版の保存に失敗しました：'+(e&&e.message||e));}
     setMarkingDecision(false);
@@ -3911,7 +3932,8 @@ function App(){
     }
     // v207: opts.inlineOnly=true なら別タブ/別ウィンドウを一切開かず、常に画面内ビューアで表示
     //       （スタッフのスマホでタブが増えて戻れなくなる問題の対策）
-    const printWin=opts.inlineOnly?null:window.open('','_blank','width=900,height=1200');
+    // v211: opts.returnHtml=true なら何も表示せず、組み立てたHTML文字列を返すだけ（決定版の凍結HTML生成用）
+    const printWin=(opts.inlineOnly||opts.returnHtml)?null:window.open('','_blank','width=900,height=1200');
     // v205: printWinがnull（ポップアップ不可の端末）でも中断せず、画面内ビューアで表示する
     const allDates=getWorkDates(py,pm),allWeeks=groupByWeek(allDates);
     const printTitle=['医療法人 福耳会',CLINIC_LABEL,APP_UNIT_LABEL,isSnapshot?'公開時点スナップショット':'シフト表'].filter(Boolean).join('　');
@@ -4013,6 +4035,7 @@ ${snapLine}
 <!-- v169 changelog: 公開履歴を完全復元用スナップショットとして保存し、履歴復元では現在画面の配置・設定を全消去して履歴データのみで完全置換するよう修正。 -->
 <!-- v172 changelog: 履歴の「表示」と「この版に戻す」で参照するスナップショット元を統一。復元は表示されているsnap.dataを正本にし、restoreDataは補助に限定。 -->
 </body></html>`);
+    if(opts.returnHtml)return __pdfHtml; // v211: 凍結HTML生成モード（表示せずHTMLだけ返す）
     if(printWin){
       printWin.document.write(__pdfHtml);
       printWin.document.close();injectPrintButton(printWin);
@@ -6336,9 +6359,13 @@ ${bodyHtml}
               {(()=>{
                 const ymKey=staffY+'-'+String(staffM).padStart(2,'0');
                 const dec=decisionSnaps&&decisionSnaps[ymKey];
-                if(dec&&dec.data){
+                if(dec&&(dec.html||dec.data)){
                   return (
                     <button onClick={()=>{
+                        // v211: 確定時に保存された「凍結HTML」があれば、それをそのまま表示する。
+                        // 端末側での組み立てを一切行わないため、誰のスマホでも100%同じ表示になる。
+                        if(dec.html){showInlineHtmlViewer(dec.html,'📌 決定版シフト表（'+(dec.ymLabel||ymKey)+'）');return;}
+                        // 凍結HTMLが無い旧データは、従来どおり端末側でデータから組み立てて表示（フォールバック）
                         const p=snapshotPayloadForCurrentUnit(dec.data);
                         if(!p){alert('決定版データを読み込めませんでした。');return;}
                         exportPDF(p,{snapshot:{label:'📌 決定版シフト表（'+(dec.ymLabel||ymKey)+'）',at:dec.decidedAt,made:dec.publishedAt,archiveName:'決定版'},mode:'view',inlineOnly:true});// v207: 常に画面内表示（タブを開かない）
@@ -6350,7 +6377,13 @@ ${bodyHtml}
                   );
                 }
                 return (
-                  <button onClick={()=>alert(staffY+'年'+staffM+'月の決定版はまだ確定されていません。\n管理者がシフト確定時に「📌 決定版にする」を押すと、ここから見られるようになります。')}
+                  <button onClick={()=>alert(staffY+'年'+staffM+'月の決定版はまだ確定されていません。\n管理者がシフト確定時に「📌 決定版にする」を押すと、ここから見られるようになります。'
+                      /* v211: 自己診断情報（現場からの「押せない」報告を、この画面だけで切り分けられるように） */
+                      +'\n\n──────────\n【確認用の情報】\nアプリの版: '+APP_VERSION
+                      +'\n探した年月: '+staffY+'年'+staffM+'月（'+ymKey+'）'
+                      +'\n確定済みの決定版: '+(decisionSnaps?(Object.keys(decisionSnaps).sort().join(' / ')||'なし'):'（クラウドから未取得）')
+                      +'\nクラウド接続: '+(sbLoading?'取得中…':sbStatus==='error'?'⚠ エラー':'正常')
+                      +'\n\n※「探した年月」が「確定済み」の一覧に無い場合は、◀▶ボタンで年月を切り替えてください。\n※ アプリの版が古い場合は「🔄 最新に更新」を押してください。')}
                     title={staffY+'年'+staffM+'月の決定版は未確定です'}
                     style={{border:'1px dashed #CBD5E1',borderRadius:8,padding:'4px 10px',background:'#F8FAFC',color:'#94A3B8',cursor:'pointer',fontSize:12,fontWeight:500,whiteSpace:'nowrap',flexShrink:0}}>
                     📌 決定版（{staffM}月分・未確定）
@@ -10278,6 +10311,27 @@ CHANGELOG v209
   v208ではPC用の「申請」ドロップダウンにしか追加していなかったため、スマホの管理者画面から
   連絡板を開けなかった。スマホ用メニューの「申請」セクション（🚩管理者へのメッセージの下）にも追加。
 - アプリ表示バージョンを v208 から v209 に更新。 v210: スタッフのカレンダー表示から日を素早く2回タップで申請シートを開けるよう対応（onDoubleClick を、タッチ端末でも発火する二度タップ判定[約400ms]に置換し、touchAction:manipulation を付与）。カレンダー表示でも「管理者へのメッセージ」を送信可能に。表示バージョンを v209 から v210 に更新。
+-->
+<!--
+CHANGELOG v211
+- 【改良】決定版シフト表を「凍結HTML」方式に変更。
+  背景: 「📌 決定版シフト表」がスマホによって押せる/押せないが分かれる報告（駅前ナース）。調査の結果、
+        クラウド・保存経路・タイムカード・認証はすべて問題なし。残る原因候補は端末側
+        （旧バージョンのキャッシュ残り、または復帰セッションの年月ズレ）と特定。
+        従来方式は決定版の「データ」を配り各端末でシフト表を組み立てていたため、端末側の状態差が表示差になり得た。
+- 対策: 管理者が「📌 決定版にする」を押した瞬間に、表示用の完成品HTML（exportPDFが組み立てる__pdfHtml）を
+  その場で生成して decisionSnaps[YYYY-MM].html に丸ごと保存。
+  スタッフの「📌 決定版シフト表」は保存済みHTMLを画面内ビューア（showInlineHtmlViewer・iframe srcdoc）へ
+  流し込むだけにし、端末側でのシフト再構築を廃止 → 全端末で完全に同一の表示になる。
+- exportPDF に opts.returnHtml を追加（表示せずHTML文字列を返すだけの生成モード。凍結HTML生成に使用）。
+- フォールバック: html が無い旧データ（v210以前に確定した月）は従来どおり data から組み立てて表示。
+- サイズ安全弁: decisionSnaps 全体（凍結HTML込み）が約1.5MBを超える場合、古い月から html だけを自動削除
+  （data は残るので従来方式で表示可能）。確定時のアラートに凍結HTMLの実測サイズ（KB）を表示。
+- スタッフの未確定案内（グレーのボタン）に自己診断情報を追加：アプリの版・探した年月・確定済み決定版の一覧・
+  クラウド接続状態。今後「押せない」報告が来たら、この画面のスクショだけで原因の切り分けができる。
+- ★注意: 凍結HTML方式もスタッフ端末のアプリが v211 以上である必要がある。旧バージョンが残った端末には
+  「🔄 最新に更新」を案内すること（アプリ更新問題そのものは本方式では解決しない）。
+- アプリ表示バージョンを v210 から v211 に更新。
 -->
 </body>
 </html>
