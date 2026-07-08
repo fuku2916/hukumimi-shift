@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v209'; // v201: 各スタッフの編集画面に「🗂 在籍ステータス」ボタン追加（その職員を選択済みで在籍ステータス欄が開く）。スタッフ一覧に在籍ステータスのバッジ（現在有効/開始予定/未定のみ・非在職者だけ）を表示
+const APP_VERSION = 'v210'; // v201: 各スタッフの編集画面に「🗂 在籍ステータス」ボタン追加（その職員を選択済みで在籍ステータス欄が開く）。スタッフ一覧に在籍ステータスのバッジ（現在有効/開始予定/未定のみ・非在職者だけ）を表示
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -1568,7 +1568,7 @@ function saveReqRead(d){try{localStorage.setItem(LS_REQ_READ,JSON.stringify(d));
 // スタッフのシフト表示モード（'table'=従来の横長 / 'calendar'=カレンダー）。端末ごとに前回選択を記憶。
 const LS_STAFF_VIEW='fukumimi_staff_view_v1'+_LSC+_LSU;
 function loadStaffView(){try{const v=localStorage.getItem(LS_STAFF_VIEW);return v==='calendar'?'calendar':'table';}catch(e){return 'table';}}
-function saveStaffView(v){try{localStorage.setItem(LS_STAFF_VIEW,v);}catch(e){}}
+function saveStaffView(v){try{localStorage.setItem(LS_STAFF_VIEW,v);}catch(e){}} let _staffCalTap={dk:null,t:0};
 
 // ── Googleカレンダー手術予定連携（Apps Script URL）──
 // 管理者カレンダーを開くたびに、Apps Scriptから「午前/午後の手術ありなし」だけを取得して表示する。
@@ -6541,9 +6541,9 @@ ${bodyHtml}
                             const cellBg=isClosed?(holName?'#FEE2E2':'#F1F5F9'):isSat?'#FFFBEB':'#fff';
                             return(
                               <td key={ci}
-                                onDoubleClick={()=>{if(!isClosed)setStaffReqDk(dk);}}
+                                onClick={()=>{if(isClosed)return;const _n=Date.now();if(_staffCalTap.dk===dk&&_n-_staffCalTap.t<400){setStaffReqDk(dk);_staffCalTap={dk:null,t:0};}else{_staffCalTap={dk:dk,t:_n};}}}
                                 title={isClosed?'':'ダブルタップで申請'}
-                                style={{border:'1px solid #E2E8F0',background:cellBg,padding:4,verticalAlign:'top',cursor:isClosed?'default':'pointer'}}>
+                                style={{border:'1px solid #E2E8F0',background:cellBg,padding:4,verticalAlign:'top',cursor:isClosed?'default':'pointer',touchAction:'manipulation'}}>
                                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:2}}>
                                   <span style={{fontSize:13,fontWeight:700,color:isClosed&&holName?'#991B1B':isSat?'#92400E':'#1E293B'}}>{d.getDate()}{holName&&<span style={{fontSize:9,fontWeight:400,color:'#991B1B',marginLeft:2}}>{holName.slice(0,3)}</span>}</span>
                                   {myReq&&!isClosed&&<span style={{fontSize:9,fontWeight:700,color:myRt.color,background:myRt.bg,borderRadius:3,padding:'0 3px',whiteSpace:'nowrap'}}>{myReq.type==='work_wish'?(myReq.decision==='approved'?'✓承認':myReq.decision==='rejected'?'✕見送':'🙋希望'):myRt.icon}</span>}
