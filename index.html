@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v212'; // v212: スタッフ申請の取りこぼし対策。アプリが背面化/終了する瞬間(visibilitychange:hidden / pagehide)にも未送信の申請を確実にクラウド保存する（従来はロゴでホームに戻る時だけが確実な保存だった）
+const APP_VERSION = 'v213'; // v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）。v212: スタッフ申請の取りこぼし対策（背面化/終了時にも未送信の申請を確実にクラウド保存）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -1169,9 +1169,9 @@ const APP_UNIT_LABEL=UNIT_LABELS[APP_UNIT]||'';
 // ── マルチクリニック対応（2026-06-22）──
 // クリニックを指定すると shift_data を行 id=<clinic> で扱い、診療枠/休診日を data.shared に一本化する。
 // クリニック未指定（従来URL）は legacy モード＝今までどおり id=main の {clerk,nurse,doctor} を使う（後方互換）。
-const CLINIC_KEYS=['ekimae','iguchi','karasuma','demachi']; // 駅前 / いぐち / みずたに / こども
-const CLINIC_LABELS={ekimae:'駅前',iguchi:'いぐち',karasuma:'みずたに',demachi:'こども'};
-const CLINIC_FULL_LABELS={ekimae:'駅前クリニック',iguchi:'いぐちクリニック',karasuma:'みずたにクリニック',demachi:'こどもクリニック'};
+const CLINIC_KEYS=['ekimae','iguchi','karasuma']; // 駅前 / いぐち / みずたに （v213: こども(demachi)はアプリから非表示。クラウドの shift_data 行 id=demachi は残置＝再表示すれば復活可）
+const CLINIC_LABELS={ekimae:'駅前',iguchi:'いぐち',karasuma:'みずたに'};
+const CLINIC_FULL_LABELS={ekimae:'駅前クリニック',iguchi:'いぐちクリニック',karasuma:'みずたにクリニック'};
 const APP_CLINIC=(()=>{
   try{
     const qs=new URLSearchParams(location.search);
@@ -1189,7 +1189,7 @@ const APP_CLINIC=(()=>{
 const CLINIC_LABEL=CLINIC_LABELS[APP_CLINIC]||'';
 const CLINIC_MODE=!!APP_CLINIC; // true＝クリニック行モード（shift_dataをid=<clinic>で扱う）
 function defaultPayrollClinic(){return APP_CLINIC||'iguchi';}
-function defaultWorkClinics(){return APP_CLINIC?[APP_CLINIC]:['ekimae','iguchi','karasuma','demachi'];}
+function defaultWorkClinics(){return APP_CLINIC?[APP_CLINIC]:['ekimae','iguchi','karasuma'];}
 function normalizeWorkClinics(v){const a=Array.isArray(v)?v:[];const out=a.filter(x=>CLINIC_KEYS.includes(x));return out.length?out:defaultWorkClinics();}
 function clinicFullLabel(k){return CLINIC_FULL_LABELS[k]||CLINIC_LABELS[k]||k;}
 // data.shared に置く共通キー（クリニック内の全職種で共有）
@@ -10359,6 +10359,16 @@ CHANGELOG v212
         参照するようにし、イベントハンドラから常に最新の申請を送れるようにした。
         既存の即保存effect（即時性）はそのまま残す＝二重でも害はなく、離脱時の穴だけを塞ぐ。
 - アプリ表示バージョンを v211 から v212 に更新。
+
+CHANGELOG v213
+- 【変更】こども（demachi）クリニックをアプリの選択肢から非表示にした。
+  背景: こどもクリニックのシフト管理を運用から外すため。
+- 実装: CLINIC_KEYS / CLINIC_LABELS / CLINIC_FULL_LABELS / defaultWorkClinics から 'demachi' を除去。
+  これによりクリニック選択画面・管理者のクリニック切替・スタッフの勤務先選択など、CLINIC_KEYS を
+  参照する全UIから「こども」が消える。?clinic=demachi のURLも認識されなくなる（legacyモード扱い）。
+- データは残置: Supabaseの shift_data 行 id=demachi は削除していない。再び CLINIC_KEYS に 'demachi' を
+  戻せば、こどもクリニックとそのデータはそのまま復活できる（可逆）。
+- アプリ表示バージョンを v212 から v213 に更新。
 -->
 </body>
 </html>
