@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v211'; // v211: 決定版シフト表を「凍結HTML」方式に変更（確定した瞬間の完成品HTMLを保存し、スタッフは全端末でそれをそのまま表示。端末差が原理的に消える）
+const APP_VERSION = 'v212'; // v212: スタッフ申請の取りこぼし対策。アプリが背面化/終了する瞬間(visibilitychange:hidden / pagehide)にも未送信の申請を確実にクラウド保存する（従来はロゴでホームに戻る時だけが確実な保存だった）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -2610,6 +2610,18 @@ function App(){
     (async()=>{const cloud=await SB.get('requests_data');const _c=unwrapReq(cloud);SB.set('requests_data',wrapReq(mergeRequests(requests,_c.requests,reqTomb.current),mergeAvatars(avatarsRef.current,_c.avatars),mergeCorrections(correctionsRef.current,_c.corrections),mergeBoard(boardRef.current,_c.board,boardTomb.current)));})();
   },[requests,appMode]);
 
+  // v212: スタッフがロゴを押さずに離脱（アプリを背面化・タブを閉じる・画面ロック）しても
+  // 未送信の申請を取りこぼさないよう、ページが隠れる瞬間に確実にクラウドへ保存する。
+  // 上の即保存(投げっぱなし)は通信2往復の完了前に離脱すると飛ぶため、その保険。
+  // flushStaffToCloud は requestsRef/各refを見るので、この時点の最新申請を送れる。
+  React.useEffect(()=>{
+    if(appMode!=='staff'||!SB_ENABLED)return;
+    const onHide=()=>{ if(document.visibilityState==='hidden')flushStaffToCloud(); };
+    document.addEventListener('visibilitychange',onHide);
+    window.addEventListener('pagehide',flushStaffToCloud);
+    return()=>{ document.removeEventListener('visibilitychange',onHide); window.removeEventListener('pagehide',flushStaffToCloud); };
+  },[appMode]);
+
   // ポーリング（スタッフモード：10秒ごとにシフト更新を確認）
   React.useEffect(()=>{
     if(appMode!=='staff'||!SB_ENABLED)return;
@@ -2719,6 +2731,7 @@ function App(){
   },[appMode,staffMyId,staffTab,staffY,staffM]);
   // 申請データはlocalStorageから読み書き（管理者モードと共有）
   const [requests,setRequests]=useState(()=>loadRequests());
+  const requestsRef=React.useRef(requests); // v212: 最新の申請を保持。離脱時flush(visibilitychange/pagehide)から常に最新を送るため。
   // 管理者→スタッフ返信の下書き（キー: "dk|reqKey"）。送信すると当該申請の replies[] に積まれる。
   const [replyDraft,setReplyDraft]=useState({});
   // 返信の既読状態（端末ローカル・スタッフ別）。{ [staffId]:{ [dk|key]: 既読済み最新at } }
@@ -2810,7 +2823,7 @@ function App(){
     alert('スタッフに返信を送信しました。');
   }
   // requestsが変わったら即保存
-  React.useEffect(()=>{saveRequests(requests);},[requests]);
+  React.useEffect(()=>{saveRequests(requests);requestsRef.current=requests;/* v212 */},[requests]);
   // 管理者モードは申請データをポーリングで監視（3秒ごと）
   // クラウド有効時はSupabaseから取得（別端末から出された休み希望を確実に反映）。
   // 無効時のみlocalStorageを参照する。
@@ -5919,7 +5932,7 @@ ${bodyHtml}
     if(!SB_ENABLED)return true;
     try{
       const cloud=await SB.get('requests_data'); const _c=unwrapReq(cloud);
-      await SB.set('requests_data',wrapReq(mergeRequests(requests,_c.requests,reqTomb.current),mergeAvatars(avatarsRef.current,_c.avatars),mergeCorrections(correctionsRef.current,_c.corrections),mergeBoard(boardRef.current,_c.board,boardTomb.current)));
+      await SB.set('requests_data',wrapReq(mergeRequests(requestsRef.current,_c.requests,reqTomb.current),mergeAvatars(avatarsRef.current,_c.avatars),mergeCorrections(correctionsRef.current,_c.corrections),mergeBoard(boardRef.current,_c.board,boardTomb.current)));
       return true;
     }catch(e){return false;}
   }
@@ -10332,6 +10345,20 @@ CHANGELOG v211
 - ★注意: 凍結HTML方式もスタッフ端末のアプリが v211 以上である必要がある。旧バージョンが残った端末には
   「🔄 最新に更新」を案内すること（アプリ更新問題そのものは本方式では解決しない）。
 - アプリ表示バージョンを v210 から v211 に更新。
+
+CHANGELOG v212
+- 【改良】スタッフ申請の「取りこぼし」対策。
+  背景: スタッフの申請(requests)は setRequests のたびにクラウドへ即保存する処理が既にあるが、
+        これは await していない投げっぱなしで、中身は「読み→PATCH」の通信2往復。申請直後に
+        ロゴを押さずに離脱（アプリを背面化・タブを閉じる・画面ロック）すると、往復完了前に
+        ページが止まって保存が飛ぶ余地があった。確実に await していたのはロゴ→ホームの1箇所だけ。
+- 対策: スタッフモード中、ページが隠れる瞬間（visibilitychange:hidden と pagehide）に
+        flushStaffToCloud() を呼び、未送信の申請を確実にクラウドへ保存する。
+        visibilitychange:hidden は背面化時にページが生きたまま発火するため通信を完了できる。
+- 実装: flushStaffToCloud がクロージャの requests でなく requestsRef.current（＋既存の各ref）を
+        参照するようにし、イベントハンドラから常に最新の申請を送れるようにした。
+        既存の即保存effect（即時性）はそのまま残す＝二重でも害はなく、離脱時の穴だけを塞ぐ。
+- アプリ表示バージョンを v211 から v212 に更新。
 -->
 </body>
 </html>
