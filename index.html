@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v214'; // v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）。v212: スタッフ申請の取りこぼし対策（背面化/終了時にも未送信の申請を確実にクラウド保存）
+const APP_VERSION = 'v215'; // v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）。v212: スタッフ申請の取りこぼし対策（背面化/終了時にも未送信の申請を確実にクラウド保存）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -5016,7 +5016,20 @@ ${bodyHtml}
       return lines.join('\n')+'\n';
     })();
     // v198: 在職以外の月の職員はAIに渡すスタッフ一覧から外す（自動シフト作成の対象外にする）
-    const activeStaff=staff.filter(s=>!staffInactiveRows(s));
+    // v215: 生成直前に在籍ステータスを最新取得してから絞り込む。staffStatusRows は非同期読込のため、
+    //        退職などを設定した直後や読込完了前に生成すると、除外が漏れて退職者が配置される不具合があった。
+    //        ここで確実に取り直し、対象月に在職以外が重なる職員(退職・産休・育休・休職)をAI対象から外す。
+    let _statusRows=staffStatusRows;
+    try{
+      if(SB_ENABLED){
+        if(!SB_ACCESS_TOKEN) await sbReauth();
+        const _sr=await sbStatusList();
+        if(_sr&&_sr.ok){ _statusRows=_sr.rows||[]; setStaffStatusRows(_statusRows); }
+      }
+    }catch(_){}
+    const _inactiveCodes=new Set();
+    (_statusRows||[]).forEach(r=>{ if(r&&r.staff_code&&statusOverlapsMonth(r,y,m)) _inactiveCodes.add(r.staff_code); });
+    const activeStaff=staff.filter(s=>!(s&&s.code&&_inactiveCodes.has(s.code)));
     try{setARes(await autoGenerate(activeStaff,y,m,dates,apiKey,weeklyReq,manualExclusions,slots,asgn,tmps,holidays,manualClosedDays,bsDesc,requests));}
     catch(e){if(e.message==='AUTH_ERROR'){setAErr('AUTH_ERROR');setShowKeyPanel(true);setKeyInput(apiKey);}else{setAErr(e.message);}}
     finally{setALoad(false);}
@@ -10383,6 +10396,16 @@ CHANGELOG v214
 - 対策: 2つのクラウド読込effect（管理者/スタッフ）の依存配列に authStatus を追加。認証完了(authed)後に
         再実行され、shared（診療枠・休診日・外来閉室・医師在室 等）を確実に取り込む。
 - アプリ表示バージョンを v213 から v214 に更新。
+
+CHANGELOG v215
+- 【修正】退職(や産休・育休・休職)にした職員が、AI自動作成で配置されてしまう不具合。
+  背景: 在籍ステータス(staff_status)は非同期でクラウドから読み込む(staffStatusRows)。退職を設定した
+        直後や、まだ読み込みが完了していない状態で「AI自動作成」を押すと、除外用の staffInactiveRows が
+        空を返し、退職者が対象スタッフ(activeStaff)に混入して配置されていた。
+- 対策: doAuto()内で activeStaff を作る直前に、在籍ステータスを sbStatusList() で最新取得し直してから
+        (未認証なら先に再サインイン)、対象月に在職以外(退職・産休・育休・休職)が重なる職員を確実に除外する。
+        取得できた場合は staffStatusRows も更新するため、以降の後処理(常勤最低時間の補充等)も最新状態で判定。
+- アプリ表示バージョンを v214 から v215 に更新。
 -->
 </body>
 </html>
