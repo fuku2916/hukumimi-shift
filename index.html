@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v216'; // v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）。v212: スタッフ申請の取りこぼし対策（背面化/終了時にも未送信の申請を確実にクラウド保存）
+const APP_VERSION = 'v217'; // v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）。v212: スタッフ申請の取りこぼし対策（背面化/終了時にも未送信の申請を確実にクラウド保存）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -2546,6 +2546,7 @@ function App(){
           if(Array.isArray(sd.editLog))setEditLog(sd.editLog); // 追加・修正ログ
           if(sd.lockedAsgn&&typeof sd.lockedAsgn==='object')setLockedAsgn(sd.lockedAsgn); // 確定基準
           if(sd.lockedMonths&&typeof sd.lockedMonths==='object')setLockedMonths(sd.lockedMonths);
+          if(sd.finalChecks!==undefined)setFinalChecks(sd.finalChecks||''); // v217: 最終チェックの質問文
           shiftStampLoadRef.current=true; // 読込では作成日時を更新しない
           if(sd.shiftUpdatedAt!==undefined){setShiftUpdatedAt(sd.shiftUpdatedAt||'');setPublishedAt(sd.shiftUpdatedAt||'');}
           if(Array.isArray(sd.history))setShiftHistory(sd.history); // バックアップ履歴
@@ -3045,6 +3046,11 @@ function App(){
   const [showReportPanel,setShowReportPanel]=useState(false);
   const [showStaffCheck,setShowStaffCheck]=useState(false);
   const [showLeaveAudit,setShowLeaveAudit]=useState(false);
+  // v217: 最終チェック（完成シフトを制約から逆算して検算）。質問文は職種ごとに保存。
+  const [showFinalCheck,setShowFinalCheck]=useState(false);
+  const [finalChecks,setFinalChecks]=useState(()=>saved?.finalChecks||'');
+  const [finalCheckRunning,setFinalCheckRunning]=useState(false);
+  const [finalCheckResult,setFinalCheckResult]=useState(null); // {items:[{n,q,verdict,evidence}]} | {error}
   const [keyInput,setKeyInput]=useState('');
   const [weeklyReq,setWeeklyReq]=useState(()=>normalizeWeeklyReqV155(saved?.weeklyReq||WEEKLY_REQ_DEFAULT,initialSlotsV155));
   const [monthlyReq,setMonthlyReq]=useState(()=>normalizeMonthlyReqV155(saved?.monthlyReq||{},initialSlotsV155));
@@ -3126,8 +3132,8 @@ function App(){
   // ── 自動保存 ──
   // ローカル自動保存
   useEffect(()=>{
-    saveLS({y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,outpatientClosures,outpatientClosuresUpdatedAt,outpatientDoctorPresence});
-  },[y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,outpatientClosures,outpatientClosuresUpdatedAt]);
+    saveLS({y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,outpatientClosures,outpatientClosuresUpdatedAt,outpatientDoctorPresence,finalChecks});
+  },[y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,outpatientClosures,outpatientClosuresUpdatedAt,finalChecks]);
 
   // ★ v108: シフト本体は「下書き保存」と「公開」を分離する。
   // 　下書き保存＝管理者用の控え（スタッフには見えない）。公開＝スタッフ画面へ反映。
@@ -3141,7 +3147,7 @@ function App(){
   const [shiftHistory,setShiftHistory]=useState([]); // [{at,made,data}]（クラウドから取得）
   const [showHistory,setShowHistory]=useState(false);
   const [historyLoading,setHistoryLoading]=useState(false);
-  const FULL_RESTORE_KEYS=['y','m','clinicId','clinicLabel','unit','unitLabel','staff','asgn','tmps','weeklyReq','monthlyReq','manualExclusions','manualClosedDays','baseShift','slots','newSlotCounter','paidLeave','shiftUpdatedAt','editLog','lockedAsgn','lockedMonths','surgeryFlags','surgeryCalSnapshotAt','outpatientClosures','outpatientClosuresUpdatedAt','outpatientDoctorPresence'];
+  const FULL_RESTORE_KEYS=['y','m','clinicId','clinicLabel','unit','unitLabel','staff','asgn','tmps','weeklyReq','monthlyReq','manualExclusions','manualClosedDays','baseShift','slots','newSlotCounter','paidLeave','shiftUpdatedAt','editLog','lockedAsgn','lockedMonths','surgeryFlags','surgeryCalSnapshotAt','outpatientClosures','outpatientClosuresUpdatedAt','outpatientDoctorPresence','finalChecks'];
   function clonePlain(obj){try{return JSON.parse(JSON.stringify(obj));}catch(e){return obj;}}
   function currentShiftPayload(extra){
     // v170: 公開履歴から完全復元できるよう、復元に必要な全 state を固定リストで保存する。
@@ -3171,6 +3177,7 @@ function App(){
       outpatientClosures:clonePlain(outpatientClosures||{}),
       outpatientClosuresUpdatedAt:outpatientClosuresUpdatedAt||'',
       outpatientDoctorPresence:clonePlain(outpatientDoctorPresence||{}),
+      finalChecks:(finalChecks||''),
       ...(extra||{})
     };
     return payload;
@@ -5038,6 +5045,55 @@ ${bodyHtml}
     try{setARes(await autoGenerate(activeStaff,y,m,dates,apiKey,weeklyReq,manualExclusions,slots,_cleanAsgn,tmps,holidays,manualClosedDays,bsDesc,requests));}
     catch(e){if(e.message==='AUTH_ERROR'){setAErr('AUTH_ERROR');setShowKeyPanel(true);setKeyInput(apiKey);}else{setAErr(e.message);}}
     finally{setALoad(false);}
+  }
+  // ── v217: 最終チェック（完成シフトを各スタッフの実績から検算）──
+  //   アプリが当月の実配置を機械集計し、その実数を根拠にAIが各チェック項目(質問)を達成/未達成/判定不能で判定する。
+  async function runFinalCheck(){
+    const qs=(finalChecks||'').split('\n').map(s=>s.trim()).filter(Boolean);
+    if(qs.length===0){ setFinalCheckResult({error:'チェック項目を1行に1つ入力してください。'}); return; }
+    if(!apiKey||!apiKey.trim()){ setFinalCheckResult({error:'APIキーが未設定です。設定メニュー→APIキーから登録してください。'}); return; }
+    setFinalCheckRunning(true); setFinalCheckResult(null);
+    try{
+      const dayJP=['日','月','火','水','木','金','土'];
+      const activeSlotIds=(dk,dow)=>(slots[dow]||[]);
+      const worksOn=(sid,dk,dow)=>activeSlotIds(dk,dow).some(slot=>((asgn[dk]?.[slot.id]||[]).filter(x=>!((manualExclusions[dk]?.[slot.id]||[]).includes(x))).includes(sid)));
+      const slotLabelsOn=(sid,dk,dow)=>{const out=[];activeSlotIds(dk,dow).forEach(slot=>{const ids=(asgn[dk]?.[slot.id]||[]).filter(x=>!((manualExclusions[dk]?.[slot.id]||[]).includes(x)));if(ids.includes(sid))out.push(slot.label||slot.id);});return out;};
+      const factLines=[];
+      (staff||[]).forEach(s=>{
+        if(!s)return;
+        const daysWorked=[];
+        dates.forEach(d=>{
+          const dk=tdk(d); if(isClosedDay(dk))return;
+          const dow=d.getDay();
+          if(worksOn(s.id,dk,dow)) daysWorked.push({dk,dow,mmdd:String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'),labels:slotLabelsOn(s.id,dk,dow)});
+        });
+        const dowCount={1:0,2:0,3:0,4:0,5:0,6:0};
+        daysWorked.forEach(x=>{if(dowCount[x.dow]!==undefined)dowCount[x.dow]++;});
+        const perWeek=weeks.map(wk=>{const set=new Set(wk.map(tdk));return daysWorked.filter(x=>set.has(x.dk)).length;});
+        const totalH=weeks.reduce((a,wk)=>a+weekHours(s.id,wk,asgn,manualExclusions,slots),0);
+        if(daysWorked.length===0){ factLines.push(s.name+'(ID:'+s.id+'): 当月の勤務なし'); }
+        else{
+          const dowStr=[1,2,3,4,5,6].map(dw=>dayJP[dw]+dowCount[dw]).join(' ');
+          const dayList=daysWorked.map(x=>x.mmdd+'('+dayJP[x.dow]+')'+(x.labels.length?'['+x.labels.join('/')+']':'')).join(' ');
+          factLines.push(s.name+'(ID:'+s.id+'): 合計'+daysWorked.length+'日/'+totalH.toFixed(1)+'h; 曜日別['+dowStr+']; 週別勤務日数['+perWeek.join(',')+']; 勤務日: '+dayList);
+        }
+      });
+      const noteLines=(staff||[]).filter(s=>s&&(s.notes||'').trim()).map(s=>s.name+': '+(s.notes||'').replace(/\n/g,' / '));
+      const qList=qs.map((q,i)=>(i+1)+'. '+q).join('\n');
+      const prompt='あなたはシフトの「検算（最終チェック）」担当です。下記は完成した'+y+'年'+m+'月のシフトから機械的に集計した各スタッフの勤務実績です。この実績だけを根拠に、後述のチェック項目を1つずつ判定してください。実績に無いこと・推測が必要なことは「判定不能」にしてください。曜日は日本語(月〜土)。「週」は「週別勤務日数」の並びの各要素(第1週,第2週…)に対応します。\n\n【各スタッフの勤務実績（当月・機械集計）】\n'+factLines.join('\n')+'\n\n【スタッフ登録条件（参考。実績と矛盾する場合は必ず実績を優先）】\n'+(noteLines.join('\n')||'（なし）')+'\n\n【チェック項目】\n'+qList+'\n\n【判定の考え方】\n- 「◯◯は水曜に休みか？」→ 実績の曜日別「水」が0なら達成、1以上なら未達成。\n- 「◯◯は週N日以内か？」→ 週別勤務日数がすべてN以下なら達成、1つでも超過なら未達成（超過した週と日数を根拠に）。\n- 根拠には必ず該当する実数（曜日別カウントや週別日数など）を簡潔に添えること。\n\n【出力形式・厳守】返答は次のJSONだけ。最初の文字は「{」、最後は「}」。前置き・説明・コードブロックは書かない。\n{"results":[{"n":1,"verdict":"達成","evidence":"…"}]}';
+      const headers={'Content-Type':'application/json'};
+      if(apiKey&&apiKey.trim()){headers['x-api-key']=apiKey.trim();headers['anthropic-version']='2023-06-01';headers['anthropic-dangerous-direct-browser-access']='true';}
+      const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers,body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:4000,messages:[{role:'user',content:prompt}]})});
+      const data=await r.json();
+      if(!r.ok){ throw new Error((data&&data.error&&data.error.message)||('APIエラー('+r.status+')')); }
+      let raw=(data.content||[]).map(c=>c.type==='text'?c.text:'').join('').trim();
+      const a=raw.indexOf('{'),b=raw.lastIndexOf('}'); if(a>=0&&b>a)raw=raw.slice(a,b+1);
+      const parsed=JSON.parse(raw);
+      const items=(parsed.results||[]).map(x=>({n:x.n,q:qs[(x.n||0)-1]||'',verdict:x.verdict||'判定不能',evidence:x.evidence||''}));
+      if(items.length===0)throw new Error('判定結果が空でした。もう一度お試しください。');
+      setFinalCheckResult({items});
+    }catch(e){ setFinalCheckResult({error:(e&&e.message)||'チェックに失敗しました'}); }
+    finally{ setFinalCheckRunning(false); }
   }
   // ── 常勤スタッフの最低時間を必ず達成する（必要ならパートと入れ替え）──
   function fillFulltimeMinHours(rawAsgn){
@@ -7356,6 +7412,7 @@ ${bodyHtml}
                     <MenuItem icon="📊" label="達成レポート" onClick={()=>{setShowReportPanel(p=>!p);setOpenMenu(null);}} active={showReportPanel}/>
                     <MenuItem icon="👤" label="スタッフごとのチェック" onClick={()=>{setShowStaffCheck(p=>!p);setOpenMenu(null);}} active={showStaffCheck}/>
                     <MenuItem icon="🕖" label="退勤時刻チェック" onClick={()=>{setShowLeaveAudit(true);setOpenMenu(null);}} active={showLeaveAudit}/>
+                    <MenuItem icon="🔎" label="最終チェック" onClick={()=>{setShowFinalCheck(true);setOpenMenu(null);}} active={showFinalCheck}/>
                   </>}
 
                   {/* 出力メニュー */}
@@ -7655,6 +7712,45 @@ ${bodyHtml}
           {showStaffCheck&&<StaffCheckPanel staff={staff} dates={dates} asgn={asgn} manualExclusions={manualExclusions} tmps={tmps} slots={slots} weeks={weeks} y={y} m={m} holidays={holidays} manualClosedDays={manualClosedDays} onClose={()=>setShowStaffCheck(false)}/>}
           {showLeaveAudit&&<LeaveAudit staff={staff} dates={dates} asgn={asgn} manualExclusions={manualExclusions} tmps={tmps} slots={slots} y={y} m={m} onClose={()=>setShowLeaveAudit(false)}/>}
           {aRes&&<AutoPanel result={aRes} apid={apid} staff={staff} y={y} m={m} allSlots={allSlots} weeks={weeks} slots={slots} patReqList={patReqList} finalizeAsgn={finalizeAsgn} onApply={applyPat} onClose={()=>{setARes(null);setApid(null);}} onJump={dk=>{setSelDk(dk);setDtab('assign');}}/>}
+
+          {/* v217: 最終チェック パネル */}
+          {showFinalCheck&&(
+            <div onClick={()=>setShowFinalCheck(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:2000,padding:16}}>
+              <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:14,width:'100%',maxWidth:680,maxHeight:'85vh',display:'flex',flexDirection:'column',boxShadow:'0 8px 32px rgba(0,0,0,0.2)'}}>
+                <div style={{padding:'14px 18px',borderBottom:'1px solid #E2E8F0',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+                  <div style={{fontWeight:700,fontSize:16}}>🔎 最終チェック（{y}年{m}月）</div>
+                  <button onClick={()=>setShowFinalCheck(false)} style={{border:'none',background:'none',fontSize:20,cursor:'pointer',color:'#64748B'}}>✕</button>
+                </div>
+                <div style={{padding:'14px 18px',overflowY:'auto'}}>
+                  <div style={{fontSize:12,color:'#64748B',marginBottom:6,lineHeight:1.6}}>確認したいことを<b>1行に1つ</b>、質問形式で入力してください（例：「大瀧さんは週3日以内の勤務になっているか？」「北尾さんは水曜日に休みになっているか？」）。入力内容は保存され、翌月も使えます。「チェック実行」を押すと、完成した当月シフトの<b>実際の勤務実績</b>をAIが集計し、その実数を根拠に各項目を判定します。</div>
+                  <textarea value={finalChecks} onChange={e=>setFinalChecks(e.target.value)} rows={7} placeholder={'大瀧さんは週3日以内の勤務になっているか？\n北尾さんは水曜日に休みになっているか？'} style={{width:'100%',boxSizing:'border-box',border:'1px solid #CBD5E1',borderRadius:8,padding:'8px 10px',fontSize:14,fontFamily:'inherit',resize:'vertical',lineHeight:1.7}}/>
+                  <div style={{display:'flex',gap:10,alignItems:'center',marginTop:10,flexWrap:'wrap'}}>
+                    <button onClick={()=>{if(!finalCheckRunning)runFinalCheck();}} disabled={finalCheckRunning} style={{background:finalCheckRunning?'#94A3B8':'#2563EB',color:'#fff',border:'none',borderRadius:8,padding:'8px 18px',fontSize:14,fontWeight:600,cursor:finalCheckRunning?'default':'pointer'}}>{finalCheckRunning?'チェック中…':'チェック実行'}</button>
+                    <span style={{fontSize:11,color:'#94A3B8'}}>※当月シフトの実績をAIが検算します（APIキー使用）</span>
+                  </div>
+                  {finalCheckResult&&finalCheckResult.error&&<div style={{marginTop:12,color:'#B91C1C',fontSize:13,background:'#FEF2F2',border:'1px solid #FECACA',borderRadius:8,padding:'8px 10px'}}>{finalCheckResult.error}</div>}
+                  {finalCheckResult&&finalCheckResult.items&&(
+                    <div style={{marginTop:14,display:'flex',flexDirection:'column',gap:8}}>
+                      {(()=>{const ng=finalCheckResult.items.filter(x=>x.verdict==='未達成').length;return <div style={{fontSize:13,fontWeight:600,color:ng>0?'#991B1B':'#166534'}}>{ng>0?('⚠ '+ng+'件が未達成です'):'✅ すべて達成しています'}</div>;})()}
+                      {finalCheckResult.items.map((it,i)=>{
+                        const ok=it.verdict==='達成',bad=it.verdict==='未達成';
+                        const col=ok?{bg:'#F0FDF4',bd:'#86EFAC',tx:'#166534',mk:'✅ 達成'}:bad?{bg:'#FEF2F2',bd:'#FECACA',tx:'#991B1B',mk:'❌ 未達成'}:{bg:'#FFFBEB',bd:'#FDE68A',tx:'#92400E',mk:'⚠️ 判定不能'};
+                        return(<div key={i} style={{background:col.bg,border:'1px solid '+col.bd,borderRadius:8,padding:'8px 10px'}}>
+                          <div style={{display:'flex',gap:8,alignItems:'flex-start'}}>
+                            <div style={{fontWeight:700,color:col.tx,whiteSpace:'nowrap',fontSize:13}}>{col.mk}</div>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontSize:13,color:'#1E293B'}}>{it.q||('項目'+(it.n||i+1))}</div>
+                              {it.evidence&&<div style={{fontSize:12,color:'#475569',marginTop:2,lineHeight:1.5}}>根拠: {it.evidence}</div>}
+                            </div>
+                          </div>
+                        </div>);
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* バックアップ履歴パネル */}
           {showHistory&&(
@@ -10422,6 +10518,16 @@ CHANGELOG v216
 - 補足: ベースシフトや既存シフト表に既に入っている退職者の「配置データ」自体は自動削除しない（手動またはベース
         シフト編集で除去）。本修正はAI自動作成が退職者を新たに置かないようにするもの。
 - アプリ表示バージョンを v215 から v216 に更新。
+
+CHANGELOG v217
+- 【新機能】シフト設計に「最終チェック」を追加。完成したシフトを、制約から逆算して検算するための機能。
+  背景: AIが「月火木金勤務可能」を「水も可」と解釈したり「週3日まで」を融通する等、生成が制約に反することがある。
+        そこで生成後に、ハードな条件を質問形式で列挙し、実際のシフトが満たしているか一括チェックできるようにした。
+- 使い方: シフト設計メニュー→「最終チェック」。確認事項を1行1問で自由記入（例: 大瀧は週3日以内か？/北尾は水曜に休みか？）。
+        「チェック実行」で、アプリが当月の実配置を機械集計(曜日別勤務数・週別勤務日数・勤務日/コマ)し、その実数を根拠に
+        AI(claude-sonnet-4-6)が各項目を 達成/未達成/判定不能 で判定。根拠(実数)も表示するので人が検証できる。
+- 質問文は職種ごとに保存(finalChecks)。ローカル自動保存＋公開時クラウド保存＋履歴復元(FULL_RESTORE_KEYS)に対応。
+- アプリ表示バージョンを v216 から v217 に更新。
 -->
 </body>
 </html>
