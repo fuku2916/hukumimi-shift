@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v213'; // v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）。v212: スタッフ申請の取りこぼし対策（背面化/終了時にも未送信の申請を確実にクラウド保存）
+const APP_VERSION = 'v214'; // v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）。v212: スタッフ申請の取りこぼし対策（背面化/終了時にも未送信の申請を確実にクラウド保存）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -2560,7 +2560,10 @@ function App(){
       }catch(e){setSbStatus('error');}
       setSbLoading(false);
     })();
-  },[appMode]);
+  // v214: authStatus を依存に追加。起動時の認証(signIn)が非同期で、認証前にこのロードが走ると
+  //        anon権限＝RLSでクラウドが空({}/200)に見え、共通(shared:診療枠・休診日等)が採用されず
+  //        端末ローカルのみで表示されていた。認証完了(authed)後に再実行して確実に取り込む。
+  },[appMode,authStatus]);
 
   // Supabaseからデータ読み込み（スタッフ一覧画面・スタッフモード起動時）
   // ※ staff_login（名前・PIN選択画面）でも読み込む。これがないと、一度管理者画面に
@@ -2602,7 +2605,8 @@ function App(){
       }catch(e){setSbStatus('error');}
       setSbLoading(false);
     })();
-  },[appMode]);
+  // v214: authStatus を依存に追加（スタッフ画面も同様に認証完了後に再読込）。
+  },[appMode,authStatus]);
 
   // スタッフモード：requestsが変わったらSupabaseに即保存
   React.useEffect(()=>{
@@ -10369,6 +10373,16 @@ CHANGELOG v213
 - データは残置: Supabaseの shift_data 行 id=demachi は削除していない。再び CLINIC_KEYS に 'demachi' を
   戻せば、こどもクリニックとそのデータはそのまま復活できる（可逆）。
 - アプリ表示バージョンを v212 から v213 に更新。
+
+CHANGELOG v214
+- 【修正】起動時の競合で、クラウドの共通設定（診療枠・休診日など shared）が端末に反映されない不具合。
+  背景: 起動時に Supabase へのサインイン(signIn)は非同期。管理者/スタッフのクラウド読込effectが
+        認証完了前に走ると、anon権限では RLS によりクラウド行が空({}/HTTP200)に見える（401ではないので
+        再認証も走らない）。結果 sd=null となり shared 採用ブロックが skip され、端末ローカルのみで表示。
+        例: ドクター画面で登録したお盆休み(8/12-15)の休診が、ナース/クラーク画面に反映されなかった。
+- 対策: 2つのクラウド読込effect（管理者/スタッフ）の依存配列に authStatus を追加。認証完了(authed)後に
+        再実行され、shared（診療枠・休診日・外来閉室・医師在室 等）を確実に取り込む。
+- アプリ表示バージョンを v213 から v214 に更新。
 -->
 </body>
 </html>
