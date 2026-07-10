@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v215'; // v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）。v212: スタッフ申請の取りこぼし対策（背面化/終了時にも未送信の申請を確実にクラウド保存）
+const APP_VERSION = 'v216'; // v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）。v212: スタッフ申請の取りこぼし対策（背面化/終了時にも未送信の申請を確実にクラウド保存）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -4989,7 +4989,22 @@ ${bodyHtml}
 
   async function doAuto(){
     setALoad(true);setAErr(null);setARes(null);setApid(null);
-    // ── ベースシフト情報をApp内で計算（state参照可能）──
+    // v215/v216: 生成直前に在籍ステータスを最新取得し、対象月に在職以外(退職/産休/育休/休職)が重なる職員を特定。
+    //   staffStatusRows は非同期読込のため、退職設定直後や読込完了前の生成で除外が漏れていた。ここで確実に
+    //   取り直し、(1)AIに渡すスタッフ一覧 activeStaff だけでなく (2)ベースシフト説明文 bsDesc からも該当者を外す。
+    //   ※v216: ベースシフト(基本パターン)に退職者が残っていると、AIが基本パターン通りに退職者を配置していた。
+    let _statusRows=staffStatusRows;
+    try{
+      if(SB_ENABLED){
+        if(!SB_ACCESS_TOKEN) await sbReauth();
+        const _sr=await sbStatusList();
+        if(_sr&&_sr.ok){ _statusRows=_sr.rows||[]; setStaffStatusRows(_statusRows); }
+      }
+    }catch(_){}
+    const _inactiveCodes=new Set();
+    (_statusRows||[]).forEach(r=>{ if(r&&r.staff_code&&statusOverlapsMonth(r,y,m)) _inactiveCodes.add(r.staff_code); });
+    const _isInactiveId=(sid)=>{ const s=staff.find(x=>x.id===sid); return !!(s&&s.code&&_inactiveCodes.has(s.code)); };
+    // ── ベースシフト情報をApp内で計算（state参照可能）。在職以外(退職等)の職員は除外 ──
     const bsDesc=(()=>{
       const hasBase=['A','B'].some(p=>Object.keys(baseShift[p]||{}).length>0);
       if(!hasBase) return '';
@@ -5008,7 +5023,7 @@ ${bodyHtml}
           Object.entries(daySlots).forEach(([slotId,sids])=>{
             if(!sids||sids.length===0) return;
             const slotName=(slots[dow]||[]).find(s=>s.id===slotId)?.label||slotId;
-            const names=sids.map(sid=>staff.find(s=>s.id===sid)?.name||sid).filter(Boolean).join('・');
+            const names=sids.filter(sid=>!_isInactiveId(sid)).map(sid=>staff.find(s=>s.id===sid)?.name||sid).filter(Boolean).join('・');
             if(names) lines.push('    '+dow2DayName+'曜 '+slotName+': '+names);
           });
         });
@@ -5016,21 +5031,11 @@ ${bodyHtml}
       return lines.join('\n')+'\n';
     })();
     // v198: 在職以外の月の職員はAIに渡すスタッフ一覧から外す（自動シフト作成の対象外にする）
-    // v215: 生成直前に在籍ステータスを最新取得してから絞り込む。staffStatusRows は非同期読込のため、
-    //        退職などを設定した直後や読込完了前に生成すると、除外が漏れて退職者が配置される不具合があった。
-    //        ここで確実に取り直し、対象月に在職以外が重なる職員(退職・産休・育休・休職)をAI対象から外す。
-    let _statusRows=staffStatusRows;
-    try{
-      if(SB_ENABLED){
-        if(!SB_ACCESS_TOKEN) await sbReauth();
-        const _sr=await sbStatusList();
-        if(_sr&&_sr.ok){ _statusRows=_sr.rows||[]; setStaffStatusRows(_statusRows); }
-      }
-    }catch(_){}
-    const _inactiveCodes=new Set();
-    (_statusRows||[]).forEach(r=>{ if(r&&r.staff_code&&statusOverlapsMonth(r,y,m)) _inactiveCodes.add(r.staff_code); });
     const activeStaff=staff.filter(s=>!(s&&s.code&&_inactiveCodes.has(s.code)));
-    try{setARes(await autoGenerate(activeStaff,y,m,dates,apiKey,weeklyReq,manualExclusions,slots,asgn,tmps,holidays,manualClosedDays,bsDesc,requests));}
+    // v216: 現在の配置(引き継ぎ)からも退職者等を除外してAIに渡す（残った旧配置を踏襲させない）
+    const _cleanAsgn={};
+    Object.entries(asgn||{}).forEach(([dk,sm])=>{ const o={}; Object.entries(sm||{}).forEach(([slot,ids])=>{ o[slot]=(ids||[]).filter(sid=>!_isInactiveId(sid)); }); _cleanAsgn[dk]=o; });
+    try{setARes(await autoGenerate(activeStaff,y,m,dates,apiKey,weeklyReq,manualExclusions,slots,_cleanAsgn,tmps,holidays,manualClosedDays,bsDesc,requests));}
     catch(e){if(e.message==='AUTH_ERROR'){setAErr('AUTH_ERROR');setShowKeyPanel(true);setKeyInput(apiKey);}else{setAErr(e.message);}}
     finally{setALoad(false);}
   }
@@ -10406,6 +10411,17 @@ CHANGELOG v215
         (未認証なら先に再サインイン)、対象月に在職以外(退職・産休・育休・休職)が重なる職員を確実に除外する。
         取得できた場合は staffStatusRows も更新するため、以降の後処理(常勤最低時間の補充等)も最新状態で判定。
 - アプリ表示バージョンを v214 から v215 に更新。
+
+CHANGELOG v216
+- 【修正】退職者がAI自動作成で配置され続ける不具合（v215で塞ぎ切れていなかった経路）。
+  背景: v215はAIに渡すスタッフ一覧(activeStaff)から退職者を外したが、AIに渡す「ベースシフト説明文(bsDesc)」は
+        全スタッフ配列で組み立てていたため、ベースシフト(基本パターン)に退職者が残っていると、AIが基本パターン
+        通りに退職者を配置していた。加えて、現在の配置(引き継ぎ)に残った退職者もAIに提示されていた。
+- 対策: doAuto()で在籍ステータス判定を先に行い、(1)activeStaff に加え (2)bsDesc の各コマ、(3)AIへ渡す現在配置(asgn)
+        の3か所すべてから、対象月に在職以外(退職/産休/育休/休職)が重なる職員を除外する。
+- 補足: ベースシフトや既存シフト表に既に入っている退職者の「配置データ」自体は自動削除しない（手動またはベース
+        シフト編集で除去）。本修正はAI自動作成が退職者を新たに置かないようにするもの。
+- アプリ表示バージョンを v215 から v216 に更新。
 -->
 </body>
 </html>
