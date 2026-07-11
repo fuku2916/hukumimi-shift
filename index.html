@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v219'; // v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）。v212: スタッフ申請の取りこぼし対策（背面化/終了時にも未送信の申請を確実にクラウド保存）
+const APP_VERSION = 'v220'; // v220: Phase2 AI自動作成を有効期間つき診療枠に対応（多版月は期間ごとに枠を提示＋無効コマ配置を除去）。v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）。v212: スタッフ申請の取りこぼし対策（背面化/終了時にも未送信の申請を確実にクラウド保存）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -889,23 +889,42 @@ function monthHours(staffId,dates,asgn,excl,slotsState,staffArr){
   return dates.reduce((s,d)=>s+dayHours(tdk(d),staffId,asgn,excl,slotsState,staffArr),0);
 }
 
-async function autoGenerate(staff,y,m,dates,apiKey,weeklyReq,manualExclusions,slots,currentAsgn,tmps,holidays,manualClosedDays,baseShiftDesc,requests){
+async function autoGenerate(staff,y,m,dates,apiKey,weeklyReq,manualExclusions,slots,currentAsgn,tmps,holidays,manualClosedDays,baseShiftDesc,requests,slotResolver,multiVer){
   holidays=holidays||{};
   manualClosedDays=manualClosedDays||{};
   const MM=String(m).padStart(2,'0');
   const dd=dates.map(d=>MM+'-'+String(d.getDate()).padStart(2,'0')+'('+DAY_JP[d.getDay()]+')').join(' ');
-  const reqDesc=[1,2,3,4,5,6].map(dow=>{
-    const sls=(slots||SLOTS)[dow]||[];
+  // v220 Phase2: 日付→その日に有効な診療枠。多版月では期間ごとに枠が変わる（slotResolver未指定＝従来どおり単一slots）。
+  const daySlotsOf=(d)=> (slotResolver?slotResolver(d):(slots||SLOTS))||SLOTS;
+  // 対象月を「同じ診療枠バージョンが続く連続区間」に分割（多版月のみ複数区間になる）
+  const slotSegs=(()=>{
+    const segs=[];
+    dates.forEach(d=>{
+      const sl=daySlotsOf(d);
+      const last=segs[segs.length-1];
+      if(last&&last.slots===sl) last.to=d; else segs.push({from:d,to:d,slots:sl});
+    });
+    return segs;
+  })();
+  const isMultiVer=!!multiVer&&slotSegs.length>1;
+  const segLabel=(seg)=>`${String(seg.from.getMonth()+1).padStart(2,'0')}-${String(seg.from.getDate()).padStart(2,'0')}〜${String(seg.to.getMonth()+1).padStart(2,'0')}-${String(seg.to.getDate()).padStart(2,'0')}`;
+  const reqDescFor=(sl)=>[1,2,3,4,5,6].map(dow=>{
+    const sls=(sl||SLOTS)[dow]||[];
     if(!sls.length)return '';
     return '  '+DAY_JP[dow]+'曜: '+sls.map(s=>s.label+'='+((weeklyReq||{})[dow]?.[s.id]??1)+'名').join(', ');
   }).filter(Boolean).join('\n');
-
   // 動的コマ定義（診療枠タブで編集された名前・時間を反映）
-  const slotDefDesc=[1,2,3,4,5,6].map(dow=>{
-    const sls=(slots||SLOTS)[dow]||[];
+  const slotDefDescFor=(sl)=>[1,2,3,4,5,6].map(dow=>{
+    const sls=(sl||SLOTS)[dow]||[];
     if(!sls.length)return '';
     return '  '+DAY_JP[dow]+': '+sls.map(s=>`${s.id}(${s.label} ${s.time})`).join(', ');
   }).filter(Boolean).join('\n');
+  const reqDesc=isMultiVer
+    ? slotSegs.map(seg=>`  ── 期間【${segLabel(seg)}】──\n`+reqDescFor(seg.slots)).join('\n')
+    : reqDescFor(slots||SLOTS);
+  const slotDefDesc=isMultiVer
+    ? slotSegs.map(seg=>`  ── 期間【${segLabel(seg)}】──\n`+slotDefDescFor(seg.slots)).join('\n')
+    : slotDefDescFor(slots||SLOTS);
 
   // ── 確定済み配置セクション（除外操作がある場合のみ生成） ──
   const hasExcl=Object.values(manualExclusions||{}).some(sm=>Object.values(sm).some(ids=>(ids||[]).length>0));
@@ -916,7 +935,7 @@ async function autoGenerate(staff,y,m,dates,apiKey,weeklyReq,manualExclusions,sl
       const dk=tdk(d);
       const da=currentAsgn[dk]||{};
       const dExcl=(manualExclusions||{})[dk]||{};
-      const sls=(slots||SLOTS)[d.getDay()]||[];
+      const sls=daySlotsOf(d)[d.getDay()]||[]; // v220 Phase2: その日に有効な診療枠で判定
       sls.forEach(slot=>{
         const activeIds=(da[slot.id]||[]).filter(sid=>!(dExcl[slot.id]||[]).includes(sid));
         if(activeIds.length>0){
@@ -1082,7 +1101,7 @@ ${hourConstraints||'  （時間制約の設定なし）'}
     無人帯のあるコマへ移して連続カバーを優先すること（無人(0名)にするより、他コマの定員割れの方が良い）。
   ・同様に、出勤開始が遅い人だけのコマは開始時刻直後が無人になり得る点にも注意。
 ━━ コマ定義（曜日/slot_id/時間帯）━━
-${slotDefDesc}
+${isMultiVer?'  ※この月は途中で診療枠が変わります。各日付は、その日が属する期間の枠のみを使用してください（他期間のコマIDへの配置は禁止）。\n':''}${slotDefDesc}
 ━━ 各コマの必要人数（目標）━━
 ${reqDesc}
 ${excSection}${tmpSection}${empSection}━━ 現在登録されているスタッフと勤務条件━━
@@ -5080,7 +5099,10 @@ ${bodyHtml}
     // v216: 現在の配置(引き継ぎ)からも退職者等を除外してAIに渡す（残った旧配置を踏襲させない）
     const _cleanAsgn={};
     Object.entries(asgn||{}).forEach(([dk,sm])=>{ const o={}; Object.entries(sm||{}).forEach(([slot,ids])=>{ o[slot]=(ids||[]).filter(sid=>!_isInactiveId(sid)); }); _cleanAsgn[dk]=o; });
-    try{setARes(await autoGenerate(activeStaff,y,m,dates,apiKey,weeklyReq,manualExclusions,slots,_cleanAsgn,tmps,holidays,manualClosedDays,bsDesc,requests));}
+    // v220 Phase2: 対象月内で診療枠が変わる場合、日付ごとに有効な枠でプロンプトを作る（多版月のみ）
+    const _multiVer=monthSpansMultipleVersions();
+    const _slotResolver=(d)=>slotsForDateStr(tdk(d));
+    try{setARes(await autoGenerate(activeStaff,y,m,dates,apiKey,weeklyReq,manualExclusions,slots,_cleanAsgn,tmps,holidays,manualClosedDays,bsDesc,requests,_slotResolver,_multiVer));}
     catch(e){if(e.message==='AUTH_ERROR'){setAErr('AUTH_ERROR');setShowKeyPanel(true);setKeyInput(apiKey);}else{setAErr(e.message);}}
     finally{setALoad(false);}
   }
@@ -5342,6 +5364,27 @@ ${bodyHtml}
     });
     return target;
   }
+  // ── v220 Phase2: 各日付を、その日に有効な診療枠バージョンで解決し、存在しないコマIDへの配置を除去する。 ──
+  // 月内で診療枠が変わる（多版月）場合のみ作動。単一版月では従来どおり（no-op）。
+  function dropInvalidSlotsByDate(rawAsgn){
+    const na={};
+    Object.entries(rawAsgn||{}).forEach(([dk,sm])=>{
+      const dow=new Date(dk).getDay();
+      const daySlots=(slotsForDateStr(dk)||{})[dow]||[];
+      const validIds=new Set(daySlots.map(sl=>sl&&sl.id).filter(Boolean));
+      const o={};
+      Object.entries(sm||{}).forEach(([slotId,ids])=>{ if(validIds.has(slotId)) o[slotId]=[...(ids||[])]; });
+      na[dk]=o;
+    });
+    return na;
+  }
+  // 対象月(dates)が複数の診療枠バージョンにまたがるか（多版月の判定）
+  function monthSpansMultipleVersions(){
+    const sc=slotSchedule; if(!sc||sc.length<=1)return false;
+    const seen=new Set();
+    dates.forEach(d=>{ seen.add(slotsForDateStr(tdk(d))); });
+    return seen.size>1;
+  }
   // ── 最終仕上げ：①ベースシフトを土台に配置 → ②AI結果を重ねる →
   //   ③労働時間調整（ベース分は削らない） → ④常勤最低時間/最低コマ補完 → ⑤ベース被覆の最終保証 ──
   function finalizeAsgn(aiAsgn){
@@ -5366,6 +5409,7 @@ ${bodyHtml}
     na=ensureBaseCoverage(na);   // ⑤ 念のための最終保証
     na=fixCoverageGaps(na);      // ⑥ 時間帯の無人(0名)を解消（早退者だけのコマを補修）
     na=trimOverstaff(na);        // ⑦ 過剰配置・1日8時間超のトリム（8時間厳守を最優先）
+    if(monthSpansMultipleVersions()) na=dropInvalidSlotsByDate(na); // ⑧ v220 Phase2: 多版月のみ、その日に無いコマへの配置を除去
     return na;
   }
 
@@ -10587,6 +10631,20 @@ CHANGELOG v219 (重大バグ修正: クラウド全消し)
         既存行に職種(doctor/nurse/clerk)が1つも無ければ書かない安全策を追加(1回だけ再認証して再試行、それでも
         空なら中断)。これで空読み時の全消しを構造的に防ぐ。※ローカルデータは元々無事。
 - アプリ表示バージョンを v218 から v219 に更新。
+
+CHANGELOG v220 (Phase2: AI自動作成を有効期間つき診療枠に対応)
+- 【新機能・基盤】v218で導入した「有効期間つき診療枠(slotSchedule)」に、AI自動作成(doAuto/autoGenerate)を対応。
+  背景: 診療枠が月途中で変わる（例: 8/17〜新枠）と、従来のAI自動作成は月内一律の1枠でプロンプトを作るため、
+        変更後の日付に対して古い枠のコマIDを生成し得た。
+- 対策(多版月＝対象月が2つ以上の枠バージョンにまたがる場合のみ作動。単一版月は従来どおり):
+  (1) プロンプトの「コマ定義」「必要人数」を、対象月を同一枠が続く連続区間に分割し、期間ごとに提示。
+      「この月は途中で診療枠が変わる。各日付はその期間の枠のみ使用」と明示。
+  (2) 反映(finalizeAsgn)の最終段(⑧)で、各日付をその日に有効な枠で解決し、その日に存在しないコマIDへの
+      配置を除去(dropInvalidSlotsByDate)。無効枠への配置を構造的に弾く。
+- monthSpansMultipleVersions() で多版月を判定。単一版運用（現状の駅前=7/1・8/1境界＝月内は常に単一版）は
+  プロンプト・反映とも従来と同一挙動（no-op）で、既存の生成品質に影響を与えない。
+- 勤務時間計算の日付解決（給与11〜10日の枠またぎ）は本Phaseの範囲外（別途対応）。診療枠タブの版管理UIはPhase3。
+- アプリ表示バージョンを v219 から v220 に更新。
 -->
 </body>
 </html>
