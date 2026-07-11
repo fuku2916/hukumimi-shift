@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v217'; // v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）。v212: スタッフ申請の取りこぼし対策（背面化/終了時にも未送信の申請を確実にクラウド保存）
+const APP_VERSION = 'v218'; // v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）。v212: スタッフ申請の取りこぼし対策（背面化/終了時にも未送信の申請を確実にクラウド保存）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -1193,7 +1193,7 @@ function defaultWorkClinics(){return APP_CLINIC?[APP_CLINIC]:['ekimae','iguchi',
 function normalizeWorkClinics(v){const a=Array.isArray(v)?v:[];const out=a.filter(x=>CLINIC_KEYS.includes(x));return out.length?out:defaultWorkClinics();}
 function clinicFullLabel(k){return CLINIC_FULL_LABELS[k]||CLINIC_LABELS[k]||k;}
 // data.shared に置く共通キー（クリニック内の全職種で共有）
-const SHARED_KEYS=['clinicName','slots','newSlotCounter','manualClosedDays','surgeryCalUrl','surgeryCalUrlUpdatedAt','outpatientClosures','outpatientClosuresUpdatedAt','outpatientDoctorPresence','staffStatus']; // v199: staffStatus（在籍ステータス）は全職種共通なのでsharedに格納
+const SHARED_KEYS=['clinicName','slots','slotSchedule','newSlotCounter','manualClosedDays','surgeryCalUrl','surgeryCalUrlUpdatedAt','outpatientClosures','outpatientClosuresUpdatedAt','outpatientDoctorPresence','staffStatus']; // v199: staffStatus（在籍ステータス）は全職種共通なのでsharedに格納
 try{ document.title='シフト管理'+(APP_UNIT_LABEL?'（'+APP_UNIT_LABEL+'）':'')+' '+APP_VERSION; }catch(e){}
 // ================================================================
 
@@ -2517,6 +2517,7 @@ function App(){
         // クリニックモードの共通(shared)＝診療枠・休診日・採番は全職種で同一。
         // ある職種の未公開編集の有無に関わらず、共通部分は常にクラウドの版を採用する。
         if(CLINIC_MODE && sd && !skipCloudShift){
+          if(Array.isArray(sd.slotSchedule)&&sd.slotSchedule.length)setSlotSchedule(sd.slotSchedule); // v218: 有効期間つき診療枠
           if(sd.slots)setSlots(sd.slots);
           if(sd.manualClosedDays)setManualClosedDays(sd.manualClosedDays);
           if(sd.newSlotCounter)setNewSlotCounter(sd.newSlotCounter);
@@ -2584,6 +2585,7 @@ function App(){
           setSurgeryCalUrl(cu);setSurgeryCalInput(cu);saveSurgeryCalUrl(cu);
         }
         if(sd&&Object.keys(sd).length>0){
+          if(Array.isArray(sd.slotSchedule)&&sd.slotSchedule.length)setSlotSchedule(sd.slotSchedule); // v218
           if(sd.staff)setStaff(sd.staff);
           if(sd.slots)setSlots(sd.slots);
           if(sd.asgn)setAsgn(sd.asgn);
@@ -3093,6 +3095,29 @@ function App(){
     setOutpatientClosures(prev=>{const n=normalizeOutpatientClosuresV155(prev,ns);return v155DeepSame(n,prev)?prev:n;});
   // eslint-disable-next-line
   },[slots,weeklyReq,monthlyReq,asgn,manualExclusions,lockedAsgn,baseShift,outpatientClosures]);
+  // ── v218 Phase1: 有効期間つき診療枠（date-effective 診療枠）──
+  // 診療枠を「適用開始日つきバージョンの並び」で保持し、表示中の月に効くバージョンで slots を解決する。
+  // これで 7月は7月枠・8月は8月枠… と月ごとに正しく表示できる（過去が崩れない）。編集UIはPhase3で追加。
+  const [slotSchedule,setSlotSchedule]=useState(()=>{
+    const ss=saved?.slotSchedule;
+    if(Array.isArray(ss)&&ss.length){
+      return ss.filter(v=>v&&v.effectiveFrom&&v.slots).map(v=>({effectiveFrom:String(v.effectiveFrom),slots:normalizeSlotsForV155(v.slots)})).sort((a,b)=>a.effectiveFrom<b.effectiveFrom?-1:1);
+    }
+    // 移行：単一の現行 slots を「十分過去から有効な1バージョン」として作る（冪等）
+    return [{effectiveFrom:'2000-01-01',slots:normalizeSlotsForV155(saved?.slots||initialSlotsV155)}];
+  });
+  // 指定日(YYYY-MM-DD)に有効な診療枠（その日以前で最新の適用開始日のバージョン）
+  function slotsForDateStr(dk){ const sc=slotSchedule; if(!sc||!sc.length) return slots; let cur=sc[0].slots; for(const v of sc){ if(v.effectiveFrom<=dk) cur=v.slots; else break; } return cur||slots; }
+  // 指定年月の1日時点で有効な診療枠（Phase1: 月ごと解決）
+  function slotsForMonth(yy,mm){ return slotsForDateStr(yy+'-'+String(mm).padStart(2,'0')+'-01'); }
+  // 表示中の月(y,m)に応じて slots を自動追従（バージョンが2つ以上あるときのみ）。表示解決であり編集ではないのでスタンプ抑制。
+  const slotDeriveRef=React.useRef(false);
+  React.useEffect(()=>{
+    if(!slotSchedule||slotSchedule.length<=1) return;
+    const want=slotsForMonth(y,m);
+    if(want&&!v155DeepSame(want,slots)){ slotDeriveRef.current=true; beginShiftHydration(800); setSlots(normalizeSlotsForV155(want)); }
+  // eslint-disable-next-line
+  },[y,m,slotSchedule]);
   // 診療枠 編集 state
   const [editSlotKey,setEditSlotKey]=useState(null);
   const [editSlotF,setEditSlotF]=useState({});
@@ -3132,8 +3157,8 @@ function App(){
   // ── 自動保存 ──
   // ローカル自動保存
   useEffect(()=>{
-    saveLS({y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,outpatientClosures,outpatientClosuresUpdatedAt,outpatientDoctorPresence,finalChecks});
-  },[y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,outpatientClosures,outpatientClosuresUpdatedAt,finalChecks]);
+    saveLS({y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,slotSchedule,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,outpatientClosures,outpatientClosuresUpdatedAt,outpatientDoctorPresence,finalChecks});
+  },[y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,slotSchedule,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,outpatientClosures,outpatientClosuresUpdatedAt,finalChecks]);
 
   // ★ v108: シフト本体は「下書き保存」と「公開」を分離する。
   // 　下書き保存＝管理者用の控え（スタッフには見えない）。公開＝スタッフ画面へ反映。
@@ -3147,7 +3172,7 @@ function App(){
   const [shiftHistory,setShiftHistory]=useState([]); // [{at,made,data}]（クラウドから取得）
   const [showHistory,setShowHistory]=useState(false);
   const [historyLoading,setHistoryLoading]=useState(false);
-  const FULL_RESTORE_KEYS=['y','m','clinicId','clinicLabel','unit','unitLabel','staff','asgn','tmps','weeklyReq','monthlyReq','manualExclusions','manualClosedDays','baseShift','slots','newSlotCounter','paidLeave','shiftUpdatedAt','editLog','lockedAsgn','lockedMonths','surgeryFlags','surgeryCalSnapshotAt','outpatientClosures','outpatientClosuresUpdatedAt','outpatientDoctorPresence','finalChecks'];
+  const FULL_RESTORE_KEYS=['y','m','clinicId','clinicLabel','unit','unitLabel','staff','asgn','tmps','weeklyReq','monthlyReq','manualExclusions','manualClosedDays','baseShift','slots','slotSchedule','newSlotCounter','paidLeave','shiftUpdatedAt','editLog','lockedAsgn','lockedMonths','surgeryFlags','surgeryCalSnapshotAt','outpatientClosures','outpatientClosuresUpdatedAt','outpatientDoctorPresence','finalChecks'];
   function clonePlain(obj){try{return JSON.parse(JSON.stringify(obj));}catch(e){return obj;}}
   function currentShiftPayload(extra){
     // v170: 公開履歴から完全復元できるよう、復元に必要な全 state を固定リストで保存する。
@@ -3166,6 +3191,7 @@ function App(){
       manualClosedDays:clonePlain(manualClosedDays||{}),
       baseShift:clonePlain(baseShift||{A:{},B:{}}),
       slots:clonePlain(slots||SLOTS),
+      slotSchedule:clonePlain(slotSchedule||[]),
       newSlotCounter:newSlotCounter||1,
       paidLeave:clonePlain(paidLeave||{}),
       shiftUpdatedAt:shiftUpdatedAt||'',
@@ -10528,6 +10554,16 @@ CHANGELOG v217
         AI(claude-sonnet-4-6)が各項目を 達成/未達成/判定不能 で判定。根拠(実数)も表示するので人が検証できる。
 - 質問文は職種ごとに保存(finalChecks)。ローカル自動保存＋公開時クラウド保存＋履歴復元(FULL_RESTORE_KEYS)に対応。
 - アプリ表示バージョンを v216 から v217 に更新。
+
+CHANGELOG v218 (Phase1: 有効期間つき診療枠)
+- 【新機能・基盤】診療枠を「適用開始日つきバージョンの並び(slotSchedule)」で保持し、表示中の月に効く
+  バージョンで slots を自動解決する仕組みを追加。これで 7月は7月枠・8月は8月枠… と月ごとに正しく表示でき、
+  診療枠を新しくしても過去月の表示が崩れなくなる（2026-07-11の7月表示崩れ・データ消失の根本対策の第一段）。
+- 実装: slotSchedule state＋slotsForDate/slotsForMonth＋月追従effect(表示解決なのでスタンプ抑制)。移行は
+  冪等(既存の単一slotsから1バージョンを自動生成)。保存(saveLS/payload/FULL_RESTORE_KEYS/SHARED_KEYS/
+  クラウド読込)に slotSchedule を反映。既存の slots は「最新版ミラー」として残し後方互換。
+- 注意: 診療枠の編集UI(版の作成・切替)は Phase3 で追加予定。それまで診療枠の編集は控える(表示は月ごと正しい)。
+- アプリ表示バージョンを v217 から v218 に更新。
 -->
 </body>
 </html>
