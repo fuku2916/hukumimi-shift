@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v218'; // v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）。v212: スタッフ申請の取りこぼし対策（背面化/終了時にも未送信の申請を確実にクラウド保存）
+const APP_VERSION = 'v219'; // v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）。v212: スタッフ申請の取りこぼし対策（背面化/終了時にも未送信の申請を確実にクラウド保存）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -1303,6 +1303,9 @@ const SB={
         if(cur.status===401&&a===0&&await sbReauth())continue;
         if(cur.ok){readOk=true;const j=await cur.json();const ex=j[0]?.data;if(ex&&typeof ex==='object')all={...ex};}
         if(!readOk){ if(a===0)continue; return false; }
+        // v219: 認証レース等で既存行が空に読めたとき、本番データを空で上書きしない安全策。
+        //   クリニックモードで既存行に職種(doctor/nurse/clerk)が無ければ書かない（1回だけ再認証して再試行）。
+        if(clinic && all && typeof all==='object' && !(all.doctor||all.nurse||all.clerk)){ if(a===0){try{await sbReauth();}catch(_){}continue;} return false; }
         if(clinic){
           const drafts={...(all.drafts&&typeof all.drafts==='object'?all.drafts:{})};
           drafts[u]=data;
@@ -1355,6 +1358,9 @@ const SB={
         if(cur.status===401&&a===0&&await sbReauth())continue;
         if(cur.ok){readOk=true;const j=await cur.json();const ex=j[0]?.data;if(ex&&typeof ex==='object')all={...ex};}
         if(!readOk){ if(a===0)continue; return false; }
+        // v219: 認証レース等で既存行が空に読めたとき、本番データを空で上書きしない安全策。
+        //   クリニックモードで既存行に職種(doctor/nurse/clerk)が無ければ書かない（1回だけ再認証して再試行）。
+        if(clinic && all && typeof all==='object' && !(all.doctor||all.nurse||all.clerk)){ if(a===0){try{await sbReauth();}catch(_){}continue;} return false; }
         if(clinic){
           const shared={...(all.shared&&typeof all.shared==='object'?all.shared:{})};
           shared.adminPin=p;
@@ -1406,6 +1412,9 @@ const SB={
         if(cur.status===401&&a===0&&await sbReauth())continue;
         if(cur.ok){readOk=true;const j=await cur.json();const ex=j[0]?.data;if(ex&&typeof ex==='object')all={...ex};}
         if(!readOk){ if(a===0)continue; return false; }
+        // v219: 認証レース等で既存行が空に読めたとき、本番データを空で上書きしない安全策。
+        //   クリニックモードで既存行に職種(doctor/nurse/clerk)が無ければ書かない（1回だけ再認証して再試行）。
+        if(clinic && all && typeof all==='object' && !(all.doctor||all.nurse||all.clerk)){ if(a===0){try{await sbReauth();}catch(_){}continue;} return false; }
         if(clinic){
           const shared={...(all.shared&&typeof all.shared==='object'?all.shared:{})};
           shared.surgeryCalUrl=v;
@@ -1447,6 +1456,9 @@ const SB={
         }
         // 読み取りに失敗＝クラウドの現状が不明。書くと他職種/sharedを巻き込んで消す恐れ→中断。
         if(!readOk){ if(a===0)continue; return false; }
+        // v219: 認証レース等で既存行が空に読めたとき、本番データを空で上書きしない安全策。
+        //   クリニックモードで既存行に職種(doctor/nurse/clerk)が無ければ書かない（1回だけ再認証して再試行）。
+        if(clinic && all && typeof all==='object' && !(all.doctor||all.nurse||all.clerk)){ if(a===0){try{await sbReauth();}catch(_){}continue;} return false; }
         if(clinic){
           // 診療枠・休診日など共通キーは data.shared に、それ以外は data[職種] に格納
           const shared={...(all.shared&&typeof all.shared==='object'?all.shared:{})};
@@ -10564,6 +10576,17 @@ CHANGELOG v218 (Phase1: 有効期間つき診療枠)
   クラウド読込)に slotSchedule を反映。既存の slots は「最新版ミラー」として残し後方互換。
 - 注意: 診療枠の編集UI(版の作成・切替)は Phase3 で追加予定。それまで診療枠の編集は控える(表示は月ごと正しい)。
 - アプリ表示バージョンを v217 から v218 に更新。
+
+CHANGELOG v219 (重大バグ修正: クラウド全消し)
+- 【修正】起動のたびにクラウドのシフトデータが空(shared:{adminPin,surgeryCalUrl}のみ)に戻る重大バグ。
+  原因: 認証レース等でクラウド読取が空({})に見えたとき、起動時の surgeryCalUrl/adminPin 昇格(SB.setSurgeryCalUrl/
+        setAdminPin)や各種保存(SB.set)が、"読取は成功(fetch ok)だが中身が空"でも書き込みを実行し、本番の全職種
+        データを空で上書き(PATCH置換)していた。既存の readOk 判定は「fetch成功」だけを見ており「中身が空」を弾け
+        ていなかった。2026-07-11に doctor/clerk/nurse がクラウド上で繰り返し消えた真因。
+- 対策: 4つの読取→マージ→書込関数(setShiftDraft/setAdminPin/setSurgeryCalUrl/SB.set)に、クリニックモードで
+        既存行に職種(doctor/nurse/clerk)が1つも無ければ書かない安全策を追加(1回だけ再認証して再試行、それでも
+        空なら中断)。これで空読み時の全消しを構造的に防ぐ。※ローカルデータは元々無事。
+- アプリ表示バージョンを v218 から v219 に更新。
 -->
 </body>
 </html>
