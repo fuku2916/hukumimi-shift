@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v220'; // v220: Phase2 AI自動作成を有効期間つき診療枠に対応（多版月は期間ごとに枠を提示＋無効コマ配置を除去）。v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）。v212: スタッフ申請の取りこぼし対策（背面化/終了時にも未送信の申請を確実にクラウド保存）
+const APP_VERSION = 'v221'; // v221: Phase3 診療枠タブに版管理UI（＋この日から診療枠を変更／版切替／版ごと編集の書き戻し）。v220: Phase2 AI自動作成を有効期間つき診療枠に対応（多版月は期間ごとに枠を提示＋無効コマ配置を除去）。v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -3143,15 +3143,65 @@ function App(){
   function slotsForMonth(yy,mm){ return slotsForDateStr(yy+'-'+String(mm).padStart(2,'0')+'-01'); }
   // 表示中の月(y,m)に応じて slots を自動追従（バージョンが2つ以上あるときのみ）。表示解決であり編集ではないのでスタンプ抑制。
   const slotDeriveRef=React.useRef(false);
+  // v221: true=版の実編集(slots変化＝スタンプさせる) / false=月切替の表示解決(スタンプ抑制)。構造編集の直前に true を立てる。
+  const slotEditIntentRef=React.useRef(false);
   React.useEffect(()=>{
-    if(!slotSchedule||slotSchedule.length<=1) return;
+    if(!slotSchedule||!slotSchedule.length) return;
     const want=slotsForMonth(y,m);
-    if(want&&!v155DeepSame(want,slots)){ slotDeriveRef.current=true; beginShiftHydration(800); setSlots(normalizeSlotsForV155(want)); }
+    if(want&&!v155DeepSame(want,slots)){
+      if(slotEditIntentRef.current){ slotEditIntentRef.current=false; /* 実編集: 抑制しない → slots変化でスタンプが走る */ }
+      else { slotDeriveRef.current=true; beginShiftHydration(800); } // 月切替の「表示解決」は抑制（編集ではない）
+      setSlots(normalizeSlotsForV155(want));
+    } else { slotEditIntentRef.current=false; }
   // eslint-disable-next-line
   },[y,m,slotSchedule]);
   // 診療枠 編集 state
   const [editSlotKey,setEditSlotKey]=useState(null);
   const [editSlotF,setEditSlotF]=useState({});
+  // v221 Phase3: 診療枠バージョン管理。slotEditVer=編集対象版の effectiveFrom 文字列（null＝表示月の有効版）。
+  const [slotEditVer,setSlotEditVer]=useState(null);
+  const [showNewVer,setShowNewVer]=useState(false);
+  const [newVerDate,setNewVerDate]=useState('');
+  // 指定年月の1日時点で有効なバージョンの index（sc は effectiveFrom 昇順）
+  function effectiveVerIdxForMonth(sc,yy,mm){ if(!sc||!sc.length)return 0; const dk=yy+'-'+String(mm).padStart(2,'0')+'-01'; let idx=0; sc.forEach((v,i)=>{ if(v.effectiveFrom<=dk) idx=i; }); return idx; }
+  // いま編集対象になっている版の index を解決（選択が無ければ表示月の有効版）
+  function getEditVerIdx(){ const sc=slotSchedule||[]; if(slotEditVer){ const i=sc.findIndex(v=>v.effectiveFrom===slotEditVer); if(i>=0)return i; } return effectiveVerIdxForMonth(sc,y,m); }
+  // 編集対象版の slots を updater で書き換え、slotSchedule に反映（実編集としてスタンプさせる）
+  function mutateEditVersion(updater){
+    const idx=getEditVerIdx();
+    slotEditIntentRef.current=true;
+    setSlotSchedule(prev=>{
+      const arr=(prev||[]).map(v=>({effectiveFrom:v.effectiveFrom,slots:v.slots}));
+      if(!arr[idx]){ slotEditIntentRef.current=false; return prev; }
+      arr[idx]={effectiveFrom:arr[idx].effectiveFrom,slots:normalizeSlotsForV155(updater(arr[idx].slots))};
+      return arr.sort((a,b)=>a.effectiveFrom<b.effectiveFrom?-1:1);
+    });
+  }
+  // 「この日から診療枠を変更」：指定日に有効な版を複製して新版を作り、編集対象にする
+  function createSlotVersionFrom(dateStr){
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)){ window.alert('日付を YYYY-MM-DD 形式で入力してください。'); return; }
+    const sc=slotSchedule||[];
+    const existing=sc.findIndex(v=>v.effectiveFrom===dateStr);
+    if(existing>=0){ setSlotEditVer(dateStr); setShowNewVer(false); setNewVerDate(''); return; } // 同じ開始日の版があれば選ぶだけ
+    const baseSlots=slotsForDateStr(dateStr); // その日に効く現行版を土台に複製
+    const newVer={effectiveFrom:dateStr,slots:normalizeSlotsForV155(clonePlain(baseSlots))};
+    slotEditIntentRef.current=true;
+    setSlotSchedule(prev=>{
+      const arr=(prev||[]).map(v=>({effectiveFrom:v.effectiveFrom,slots:v.slots}));
+      arr.push(newVer);
+      return arr.sort((a,b)=>a.effectiveFrom<b.effectiveFrom?-1:1);
+    });
+    setSlotEditVer(dateStr); setShowNewVer(false); setNewVerDate('');
+  }
+  // 版を削除（最低1版は残す）。その期間は直前の版で解決される。配置データ(asgn)は削除しない。
+  function deleteSlotVersion(effFrom){
+    const sc=slotSchedule||[];
+    if(sc.length<=1){ window.alert('診療枠バージョンは最低1つ必要です。'); return; }
+    if(!window.confirm('この診療枠バージョン（適用開始 '+effFrom+'）を削除しますか？\nこの期間の日付は直前のバージョンの診療枠で表示されます。配置データ自体は削除しません。'))return;
+    slotEditIntentRef.current=true;
+    setSlotSchedule(sc.filter(v=>v.effectiveFrom!==effFrom));
+    if(slotEditVer===effFrom)setSlotEditVer(null);
+  }
   // 診療枠 追加 state
   const [newSlotCounter,setNewSlotCounter]=useState(()=>saved?.newSlotCounter||1);
   const [addSlotDow,setAddSlotDow]=useState(null);
@@ -3180,7 +3230,7 @@ function App(){
     if(appMode!=='admin')return; // 編集できるのは管理者のみ
     setShiftUpdatedAt(new Date().toISOString());
   // eslint-disable-next-line
-  },[asgn,tmps,manualExclusions,slots,weeklyReq,monthlyReq,baseShift,manualClosedDays,paidLeave,staff,newSlotCounter,outpatientClosures]);
+  },[asgn,tmps,manualExclusions,slots,slotSchedule,weeklyReq,monthlyReq,baseShift,manualClosedDays,paidLeave,staff,newSlotCounter,outpatientClosures]);
 
   // shiftUpdatedAt が変わるたび ref を更新（クラウド競合判定が常に最新の手元日時を見るように）
   useEffect(()=>{shiftTsRef.current=shiftUpdatedAt;},[shiftUpdatedAt]);
@@ -4959,7 +5009,8 @@ ${bodyHtml}
     // time から h を自動計算して上書き
     const autoH=calcHoursFromTime(editSlotF.time);
     const finalF=autoH!=null?{...editSlotF,h:autoH}:editSlotF;
-    setSlots(p=>({
+    // v221: 編集対象の診療枠バージョンに書き戻す
+    mutateEditVersion(p=>({
       ...p,
       [dow]:(p[dow]||[]).map(s=>s.id===slotId?{...s,...finalF}:s)
     }));
@@ -4986,37 +5037,34 @@ ${bodyHtml}
       h:h,
       colorId:addSlotF.colorId||'blue',
     };
-    setSlots(p=>({...p,[addSlotDow]:[...(p[addSlotDow]||[]),newSlot]}));
-    // 必要人数のデフォルトを1に設定
+    // v221: 編集対象の診療枠バージョンに追加
+    mutateEditVersion(p=>({...p,[addSlotDow]:[...(p[addSlotDow]||[]),newSlot]}));
+    // 必要人数のデフォルトを1に設定（版共通）
     setWeeklyReq(p=>({...p,[addSlotDow]:{...(p[addSlotDow]||{}),[id]:1}}));
     setNewSlotCounter(n=>n+1);
     setAddSlotDow(null);
   }
   function deleteSlot(dow,slotId){
-    if(!window.confirm('このコマを削除しますか？\n割当済みのデータも削除されます。'))return;
-    setSlots(p=>({...p,[dow]:(p[dow]||[]).filter(s=>s.id!==slotId)}));
-    // 関連データを一括クリーンアップ
-    const clean=(obj)=>{
-      const n={...obj};
-      if(n[dow]){const d2={...n[dow]};delete d2[slotId];n[dow]=d2;}
-      return n;
-    };
-    setWeeklyReq(clean);
-    setMonthlyReq(p=>{
-      const n={};
-      Object.entries(p).forEach(([dk,slots2])=>{const d2={...slots2};delete d2[slotId];n[dk]=d2;});
-      return n;
-    });
-    setAsgn(p=>{
-      const n={};
-      Object.entries(p).forEach(([dk,slots2])=>{const d2={...slots2};delete d2[slotId];n[dk]=d2;});
-      return n;
-    });
-    setManualExclusions(p=>{
-      const n={};
-      Object.entries(p).forEach(([dk,slots2])=>{const d2={...slots2};delete d2[slotId];n[dk]=d2;});
-      return n;
-    });
+    // v221: 編集対象の診療枠バージョンの「適用期間内」だけを掃除する（他版の同IDコマ・配置を壊さない）
+    const sc=slotSchedule||[];
+    const idx=getEditVerIdx();
+    const from=sc[idx]?.effectiveFrom||'2000-01-01';
+    const to=sc[idx+1]?.effectiveFrom||'9999-12-31'; // 次版の開始日「未満」まで
+    const inRange=dk=>dk>=from&&dk<to;
+    const hasAsgn=Object.entries(asgn||{}).some(([dk,sm])=>inRange(dk)&&(sm[slotId]||[]).length>0);
+    const rangeLabel=from+(sc[idx+1]?(' 〜 '+to+' の前日'):' 以降');
+    if(!window.confirm('このコマを削除しますか？\n対象バージョン（適用: '+rangeLabel+'）から削除します。'+(hasAsgn?'\n\n⚠ この期間には既にこのコマへの配置があります。該当期間の配置も削除されます。':'\n割当済みのデータも削除されます。')))return;
+    mutateEditVersion(p=>({...p,[dow]:(p[dow]||[]).filter(s=>s.id!==slotId)}));
+    // weeklyReq は曜日×slotId（版共通）。他版に同IDコマが残っていない場合のみ掃除。
+    const survivesElsewhere=sc.some((v,i)=>i!==idx&&(v.slots?.[dow]||[]).some(s=>s.id===slotId));
+    if(!survivesElsewhere){
+      setWeeklyReq(obj=>{const n={...obj};if(n[dow]){const d2={...n[dow]};delete d2[slotId];n[dow]=d2;}return n;});
+    }
+    // asgn/monthlyReq/manualExclusions は「この版の適用期間内」の日付だけ掃除
+    const cleanRanged=p=>{const n={};Object.entries(p||{}).forEach(([dk,s2])=>{ if(inRange(dk)){const d2={...s2};delete d2[slotId];n[dk]=d2;} else n[dk]=s2; });return n;};
+    setMonthlyReq(cleanRanged);
+    setAsgn(cleanRanged);
+    setManualExclusions(cleanRanged);
     if(editSlotKey?.slotId===slotId)setEditSlotKey(null);
   }
 
@@ -8890,24 +8938,96 @@ ${bodyHtml}
         y={y} m={m}
       />}
 
-      {tab==='ref'&&(
+      {tab==='ref'&&(()=>{
+        // v221 Phase3: 有効期間つき診療枠のバージョン管理
+        const sc=slotSchedule||[];
+        const editVerIdx=getEditVerIdx();
+        const editVer=sc[editVerIdx];
+        const editSlots=(editVer&&editVer.slots)||slots;
+        const curMonthIdx=effectiveVerIdxForMonth(sc,y,m);
+        const isMulti=sc.length>1;
+        const verRangeLabel=(i)=>{ const f=sc[i]?.effectiveFrom||''; const nxt=sc[i+1]?.effectiveFrom; return nxt?(f+' 〜 '+nxt+'の前日'):(f+' 以降'); };
+        const editingCurMonth=editVerIdx===curMonthIdx;
+        return(
         <div style={{padding:16}}>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
             <div>
               <div style={{fontWeight:500,fontSize:15}}>診療枠の設定</div>
               <p style={{fontSize:12,color:K.textS,marginTop:2}}>各コマの名前・時間・色を変更できます。「編集」をクリックして変更してください。</p>
             </div>
-            <button onClick={()=>{setSlots(()=>cloneDefaultSlots());setEditSlotKey(null);}}
+            <button onClick={()=>{if(window.confirm('編集中のバージョンの診療枠を初期値に戻しますか？')){mutateEditVersion(()=>cloneDefaultSlots());setEditSlotKey(null);}}}
               style={{padding:'5px 14px',border:K.bdD,borderRadius:K.rmd,background:K.bg,color:K.textD,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
               初期値に戻す
             </button>
           </div>
+
+          {/* ── 診療枠バージョン（適用開始日つき）── */}
+          <div style={{background:K.bgI,border:K.bdI,borderRadius:K.rlg,padding:12,marginBottom:14}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8,marginBottom:isMulti?8:0}}>
+              <div>
+                <div style={{fontWeight:600,fontSize:13,color:K.textI}}>診療枠バージョン（適用開始日つき）</div>
+                <p style={{fontSize:11,color:K.textS,marginTop:2,lineHeight:1.6}}>
+                  月の途中で診療枠が変わる場合に、開始日つきの「版」を作成できます。各日付は「その日以前で一番新しい版」で表示・計算されます。{isMulti?'':'（現在は全期間で1つ）'}
+                </p>
+              </div>
+              {!showNewVer&&(
+                <button onClick={()=>{setShowNewVer(true);setNewVerDate('');}}
+                  style={{padding:'6px 12px',background:K.bg,color:K.textI,border:K.bdI,borderRadius:K.rmd,cursor:'pointer',fontSize:12,fontWeight:500,whiteSpace:'nowrap'}}>
+                  ＋ この日から診療枠を変更
+                </button>
+              )}
+            </div>
+            {showNewVer&&(
+              <div style={{marginTop:8,padding:10,background:K.bg,borderRadius:K.rmd,border:K.bd}}>
+                <div style={{fontSize:12,color:K.text,marginBottom:6}}>新しい診療枠を「この日から」適用します（現在その日に効いている版を複製して作成）。</div>
+                <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                  <input type="date" value={newVerDate} onChange={e=>setNewVerDate(e.target.value)}
+                    style={{padding:'6px 8px',border:K.bd2,borderRadius:K.rmd,fontSize:13,background:K.bg,color:K.text}}/>
+                  <button onClick={()=>createSlotVersionFrom(newVerDate)} disabled={!newVerDate}
+                    style={{padding:'6px 14px',background:newVerDate?K.bgI:K.bgS,color:newVerDate?K.textI:K.textS,border:K.bdI,borderRadius:K.rmd,cursor:newVerDate?'pointer':'not-allowed',fontSize:12,fontWeight:500}}>
+                    この日から作成
+                  </button>
+                  <button onClick={()=>{setShowNewVer(false);setNewVerDate('');}}
+                    style={{padding:'6px 12px',background:K.bgS,color:K.textS,border:K.bd,borderRadius:K.rmd,cursor:'pointer',fontSize:12}}>
+                    キャンセル
+                  </button>
+                </div>
+              </div>
+            )}
+            {isMulti&&(
+              <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:4}}>
+                {sc.map((v,i)=>{
+                  const on=i===editVerIdx;
+                  return(
+                    <div key={v.effectiveFrom} style={{display:'flex',alignItems:'center',gap:4,padding:'5px 8px',borderRadius:K.rmd,
+                      background:on?K.bg:'transparent',border:on?'1.5px solid '+K.textI:K.bd}}>
+                      <button onClick={()=>setSlotEditVer(v.effectiveFrom)}
+                        style={{border:'none',background:'none',cursor:'pointer',fontSize:12,fontWeight:on?600:400,color:on?K.textI:K.text,padding:0}}>
+                        {verRangeLabel(i)}{i===curMonthIdx?'（表示中の月）':''}
+                      </button>
+                      {sc.length>1&&(
+                        <button onClick={()=>deleteSlotVersion(v.effectiveFrom)} title="この版を削除"
+                          style={{border:'none',background:'none',cursor:'pointer',fontSize:13,color:K.textD,lineHeight:1,padding:'0 2px'}}>×</button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          {isMulti&&(
+            <p style={{fontSize:11,color:editingCurMonth?K.textS:'#92400E',marginBottom:10,padding:'6px 10px',background:editingCurMonth?K.bgS:K.bgW,borderRadius:K.rmd,border:editingCurMonth?K.bd:K.bdW}}>
+              編集中の版: <b>{verRangeLabel(editVerIdx)}</b>
+              {editingCurMonth?'（表示中の月に適用される版）':'　※これは表示中の月（'+y+'年'+m+'月）とは別の期間の版です。'}
+            </p>
+          )}
+
           <p style={{fontSize:11,color:K.textS,marginBottom:16,padding:'5px 10px',background:K.bgW,borderRadius:K.rmd,border:K.bdW}}>
             ⚠ 労働時間の計算（h）は変更できません。時間帯の表示のみ変更されます。
           </p>
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:14}}>
             {[1,2,3,4,5,6].map(dow=>{
-              const sls=slots[dow]||[];
+              const sls=editSlots[dow]||[];
               const isSat=dow===6;
               return(
                 <div key={dow} style={{background:K.bg,border:K.bd,borderRadius:K.rlg,padding:14}}>
@@ -9067,7 +9187,8 @@ ${bodyHtml}
             })}
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
@@ -10645,6 +10766,21 @@ CHANGELOG v220 (Phase2: AI自動作成を有効期間つき診療枠に対応)
   プロンプト・反映とも従来と同一挙動（no-op）で、既存の生成品質に影響を与えない。
 - 勤務時間計算の日付解決（給与11〜10日の枠またぎ）は本Phaseの範囲外（別途対応）。診療枠タブの版管理UIはPhase3。
 - アプリ表示バージョンを v219 から v220 に更新。
+
+CHANGELOG v221 (Phase3: 診療枠タブの版管理UI)
+- 【新機能】診療枠タブに「有効期間つき診療枠」の版管理UIを追加。月途中で診療枠が変わる運用を画面から作れる。
+  ・「＋ この日から診療枠を変更」：開始日(YYYY-MM-DD)を入力→その日に効いている版を複製して新版を作成し、編集対象にする。
+  ・版の一覧をチップ表示（適用期間つき）。クリックで編集対象を切替。「表示中の月」に効く版を明示。
+  ・各版のコマ編集（名前/時間/色/追加/削除/初期値に戻す）は、選択中の版に書き戻す（slotSchedule）。
+  ・版の削除（最低1版は残す）。削除してもその期間は直前の版で解決され、配置データ(asgn)は消さない。
+- 書き戻しの安全設計:
+  ・編集は slotSchedule を正本とし、表示用 slots は「表示月の有効版」を派生（月切替＝表示解決は作成日時スタンプを抑制、
+    実編集はスタンプする）。slotEditIntentRef で両者を区別。stampのdepsに slotSchedule を追加。
+  ・コマ削除時の asgn/必要人数の掃除は「その版の適用期間内の日付」だけに限定（他版の同IDコマ・配置を壊さない）。
+    weeklyReq は他版に同IDコマが残っていない場合のみ掃除。
+  ・削除対象期間に既存配置がある場合は警告を表示。
+- 単一版運用（現状）は従来と同一の見た目・挙動（版が1つならチップ非表示、編集は実質その1版＝slotsミラー）。
+- アプリ表示バージョンを v220 から v221 に更新。
 -->
 </body>
 </html>
