@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v221'; // v221: Phase3 診療枠タブに版管理UI（＋この日から診療枠を変更／版切替／版ごと編集の書き戻し）。v220: Phase2 AI自動作成を有効期間つき診療枠に対応（多版月は期間ごとに枠を提示＋無効コマ配置を除去）。v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）
+const APP_VERSION = 'v222'; // v222: Phase4 勤務時間計算を日付解決（給与11〜10日が版境界をまたいでも正確）。v221: Phase3 診療枠タブに版管理UI。v220: Phase2 AI自動作成を有効期間つき診療枠に対応。v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -751,9 +751,9 @@ function enforceHourLimits(rawAsgn, staff, weeks, slots, pinned, reqMap){
       const assigned=[];
       weekDates.forEach(d=>{
         const dk=tdk(d), dow=d.getDay();
-        (slots[dow]||[]).forEach(slot=>{
+        (resolveDaySlots(dk,slots)[dow]||[]).forEach(slot=>{ // v222: その日に有効な診療枠で判定
           if((na[dk]?.[slot.id]||[]).includes(s.id)){
-            assigned.push({dk, dow, slotId:slot.id, h:slotHours(dow,slot.id,slots), pin:pinned.has(dk+'|'+slot.id+'|'+s.id)});
+            assigned.push({dk, dow, slotId:slot.id, h:slotHours(dow,slot.id,slots,dk), pin:pinned.has(dk+'|'+slot.id+'|'+s.id)});
           }
         });
       });
@@ -825,8 +825,14 @@ function parseWeeklyHours(notes){
   return null;
 }
 // slotHours: slotsState(編集後)優先、なければ SLOTS マスタ参照
-function slotHours(dow,slotId,slotsState){
-  const src=slotsState||SLOTS;
+// v222: 日付→その日に有効な診療枠(slotsオブジェクト)を返す参照。App が slotSchedule に同期して差し込む。
+// 未同期/該当なしのときは null を返し、呼び出し側で渡された slotsState（従来の表示月版）にフォールバック。
+var SLOTS_FOR_DK=null;
+// 集計は日付キー(dk)を持つので、その日の版で解決する。dk が無い/未同期なら slotsState（従来動作）。
+// 単一版運用では SLOTS_FOR_DK(dk) は表示月版と同一オブジェクト内容 → 完全に従来と同じ（no-op）。
+function resolveDaySlots(dk,slotsState){ if(dk&&SLOTS_FOR_DK){ try{ const r=SLOTS_FOR_DK(dk); if(r) return r; }catch(e){} } return slotsState||SLOTS; }
+function slotHours(dow,slotId,slotsState,dk){
+  const src=resolveDaySlots(dk,slotsState);
   return (src[dow]||[]).find(s=>s.id===slotId)?.h||0;
 }
 // スタッフID→スタッフ情報 の参照表（曜日別の退勤時刻などを参照するため。Appが更新する）
@@ -860,7 +866,7 @@ function dayHours(dk,staffId,asgn,excl,slotsState,staffArr){
   const tc=(TMPS_LOOKUP[dk]||{})[String(staffId)]||(TMPS_LOOKUP[dk]||{})[staffId];
   if(tc&&(tc.type==='off'||tc.type==='paid'))return 0;
   const d=new Date(dk),dow=d.getDay(),da=asgn[dk]||{};
-  const src=slotsState||SLOTS;
+  const src=resolveDaySlots(dk,slotsState); // v222: その日に有効な診療枠で解決（給与期間が版境界をまたいでも正確）
   const ranges=[];
   Object.entries(da).forEach(([slotId,ids])=>{
     if(!ids.includes(staffId))return;
@@ -3141,6 +3147,8 @@ function App(){
   function slotsForDateStr(dk){ const sc=slotSchedule; if(!sc||!sc.length) return slots; let cur=sc[0].slots; for(const v of sc){ if(v.effectiveFrom<=dk) cur=v.slots; else break; } return cur||slots; }
   // 指定年月の1日時点で有効な診療枠（Phase1: 月ごと解決）
   function slotsForMonth(yy,mm){ return slotsForDateStr(yy+'-'+String(mm).padStart(2,'0')+'-01'); }
+  // v222: 集計関数(dayHours/slotHours 等・トップレベル)へ「日付→その日の診療枠」を供給（描画ごとに最新 slotSchedule へ同期）。
+  SLOTS_FOR_DK=slotsForDateStr;
   // 表示中の月(y,m)に応じて slots を自動追従（バージョンが2つ以上あるときのみ）。表示解決であり編集ではないのでスタンプ抑制。
   const slotDeriveRef=React.useRef(false);
   // v221: true=版の実編集(slots変化＝スタンプさせる) / false=月切替の表示解決(スタンプ抑制)。構造編集の直前に true を立てる。
@@ -4371,7 +4379,7 @@ td.cell-off{background:#fff}
                 if(o.id===s.id) return false;
                 if((dayAsgn[slot.id]||[]).includes(o.id)) return false;
                 const dh2=dayHours(dk,o.id,asgn,manualExclusions,slots);
-                const sh2=slotHours(d.getDay(),slot.id,slots);
+                const sh2=slotHours(d.getDay(),slot.id,slots,dk);
                 return isDoctorStaff(o)||dh2+sh2<=DAILY_LIMIT;
               }).slice(0,3).map(o=>o.name).join('・');
               viol.push((d.getMonth()+1)+'/'+d.getDate()+'('+DAY_JP[d.getDay()]+') '+slot.label+(cands?' → 代替候補: '+cands:''));
@@ -4963,7 +4971,7 @@ ${bodyHtml}
               const activeCount=curIds.filter(sid=>!(manualExclusions[dk]?.[slot.id]||[]).includes(sid)).length;
               if(activeCount>=reqCount) continue;
               const dh=dayHours(dk,s.id,next,manualExclusions,slots);
-              const sh=slotHours(dow,slot.id,slots);
+              const sh=slotHours(dow,slot.id,slots,dk);
               if(!isDoctorStaff(s)&&dh+sh>DAILY_LIMIT) continue;
               if(!isDoctorStaff(s)&&wTotal+sh>WEEKLY_LIMIT) continue;
 
@@ -5231,7 +5239,7 @@ ${bodyHtml}
             const curIds=na[dk]?.[slot.id]||[];
             if(curIds.includes(ft.id)) return;
             if((manualExclusions[dk]?.[slot.id]||[]).includes(ft.id)) return;
-            const sh=slotHours(dow,slot.id,slots);
+            const sh=slotHours(dow,slot.id,slots,dk);
             if(sh<=0) return;
             // 日の合計がDAILY_LIMITを超えないか確認
             const dh=dayHours(dk,ft.id,na,{},slots);
@@ -5359,7 +5367,7 @@ ${bodyHtml}
             if(curIds.includes(s.id)) continue;
             if((manualExclusions[dk]?.[slot.id]||[]).includes(s.id)) continue;
             const dh=dayHours(dk,s.id,na,{},slots);
-            const sh=slotHours(dow,slot.id,slots);
+            const sh=slotHours(dow,slot.id,slots,dk);
             if(!isDoctorStaff(s)&&dh+sh>DAILY_LIMIT) continue;
             const req=getReq(dk,slot.id);
             // 必要人数の2倍を超えるような過剰配置はしない
@@ -6032,7 +6040,7 @@ ${bodyHtml}
           const tc=tmps[dk]?.[String(sid)];
           if(tc&&['off','paid','paid_am','paid_pm'].includes(tc.type))return; // 休み/有給は尊重
           // 1日の労働上限を超える場合は入れない（物理的に不可能な日を避ける）
-          if((!isDoctorStaff(staff.find(x=>x.id===sid))&&dayHours(dk,sid,na,manualExclusions,slots)+slotHours(dow,slot.id,slots)>DAILY_LIMIT))return;
+          if((!isDoctorStaff(staff.find(x=>x.id===sid))&&dayHours(dk,sid,na,manualExclusions,slots)+slotHours(dow,slot.id,slots,dk)>DAILY_LIMIT))return;
           cur=[...cur,sid];
           na[dk][slot.id]=cur;
         });
@@ -10781,6 +10789,19 @@ CHANGELOG v221 (Phase3: 診療枠タブの版管理UI)
   ・削除対象期間に既存配置がある場合は警告を表示。
 - 単一版運用（現状）は従来と同一の見た目・挙動（版が1つならチップ非表示、編集は実質その1版＝slotsミラー）。
 - アプリ表示バージョンを v220 から v221 に更新。
+
+CHANGELOG v222 (Phase4: 勤務時間計算の日付解決)
+- 【改善】勤務時間の集計(dayHours/slotHours)を「日付ごとにその日の診療枠バージョン」で計算するようにした。
+  背景: 給与期間は11日〜翌10日で、月途中で診療枠が変わる（多版）と、集計に使う枠が期間の途中で変わる。
+        従来は表示中の月の単一版で計算していたため、版境界をまたぐ日の労働時間がズレ得た。
+- 実装: トップレベル参照 SLOTS_FOR_DK（App が描画ごとに slotsForDateStr へ同期）＋ resolveDaySlots(dk,slotsState)。
+  ・dayHours: 集計の元になる診療枠を resolveDaySlots(dk,…) で日付解決（給与期間が版をまたいでも各日正しい枠）。
+  ・slotHours: 任意引数 dk を追加し、渡されれば日付解決。全呼び出し箇所（enforce/補完/プレビュー）に dk を伝播。
+  ・enforceHourLimits: 週内各日のコマ列挙を resolveDaySlots(dk,slots)[dow] に変更（週上限判定を版正確に）。
+  ・weekHours/monthHours は dayHours 経由なので自動的に版正確化（呼び出し箇所の変更不要）。
+- 安全性: 単一版月では SLOTS_FOR_DK(dk) は表示月版と同一内容 → 完全に従来と同じ結果（no-op）。多版月のみ挙動変化。
+  表示・集計のみでデータ（asgn等）は不変。未同期時は渡された slotsState にフォールバック。
+- アプリ表示バージョンを v221 から v222 に更新。
 -->
 </body>
 </html>
