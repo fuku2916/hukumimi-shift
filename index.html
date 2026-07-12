@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v224'; // v224: 【クラーク限定】外来出退表 Phase A。日付別・個人別の出勤/退勤時刻(clerkTimes)を保持し、実働時間をその実時間で算出(セッション枠外に延びてもOK)＋外来表セルに「(9:00出)(18:00退)」注記。すべてAPP_UNIT==='clerk'ガードでナース/ドクターは無影響。v223: 診療枠(slots/slotSchedule/採番)を職種別化。SHARED_KEYSから外しdata[unit]へ保存、旧data.sharedはフォールバック(後方互換)。クラークが独自の勤務帯枠を持てる。v222: Phase4 勤務時間計算を日付解決（給与11〜10日が版境界をまたいでも正確）。v221: Phase3 診療枠タブに版管理UI。v220: Phase2 AI自動作成を有効期間つき診療枠に対応。v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）
+const APP_VERSION = 'v225'; // v225: 【クラーク限定】バックアップ全データ読込で診療枠版(slotSchedule)・表示月・採番も復元（Phase C投入用。セッション枠を正しく反映）。v224: 【クラーク限定】外来出退表 Phase A。日付別・個人別の出勤/退勤時刻(clerkTimes)を保持し、実働時間をその実時間で算出(セッション枠外に延びてもOK)＋外来表セルに「(9:00出)(18:00退)」注記。すべてAPP_UNIT==='clerk'ガードでナース/ドクターは無影響。v223: 診療枠(slots/slotSchedule/採番)を職種別化。SHARED_KEYSから外しdata[unit]へ保存、旧data.sharedはフォールバック(後方互換)。クラークが独自の勤務帯枠を持てる。v222: Phase4 勤務時間計算を日付解決（給与11〜10日が版境界をまたいでも正確）。v221: Phase3 診療枠タブに版管理UI。v220: Phase2 AI自動作成を有効期間つき診療枠に対応。v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -3997,6 +3997,13 @@ function App(){
         if(d.monthlyReq)setMonthlyReq(d.monthlyReq);
         if(d.asgn)setAsgn(d.asgn);
     if(APP_UNIT==='clerk'&&d.clerkTimes&&typeof d.clerkTimes==='object')setClerkTimes(d.clerkTimes); // v224
+        // v225:【クラーク限定】バックアップ復元では診療枠版(slotSchedule)・表示月・採番も復元し、セッション枠を正しく反映。
+        //   （ナース/ドクターの loadData 挙動は不変）
+        if(APP_UNIT==='clerk'){
+          if(Array.isArray(d.slotSchedule)&&d.slotSchedule.length)setSlotSchedule(d.slotSchedule);
+          if(d.newSlotCounter)setNewSlotCounter(d.newSlotCounter);
+          if(d.y)setY(d.y); if(d.m)setM(d.m);
+        }
         if(d.tmps)setTmps(d.tmps);
         if(d.manualExclusions)setManualExclusions(d.manualExclusions);
         if(d.manualClosedDays)setManualClosedDays(d.manualClosedDays);
@@ -8046,7 +8053,8 @@ ${bodyHtml}
                           const showClosedOnly=isClosed&&!hasOpenOutpatient;
                           const offIds=Object.entries(dt).filter(([,v])=>['off','paid'].includes(v.type)).map(([sid])=>parseInt(sid));
                           const overStaff=staff.filter(s=>!isDoctorStaff(s)&&!offIds.includes(s.id)&&dayHours(dk,s.id,asgn,manualExclusions,slots)>DAILY_LIMIT);
-                          const shortageSlots=hasAnyAssignment&&!showClosedOnly?sls.filter(slot=>{
+                          // v225:【クラーク限定】クラークはセッションごとの必須人数モデルではないため「人員不足」警告を出さない。
+                          const shortageSlots=(APP_UNIT!=='clerk'&&hasAnyAssignment&&!showClosedOnly)?sls.filter(slot=>{
                             const actIds=(da[slot.id]||[]).filter(sid=>!(dExcl[slot.id]||[]).includes(sid)&&!offIds.includes(sid));
                             return actIds.length===0&&getReq(dk,slot.id)>0;
                           }):[];
