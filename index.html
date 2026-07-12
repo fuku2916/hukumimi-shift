@@ -8235,6 +8235,44 @@ ${bodyHtml}
                           </div>
                         );
                       })}
+                      {/* v224 Phase B:【クラーク限定】この日の個人出退勤時刻の入力。空欄なら配置セッションの時間で実働を計算。 */}
+                      {APP_UNIT==='clerk'&&(()=>{
+                        const placed=[];
+                        ssls.forEach(slot=>{ (dA[slot.id]||[]).forEach(sid=>{ if(!placed.includes(sid))placed.push(sid); }); });
+                        const activePlaced=placed.filter(sid=>!['off','paid'].includes(dT[String(sid)]?.type));
+                        if(!activePlaced.length)return null;
+                        const ct=(clerkTimes&&clerkTimes[selDk])||{};
+                        const setTime=(sid,field,val)=>{
+                          setClerkTimes(prev=>{
+                            const n={...(prev||{})}; const day={...(n[selDk]||{})}; const cur={...(day[String(sid)]||{})};
+                            if(val)cur[field]=val; else delete cur[field];
+                            if(!cur.in&&!cur.out)delete day[String(sid)]; else day[String(sid)]=cur;
+                            if(Object.keys(day).length)n[selDk]=day; else delete n[selDk];
+                            return n;
+                          });
+                        };
+                        return(
+                          <div style={{marginTop:6,padding:10,background:'#F8FAFC',border:'1px solid #E2E8F0',borderRadius:8}}>
+                            <div style={{fontSize:12,fontWeight:600,color:K.text,marginBottom:2}}>出退勤時刻（この日）</div>
+                            <div style={{fontSize:10,color:K.textS,marginBottom:8,lineHeight:1.5}}>正社員などで時刻がまちまちな場合に入力します。入力すると実働時間はこの出勤〜退勤（6時間超は−休憩1h）で計算し、外来表のセルに「(出)(退)」を表示します。空欄なら配置したセッションの時間で計算します。</div>
+                            {activePlaced.map(sid=>{
+                              const s=staff.find(x=>x.id===sid); if(!s)return null;
+                              const t=ct[String(sid)]||{};
+                              const dh=dayHours(selDk,sid,asgn,manualExclusions,slots);
+                              return(
+                                <div key={sid} style={{display:'flex',alignItems:'center',gap:6,marginBottom:5,flexWrap:'wrap'}}>
+                                  <span style={{width:8,height:8,borderRadius:'50%',background:s.color,flexShrink:0}}/>
+                                  <span style={{fontSize:12,fontWeight:600,minWidth:56}}>{s.name}</span>
+                                  <label style={{fontSize:10,color:K.textS}}>出<input type="time" value={t.in||''} onChange={e=>setTime(sid,'in',e.target.value)} style={{fontSize:11,padding:'2px 4px',border:'1px solid #CBD5E1',borderRadius:4,marginLeft:2}}/></label>
+                                  <label style={{fontSize:10,color:K.textS}}>退<input type="time" value={t.out||''} onChange={e=>setTime(sid,'out',e.target.value)} style={{fontSize:11,padding:'2px 4px',border:'1px solid #CBD5E1',borderRadius:4,marginLeft:2}}/></label>
+                                  <span style={{fontSize:11,color:(!isDoctorStaff(s)&&dh>DAILY_LIMIT)?'#D85A30':K.textS}}>実働{dh.toFixed(1)}h{(!isDoctorStaff(s)&&dh>DAILY_LIMIT)?'⚠':''}</span>
+                                  {(t.in||t.out)&&<button onClick={()=>{setTime(sid,'in','');setTime(sid,'out','');}} style={{fontSize:10,color:K.textS,border:'1px solid #E2E8F0',borderRadius:4,background:K.bg,cursor:'pointer',padding:'1px 6px'}}>クリア</button>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
                     </>
                   )}
                   {dtab==='temp'&&(
