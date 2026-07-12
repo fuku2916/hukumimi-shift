@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v222'; // v222: Phase4 勤務時間計算を日付解決（給与11〜10日が版境界をまたいでも正確）。v221: Phase3 診療枠タブに版管理UI。v220: Phase2 AI自動作成を有効期間つき診療枠に対応。v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）
+const APP_VERSION = 'v223'; // v223: 診療枠(slots/slotSchedule/採番)を職種別化。SHARED_KEYSから外しdata[unit]へ保存、旧data.sharedはフォールバック(後方互換)。クラークが独自の勤務帯枠を持てる。v222: Phase4 勤務時間計算を日付解決（給与11〜10日が版境界をまたいでも正確）。v221: Phase3 診療枠タブに版管理UI。v220: Phase2 AI自動作成を有効期間つき診療枠に対応。v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -1218,7 +1218,11 @@ function defaultWorkClinics(){return APP_CLINIC?[APP_CLINIC]:['ekimae','iguchi',
 function normalizeWorkClinics(v){const a=Array.isArray(v)?v:[];const out=a.filter(x=>CLINIC_KEYS.includes(x));return out.length?out:defaultWorkClinics();}
 function clinicFullLabel(k){return CLINIC_FULL_LABELS[k]||CLINIC_LABELS[k]||k;}
 // data.shared に置く共通キー（クリニック内の全職種で共有）
-const SHARED_KEYS=['clinicName','slots','slotSchedule','newSlotCounter','manualClosedDays','surgeryCalUrl','surgeryCalUrlUpdatedAt','outpatientClosures','outpatientClosuresUpdatedAt','outpatientDoctorPresence','staffStatus']; // v199: staffStatus（在籍ステータス）は全職種共通なのでsharedに格納
+const SHARED_KEYS=['clinicName','manualClosedDays','surgeryCalUrl','surgeryCalUrlUpdatedAt','outpatientClosures','outpatientClosuresUpdatedAt','outpatientDoctorPresence','staffStatus']; // v199: staffStatus（在籍ステータス）は全職種共通なのでsharedに格納。v223: slots/slotSchedule/newSlotCounter を SHARED_KEYS から外し職種別化
+// v223: 診療枠（slots/slotSchedule/採番）を職種(unit)ごとに分離。保存は data[unit] へ入る（従来は data.shared に一本化）。
+//   読込は per-unit を優先し、その職種にまだ per-unit 枠が無い場合だけ旧 data.shared の枠へフォールバック（後方互換・マイグレーション不要）。
+//   これにより、クラークはナース/ドクターの部屋別枠と別に、独自の勤務帯枠（朝診/通し/朝昼/夜診等）を持てる。
+const PER_UNIT_SLOT_KEYS=['slots','slotSchedule','newSlotCounter'];
 try{ document.title='シフト管理'+(APP_UNIT_LABEL?'（'+APP_UNIT_LABEL+'）':'')+' '+APP_VERSION; }catch(e){}
 // ================================================================
 
@@ -1259,6 +1263,8 @@ const SB={
     const shared=(all&&all.shared&&typeof all.shared==='object')?all.shared:{};
     const merged={...unitData};
     SHARED_KEYS.forEach(k=>{ if(shared[k]!==undefined)merged[k]=shared[k]; });
+    // v223: 診療枠は per-unit 優先。この職種にまだ per-unit 枠が無ければ旧 shared 枠へフォールバック（後方互換）。
+    PER_UNIT_SLOT_KEYS.forEach(k=>{ if(merged[k]===undefined && shared[k]!==undefined)merged[k]=shared[k]; });
     return (Object.keys(unitData).length||Object.keys(shared).length)?merged:null;
   },
   async get(table){
@@ -2551,7 +2557,9 @@ function App(){
         // v178: ロックは消費しない。時間ウィンドウ(10分)内は毎回クラウド上書きをスキップする。
         // （cloud-load が複数回走っても復元結果が守られるように。公開成功時にロック解除する。）
         const skipCloudShift = !!_restoreLock && (Date.now()-Date.parse(_restoreLock) < 600000);
-        // クリニックモードの共通(shared)＝診療枠・休診日・採番は全職種で同一。
+        // クリニックモードの共通(shared)＝休診日・外来枠等は全職種で同一。
+        // v223: 診療枠(slots/slotSchedule/採番)は職種別。sd は _mergeClinic で当該職種ぶんに解決済み
+        //   （per-unit 優先、無ければ旧 shared フォールバック）なので、ここでの反映はそのまま自職種の枠になる。
         // ある職種の未公開編集の有無に関わらず、共通部分は常にクラウドの版を採用する。
         if(CLINIC_MODE && sd && !skipCloudShift){
           if(Array.isArray(sd.slotSchedule)&&sd.slotSchedule.length)setSlotSchedule(sd.slotSchedule); // v218: 有効期間つき診療枠
@@ -3660,6 +3668,8 @@ function App(){
         if(shared[k]!==undefined)merged[k]=shared[k];
         else if(raw[k]!==undefined&&merged[k]===undefined)merged[k]=raw[k];
       });
+      // v223: 診療枠は per-unit 優先。無ければ旧 shared→トップ階層の順にフォールバック（旧クリニック形式の履歴も復元可）。
+      PER_UNIT_SLOT_KEYS.forEach(k=>{ if(merged[k]===undefined){ if(shared[k]!==undefined)merged[k]=shared[k]; else if(raw[k]!==undefined)merged[k]=raw[k]; } });
       return merged;
     }
     // v169以降の完全復元データまたは履歴ラッパー
@@ -3671,6 +3681,7 @@ function App(){
       if(raw[k]&&typeof raw[k]==='object'&&(raw[k].asgn||raw[k].slots||raw[k].staff)){
         const merged={...raw[k]};
         SHARED_KEYS.forEach(sk=>{ if(raw[sk]!==undefined&&merged[sk]===undefined)merged[sk]=raw[sk]; });
+        PER_UNIT_SLOT_KEYS.forEach(sk=>{ if(merged[sk]===undefined&&raw[sk]!==undefined)merged[sk]=raw[sk]; }); // v223
         return merged;
       }
     }
