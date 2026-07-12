@@ -494,8 +494,8 @@ function normalizeSlotsForV155(src){
   Object.entries(input).forEach(([dow,sls])=>{
     out[dow]=[];
     (sls||[]).forEach(slot=>{
-      if(slot&&slot.type==='out'&&String(slot.label||'').indexOf('外来')>=0&&!isRoomSplitOutSlot(slot)){
-        out[dow].push(makeRoomOutSlot(slot,1),makeRoomOutSlot(slot,2));
+      if(APP_UNIT!=='clerk'&&slot&&slot.type==='out'&&String(slot.label||'').indexOf('外来')>=0&&!isRoomSplitOutSlot(slot)){
+        out[dow].push(makeRoomOutSlot(slot,1),makeRoomOutSlot(slot,2)); // v224: クラークは外来枠を1診/2診に分割しない（単一セッション列）
       }else out[dow].push({...slot});
     });
   });
@@ -4155,7 +4155,7 @@ function App(){
             const slotBg=lbl2.includes('夜')?'#F3F0FF':lbl2.includes('昼')||lbl2.includes('午後')?'#FFF7ED':'#EFF6FF';
             const slotBd=lbl2.includes('夜')?'#7C3AED':lbl2.includes('昼')||lbl2.includes('午後')?'#C05C00':'#1D6FCC';
             const surgMark=(!roomGroup&&slot.type==='surg'&&hasSurgerySnapshot)?surgeryMarkForSlot(surgeryFlagsPDF,dk,slot):'';
-            const outMark=roomGroup?outpatientAutoMarkForCalendar(outpatientClosuresPDF,dk,group,!!isClosed2,da,dExcl,dt,outpatientDoctorPresencePDF):(isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosuresPDF,dk,slot,req,!!isClosed2):'');
+            const outMark=APP_UNIT==='clerk'?'':roomGroup?outpatientAutoMarkForCalendar(outpatientClosuresPDF,dk,group,!!isClosed2,da,dExcl,dt,outpatientDoctorPresencePDF):(isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosuresPDF,dk,slot,req,!!isClosed2):'');
             const markHtml=(outMark?`<span class="out-mark ok">${outMark}</span>`:'')+(surgMark?`<span class="surg-mark ${surgMark==='○'?'on':'off'}">${surgMark}</span>`:'');
             const badgeHtml=(sid,sl)=>{
               const st=staffPDF.find(x=>String(x.id)===String(sid));if(!st)return '';
@@ -6733,7 +6733,7 @@ ${bodyHtml}
                             }
                             const reqForMark=slot?getReq(dk,slot.id):0;
                             const surgMark=(slot&&slot.type==='surg')?surgeryMarkForSlot(surgeryFlags,dk,slot):'';
-                            const outMark=(slot&&isOutpatientSlot(slot))?outpatientMarkForSlot(outpatientClosures,dk,slot,reqForMark,staffIsClosedDay(dk)):'';
+                            const outMark=APP_UNIT==='clerk'?'':(slot&&isOutpatientSlot(slot))?outpatientMarkForSlot(outpatientClosures,dk,slot,reqForMark,staffIsClosedDay(dk)):'';
                             return(
                               <td key={dk}
                                 onClick={short?()=>setHelpTarget({dk,slotId:slot.id,slotLabel:label,mo:d.getMonth()+1,day:d.getDate(),dow}):undefined}
@@ -6792,7 +6792,7 @@ ${bodyHtml}
                                     const sc=getTimeColor(slot);
                                     const reqMark=getReq(dk,slot.id);
                                     const surgMark=slot.type==='surg'?surgeryMarkForSlot(surgeryFlags,dk,slot):'';
-                                    const outMark=isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosures,dk,slot,reqMark,staffIsClosedDay(dk)):'';
+                                    const outMark=APP_UNIT==='clerk'?'':isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosures,dk,slot,reqMark,staffIsClosedDay(dk)):'';
                                     return<div key={slot.id} title={slot.label+(outMark?' '+outMark:'')+(surgMark?' '+surgMark:'')} style={{fontSize:10,padding:'2px 4px',borderRadius:3,background:sc.bg,color:sc.text,fontWeight:700,lineHeight:1.25,whiteSpace:'nowrap',maxWidth:68,overflow:'visible',textOverflow:'clip',borderLeft:'3px solid '+sc.border}}>
                                       {staffCompactSlotLabel(slot)}{outMark&&<span style={{marginLeft:2,fontSize:8,fontWeight:900,color:'#166534'}}>{outMark}</span>}{surgMark&&<span style={staffSurgeryMarkStyle(surgMark)}>{surgMark}</span>}
                                     </div>;
@@ -6867,7 +6867,7 @@ ${bodyHtml}
                                         return getReq(dk,sl.id)>0&&ids.length<getReq(dk,sl.id);
                                       })||slot;
                                       const baseLabel=roomGroup?group.label:slot.label;
-                                      const outMark=roomGroup?outpatientAutoMarkForCalendar(outpatientClosures,dk,group,staffIsClosedDay(dk),da,manualExclusions[dk]||{},dt,outpatientDoctorPresence):(isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosures,dk,slot,req,staffIsClosedDay(dk)):'');
+                                      const outMark=APP_UNIT==='clerk'?'':roomGroup?outpatientAutoMarkForCalendar(outpatientClosures,dk,group,staffIsClosedDay(dk),da,manualExclusions[dk]||{},dt,outpatientDoctorPresence):(isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosures,dk,slot,req,staffIsClosedDay(dk)):'');
                                       const surgMark=(!roomGroup&&slot.type==='surg')?surgeryMarkForSlot(surgeryFlags,dk,slot):'';
                                       const labelText=roomGroup?baseLabel:staffCompactSlotLabel(slot);
                                       return(
@@ -8089,7 +8089,7 @@ ${bodyHtml}
                                     const baseActive=uniqIds(gSlots.flatMap(sl=>(isLocked?(lockedAsgn[dk]?.[sl.id]||[]):[])));
                                     const removedSinceLock=isLocked?baseActive.filter(id=>!activeIds.includes(id)&&!allIds.includes(id)):[];
                                     const label=roomGroup?group.label:slot.label;
-                                    const outMark=roomGroup?outpatientAutoMarkForCalendar(outpatientClosures,dk,group,!!isClosedDay(dk),da,dExcl,dt,outpatientDoctorPresence):(isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosures,dk,slot,req,!!isClosedDay(dk)):'' );
+                                    const outMark=APP_UNIT==='clerk'?'':roomGroup?outpatientAutoMarkForCalendar(outpatientClosures,dk,group,!!isClosedDay(dk),da,dExcl,dt,outpatientDoctorPresence):(isOutpatientSlot(slot)?outpatientMarkForSlot(outpatientClosures,dk,slot,req,!!isClosedDay(dk)):'' );
                                     const renderBadge=(sid,sl)=>{
                                       const s=staff.find(x=>x.id===sid);
                                       if(!s)return null;
