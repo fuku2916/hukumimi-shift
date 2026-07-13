@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v229'; // v229: 【全職種】在籍ステータス一覧の氏名が「（他職種/未登録）」のままだった問題を修正。staff_status は全職種・全院共通なのに、氏名を表示中の職種のstaffだけで解決していたため他職種のコードが引けなかった。shift_data全行(全院・全職種)から職員コード→氏名の辞書(sbStaffNameDir)を作りフォールバック。v228: 【全職種】カレンダーPDFのスタッフ名チップを「色背景＋白文字」から「白背景＋黒文字（スタッフ色の細枠）」に変更。白黒プリンターで印刷すると白抜き文字が読みにくかったため。色分けは枠線で維持。v227: 【安全策・全職種】URLに ?clinic= が無いときは端末保存を黙って使わずクリニック選択画面を表示（?unit= も同様に職種選択）。不完全なブックマークで別クリニック/別職種を誤表示する事故を防止。v226: 【クラーク限定】8h超警告を非表示（クラーク表は原本の予定をそのまま映すもの。通し=在席09:15-19:45で実働9.5h等は正規）。v225: 【クラーク限定】バックアップ全データ読込で診療枠版(slotSchedule)・表示月・採番も復元（Phase C投入用。セッション枠を正しく反映）。v224: 【クラーク限定】外来出退表 Phase A。日付別・個人別の出勤/退勤時刻(clerkTimes)を保持し、実働時間をその実時間で算出(セッション枠外に延びてもOK)＋外来表セルに「(9:00出)(18:00退)」注記。すべてAPP_UNIT==='clerk'ガードでナース/ドクターは無影響。v223: 診療枠(slots/slotSchedule/採番)を職種別化。SHARED_KEYSから外しdata[unit]へ保存、旧data.sharedはフォールバック(後方互換)。クラークが独自の勤務帯枠を持てる。v222: Phase4 勤務時間計算を日付解決（給与11〜10日が版境界をまたいでも正確）。v221: Phase3 診療枠タブに版管理UI。v220: Phase2 AI自動作成を有効期間つき診療枠に対応。v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）
+const APP_VERSION = 'v230'; // v230: 【ナース/ドクター】シフト表のスタッフのコマをダブルクリックすると、その日だけの出勤・退勤時刻を設定できる（イレギュラーに「この日は19:45まで残る」等）。表示は最初のコマに(出HH:MM)・最後のコマに(帰HH:MM)、実働時間は「退勤−出勤」で計算。per-unit state dayTimes に保存（クラークの clerkTimes と同じ仕組み・非クラーク限定、クラークは従来どおり）。v229: 【全職種】在籍ステータス一覧の氏名が「（他職種/未登録）」のままだった問題を修正。staff_status は全職種・全院共通なのに、氏名を表示中の職種のstaffだけで解決していたため他職種のコードが引けなかった。shift_data全行(全院・全職種)から職員コード→氏名の辞書(sbStaffNameDir)を作りフォールバック。v228: 【全職種】カレンダーPDFのスタッフ名チップを「色背景＋白文字」から「白背景＋黒文字（スタッフ色の細枠）」に変更。白黒プリンターで印刷すると白抜き文字が読みにくかったため。色分けは枠線で維持。v227: 【安全策・全職種】URLに ?clinic= が無いときは端末保存を黙って使わずクリニック選択画面を表示（?unit= も同様に職種選択）。不完全なブックマークで別クリニック/別職種を誤表示する事故を防止。v226: 【クラーク限定】8h超警告を非表示（クラーク表は原本の予定をそのまま映すもの。通し=在席09:15-19:45で実働9.5h等は正規）。v225: 【クラーク限定】バックアップ全データ読込で診療枠版(slotSchedule)・表示月・採番も復元（Phase C投入用。セッション枠を正しく反映）。v224: 【クラーク限定】外来出退表 Phase A。日付別・個人別の出勤/退勤時刻(clerkTimes)を保持し、実働時間をその実時間で算出(セッション枠外に延びてもOK)＋外来表セルに「(9:00出)(18:00退)」注記。すべてAPP_UNIT==='clerk'ガードでナース/ドクターは無影響。v223: 診療枠(slots/slotSchedule/採番)を職種別化。SHARED_KEYSから外しdata[unit]へ保存、旧data.sharedはフォールバック(後方互換)。クラークが独自の勤務帯枠を持てる。v222: Phase4 勤務時間計算を日付解決（給与11〜10日が版境界をまたいでも正確）。v221: Phase3 診療枠タブに版管理UI。v220: Phase2 AI自動作成を有効期間つき診療枠に対応。v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -848,6 +848,10 @@ var TMPS_LOOKUP={};
 // v224: 【クラーク限定】日付別・個人別の出勤/退勤時刻 {dk:{staffId:{in:'HH:MM',out:'HH:MM'}}}（Appが描画ごとに同期）。
 //   ナース/ドクターでは常に空オブジェクト＝参照しても何も起きない（計算・表示は一切変わらない）。
 var CLERK_TIMES_LOOKUP={};
+// v230: 【非クラーク】その日・その人だけの出勤/退勤時刻オーバーライド {dk:{staffId:{in,out}}}（Appが描画ごとに同期）。
+//   イレギュラーに「この日は19:45まで残る」等を当日限りで反映する。クラークでは常に空＝clerkTimes側を使う。
+var DAY_TIMES_LOOKUP={};
+function dayTimeOverride(dk,staffId){ var m=DAY_TIMES_LOOKUP[dk]||{}; return m[String(staffId)]||m[staffId]||null; }
 // 実労働時間の計算：拘束時間（最早出勤〜退勤）から、6時間以上なら休憩1時間を引く
 // ・複数コマの重複は通し時間で計算（二重計上しない）
 // ・「○時まで」の退勤時刻で終わりを打ち切る
@@ -891,13 +895,21 @@ function dayHours(dk,staffId,asgn,excl,slotsState,staffArr){
       if(_cs!=null&&_ce!=null){ let _sp=_ce-_cs; if(_sp<=0)return 0; if(_sp>360)_sp-=60; return _sp/60; } }
   }
   const s=(staffArr?staffArr.find(x=>x.id===staffId):null)||STAFF_OBJ_LOOKUP[staffId]||null;
+  // v230: 【非クラーク】その日・その人の出退時刻オーバーライドがあれば、実働は「退勤−出勤」で算出する
+  //   （クラークの clerkTimes と同じ考え方）。両方指定＝拘束時間の差そのもの。片方だけ＝その端を上書き。
+  var ov=(APP_UNIT!=='clerk')?dayTimeOverride(dk,staffId):null;
+  if(ov&&ov.in&&ov.out){ var _a=hmToMin(ov.in),_b=hmToMin(ov.out);
+    if(_a!=null&&_b!=null){ var _sp=_b-_a; if(_sp<=0)return 0; if(_sp>360)_sp-=60; return _sp/60; } }
   // v193: 通し手術の15:30打ち切りを、カレンダー表示と同じv107ルール（bothSurgeryCap）に統一。
   // 午前・午後の両手術に本人以外の在席者がいれば中抜け休憩が可能＝通し扱いせず、本人の通常退勤まで数える。
   var lv=staffEndMin(s,dow);
   var cap=bothSurgeryCap(da,staffId,dow,excl&&excl[dk]);
   if(cap!=null)lv=(lv==null)?cap:Math.min(lv,cap);
+  var stMin=staffStartMin(s,dow);
+  // v230: 片方だけのオーバーライドは、その端（出勤 or 退勤）を上書きしてから通常計算に回す。
+  if(ov){ if(ov.out){var _o=hmToMin(ov.out); if(_o!=null)lv=_o;} if(ov.in){var _i=hmToMin(ov.in); if(_i!=null)stMin=_i;} }
   // v193: 出勤開始の勤務条件（○時から）で開始時刻を打ち切る
-  return daySpanHours(ranges, lv, staffStartMin(s,dow));
+  return daySpanHours(ranges, lv, stMin);
 }
 function weekHours(staffId,weekDates,asgn,excl,slotsState,staffArr){
   return weekDates.reduce((s,d)=>s+dayHours(tdk(d),staffId,asgn,excl,slotsState,staffArr),0);
@@ -2619,6 +2631,7 @@ function App(){
           if(sd.slots)setSlots(sd.slots);
           if(sd.asgn)setAsgn(sd.asgn);
           if(APP_UNIT==='clerk'&&sd.clerkTimes&&typeof sd.clerkTimes==='object')setClerkTimes(sd.clerkTimes); // v224
+          if(APP_UNIT!=='clerk'&&sd.dayTimes&&typeof sd.dayTimes==='object')setDayTimes(sd.dayTimes); // v230
           if(sd.tmps)setTmps(sd.tmps);
           if(sd.weeklyReq)setWeeklyReq(sd.weeklyReq);
           if(sd.monthlyReq)setMonthlyReq(sd.monthlyReq);
@@ -2676,6 +2689,7 @@ function App(){
           if(sd.slots)setSlots(sd.slots);
           if(sd.asgn)setAsgn(sd.asgn);
           if(APP_UNIT==='clerk'&&sd.clerkTimes&&typeof sd.clerkTimes==='object')setClerkTimes(sd.clerkTimes); // v224
+          if(APP_UNIT!=='clerk'&&sd.dayTimes&&typeof sd.dayTimes==='object')setDayTimes(sd.dayTimes); // v230
           if(sd.tmps)setTmps(sd.tmps);
           if(sd.manualClosedDays)setManualClosedDays(sd.manualClosedDays);
           if(sd.outpatientClosures&&typeof sd.outpatientClosures==='object')setOutpatientClosures(sd.outpatientClosures);
@@ -3279,8 +3293,12 @@ function App(){
   // ── v224: 【クラーク限定】日付別・個人別の出勤/退勤時刻 {dk:{staffId:{in:'HH:MM',out:'HH:MM'}}} ──
   //   クラーク以外では常に空のまま（保存もしない）＝ナース/ドクターのデータ形・挙動に一切影響しない。
   const [clerkTimes,setClerkTimes]=useState(()=>(APP_UNIT==='clerk'&&saved?.clerkTimes&&typeof saved.clerkTimes==='object')?saved.clerkTimes:{});
+  const [dayTimes,setDayTimes]=useState(()=>(saved?.dayTimes&&typeof saved.dayTimes==='object')?saved.dayTimes:{}); // v230: 非クラークの当日出退時刻オーバーライド
+  const [timeEdit,setTimeEdit]=useState(null); // v230: 出退時刻編集モーダル {dk,staffId,name,in,out}
+  const dblRef=React.useRef({timer:null}); // v230: シングルクリック(コマ外し)とダブルクリック(時刻編集)の判別用
   // dayHours等（React外の計算関数）から参照できるよう描画ごとに同期（クラーク以外は常に空）
   CLERK_TIMES_LOOKUP=(APP_UNIT==='clerk')?(clerkTimes||{}):{};
+  DAY_TIMES_LOOKUP=(APP_UNIT!=='clerk')?(dayTimes||{}):{}; // v230
 
   // ── シフト表の更新日時を記録（管理者の編集・再作成のたびに更新）──
   // 初回マウントとクラウド/復元読込はスキップ（読込で日時が変わらないように）
@@ -3302,8 +3320,8 @@ function App(){
   // ── 自動保存 ──
   // ローカル自動保存
   useEffect(()=>{
-    saveLS({y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,slotSchedule,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,outpatientClosures,outpatientClosuresUpdatedAt,outpatientDoctorPresence,finalChecks,...(APP_UNIT==='clerk'?{clerkTimes}:{})}); // v224: clerkTimesはクラークのみ保存
-  },[y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,slotSchedule,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,outpatientClosures,outpatientClosuresUpdatedAt,finalChecks,clerkTimes]);
+    saveLS({y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,slotSchedule,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,outpatientClosures,outpatientClosuresUpdatedAt,outpatientDoctorPresence,finalChecks,...(APP_UNIT==='clerk'?{clerkTimes}:{dayTimes})}); // v224: clerkTimesはクラークのみ / v230: dayTimesは非クラーク
+  },[y,m,staff,asgn,tmps,weeklyReq,monthlyReq,manualExclusions,manualClosedDays,baseShift,slots,slotSchedule,newSlotCounter,paidLeave,shiftUpdatedAt,editLog,lockedAsgn,lockedMonths,outpatientClosures,outpatientClosuresUpdatedAt,finalChecks,clerkTimes,dayTimes]);
 
   // ★ v108: シフト本体は「下書き保存」と「公開」を分離する。
   // 　下書き保存＝管理者用の控え（スタッフには見えない）。公開＝スタッフ画面へ反映。
@@ -3349,7 +3367,7 @@ function App(){
       outpatientClosuresUpdatedAt:outpatientClosuresUpdatedAt||'',
       outpatientDoctorPresence:clonePlain(outpatientDoctorPresence||{}),
       finalChecks:(finalChecks||''),
-      ...(APP_UNIT==='clerk'?{clerkTimes:clonePlain(clerkTimes||{})}:{}), // v224: クラーク限定の出退時刻
+      ...(APP_UNIT==='clerk'?{clerkTimes:clonePlain(clerkTimes||{})}:{dayTimes:clonePlain(dayTimes||{})}), // v224/v230: 出退時刻オーバーライド
       ...(extra||{})
     };
     return payload;
@@ -3497,6 +3515,7 @@ function App(){
     if(d.slots)setSlots(d.slots);
     if(d.asgn)setAsgn(d.asgn);
     if(APP_UNIT==='clerk'&&d.clerkTimes&&typeof d.clerkTimes==='object')setClerkTimes(d.clerkTimes); // v224
+    if(APP_UNIT!=='clerk'&&d.dayTimes&&typeof d.dayTimes==='object')setDayTimes(d.dayTimes); // v230
     if(d.tmps)setTmps(d.tmps);
     if(d.weeklyReq)setWeeklyReq(d.weeklyReq);
     if(d.monthlyReq)setMonthlyReq(d.monthlyReq);
@@ -3785,7 +3804,7 @@ function App(){
         outpatientClosures:normalizeOutpatientClosuresV155(_o(source.outpatientClosures,{}),_slots),
         outpatientClosuresUpdatedAt:source.outpatientClosuresUpdatedAt||'',
         surgeryCalUrl:source.surgeryCalUrl,
-        ...(APP_UNIT==='clerk'?{clerkTimes:clonePlain(source.clerkTimes||{})}:{}), // v224
+        ...(APP_UNIT==='clerk'?{clerkTimes:clonePlain(source.clerkTimes||{})}:{dayTimes:clonePlain(source.dayTimes||{})}), // v224/v230
         sourceShiftUpdatedAt:source.shiftUpdatedAt||''
       };
     }
@@ -3813,7 +3832,7 @@ function App(){
       outpatientClosures:normalizeOutpatientClosuresV155(clonePlain((source.outpatientClosures&&typeof source.outpatientClosures==='object')?source.outpatientClosures:{}),rSlots),
       outpatientClosuresUpdatedAt:source.outpatientClosuresUpdatedAt||'',
       surgeryCalUrl:source.surgeryCalUrl,
-      ...(APP_UNIT==='clerk'?{clerkTimes:clonePlain(source.clerkTimes||{})}:{}), // v224
+      ...(APP_UNIT==='clerk'?{clerkTimes:clonePlain(source.clerkTimes||{})}:{dayTimes:clonePlain(source.dayTimes||{})}), // v224/v230
       sourceShiftUpdatedAt:source.shiftUpdatedAt||''
     };
   }
@@ -3865,6 +3884,7 @@ function App(){
     setSlots(restored.slots);
     setAsgn(restored.asgn);
     if(APP_UNIT==='clerk')setClerkTimes(restored.clerkTimes||{}); // v224
+    if(APP_UNIT!=='clerk')setDayTimes(restored.dayTimes||{}); // v230
     setTmps(restored.tmps);
     setWeeklyReq(restored.weeklyReq);
     setMonthlyReq(restored.monthlyReq);
@@ -4026,6 +4046,7 @@ function App(){
         if(d.monthlyReq)setMonthlyReq(d.monthlyReq);
         if(d.asgn)setAsgn(d.asgn);
     if(APP_UNIT==='clerk'&&d.clerkTimes&&typeof d.clerkTimes==='object')setClerkTimes(d.clerkTimes); // v224
+    if(APP_UNIT!=='clerk'&&d.dayTimes&&typeof d.dayTimes==='object')setDayTimes(d.dayTimes); // v230
         // v225:【クラーク限定】バックアップ復元では診療枠版(slotSchedule)・表示月・採番も復元し、セッション枠を正しく反映。
         //   （ナース/ドクターの loadData 挙動は不変）
         if(APP_UNIT==='clerk'){
@@ -8078,6 +8099,13 @@ ${bodyHtml}
                               const arr=bySid[sid].slice().sort((a,b)=>((slotRangeMin(a)||{}).s||0)-((slotRangeMin(b)||{}).s||0));
                               mk[sid]={first:arr[0]&&arr[0].id,last:arr[arr.length-1]&&arr[arr.length-1].id,in:t.in||'',out:t.out||''}; });
                             return mk; })();
+                          // v230:【非クラーク】その日・その人の出退時刻オーバーライドを、出勤=最初のコマ・退勤=最後のコマに注記（clerkMarksと同じ仕組み）。
+                          const dayMarks=(()=>{ if(APP_UNIT==='clerk')return null; const dtd=(dayTimes&&dayTimes[dk])||{}; const mk={}; const bySid={};
+                            sls.forEach(sl=>{ (da[sl.id]||[]).forEach(sid=>{ (bySid[sid]=bySid[sid]||[]).push(sl); }); });
+                            Object.keys(bySid).forEach(sid=>{ const t=dtd[sid]||dtd[String(sid)]; if(!t||!(t.in||t.out))return;
+                              const arr=bySid[sid].slice().sort((a,b)=>((slotRangeMin(a)||{}).s||0)-((slotRangeMin(b)||{}).s||0));
+                              mk[sid]={first:arr[0]&&arr[0].id,last:arr[arr.length-1]&&arr[arr.length-1].id,in:t.in||'',out:t.out||''}; });
+                            return mk; })();
                           const hasOpenOutpatient=hasOutpatientOpenOverrideForDay(outpatientClosures,dk,sls);
                           const showClosedOnly=isClosed&&!hasOpenOutpatient;
                           const offIds=Object.entries(dt).filter(([,v])=>['off','paid'].includes(v.type)).map(([sid])=>parseInt(sid));
@@ -8136,7 +8164,8 @@ ${bodyHtml}
                                       const isExcl=exclIds.includes(sid);
                                       const isOff=slotOffIds.includes(sid);
                                       const isOffTmp=['off','paid','paid_am','paid_pm'].includes(tmps[dk]?.[String(sid)]?.type);
-                                      const leaveNote=(!isOffTmp&&!isExcl)?leaveNoteForSlot(s,sl,d.getDay(),da,dExcl):'';
+                                      const hasDayOv=!!(dayMarks&&dayMarks[sid]); // v230: 当日オーバーライドがあれば note の代わりにそれを表示
+                                      const leaveNote=(!isOffTmp&&!isExcl&&!hasDayOv)?leaveNoteForSlot(s,sl,d.getDay(),da,dExcl):'';
                                       const isReliefAdded=reliefAddedSet.has(dk+'|'+sl.id+'|'+sid);
                                       const baseActiveSlot=isLocked?(lockedAsgn[dk]?.[sl.id]||[]):[];
                                       const activeSlot=slotActiveIdsForCalendar(sl,da,dExcl,dt);
@@ -8144,8 +8173,16 @@ ${bodyHtml}
                                       const isRemovedSinceLock=isLocked&&baseActiveSlot.includes(sid)&&!activeSlot.includes(sid);
                                       return(
                                         <span key={sl.id+'_'+sid}
-                                          onClick={e=>{e.stopPropagation();if(!isOffTmp)togExclusion(dk,sl.id,sid);}}
-                                          title={isRemovedSinceLock?'確定後にこのコマから外れました':isAddedSinceLock?'確定後に追加されました':isOffTmp?'終日休（臨時条件タブで設定）':isExcl?'クリックでこのコマに戻す':'クリックでこのコマから外す（この日の他コマ・終日休には影響しません）'}
+                                          onClick={e=>{e.stopPropagation();if(isOffTmp)return;
+                                            // v230:【非クラーク】シングル=コマ外し / ダブル=出退時刻編集。ダブルクリック判定のため単発は少し遅らせる。
+                                            if(APP_UNIT==='clerk'){togExclusion(dk,sl.id,sid);return;}
+                                            if(dblRef.current.timer){return;}
+                                            dblRef.current.timer=setTimeout(()=>{dblRef.current.timer=null;togExclusion(dk,sl.id,sid);},230);}}
+                                          onDoubleClick={APP_UNIT==='clerk'?undefined:(e=>{e.stopPropagation();if(isOffTmp||isExcl)return;
+                                            if(dblRef.current.timer){clearTimeout(dblRef.current.timer);dblRef.current.timer=null;}
+                                            const _t=((dayTimes[dk]||{})[sid]||(dayTimes[dk]||{})[String(sid)]||{});
+                                            setTimeEdit({dk,staffId:sid,name:s.name,in:_t.in||'',out:_t.out||''});})}
+                                          title={isRemovedSinceLock?'確定後にこのコマから外れました':isAddedSinceLock?'確定後に追加されました':isOffTmp?'終日休（臨時条件タブで設定）':isExcl?'クリックでこのコマに戻す':(APP_UNIT!=='clerk'?'クリック=このコマから外す／ダブルクリック=この日の出勤・退勤時刻を変更':'クリックでこのコマから外す（この日の他コマ・終日休には影響しません）')}
                                           style={{fontSize:'var(--fs-badge)',background:isRemovedSinceLock?'#FEE2E2':(isOffTmp?'#94A3B8':s.color),color:isRemovedSinceLock?'#991B1B':'#fff',borderRadius:3,padding:'1px 3px',cursor:'pointer',userSelect:'none',whiteSpace:'nowrap',
                                             border:isRemovedSinceLock?'1px dashed #FCA5A5':'none',
                                             opacity:isRemovedSinceLock?1:((isExcl||isOffTmp)?0.35:1),
@@ -8153,7 +8190,7 @@ ${bodyHtml}
                                             textDecorationStyle:isRemovedSinceLock?'double':'solid',
                                             textDecorationColor:isRemovedSinceLock?'#DC2626':'currentColor',
                                             boxShadow:isAddedSinceLock?'0 0 0 2px #DC2626':isReliefAdded?'0 0 0 2px #16A34A':'none'}}>
-                                          {isAddedSinceLock?'＋':(isReliefAdded?'✦':'')}{s.name}{isOffTmp?'(休)':(leaveNote?<span style={{fontWeight:700,opacity:0.95}}>{leaveNote}</span>:'')}{(()=>{ if(APP_UNIT!=='clerk'||!clerkMarks||isExcl||isOffTmp)return null; const cm=clerkMarks[sid]; if(!cm)return null; const isF=cm.first===sl.id,isL=cm.last===sl.id; let txt=''; if(isF&&isL){ txt=(cm.in&&cm.out)?('（'+cm.in+'-'+cm.out+'）'):(cm.in?('（'+cm.in+'出）'):(cm.out?('（'+cm.out+'退）'):'')); } else { txt=(isF&&cm.in)?('（'+cm.in+'出）'):((isL&&cm.out)?('（'+cm.out+'退）'):''); } return txt?<span style={{fontWeight:700,opacity:0.95}}>{txt}</span>:null; })()}
+                                          {isAddedSinceLock?'＋':(isReliefAdded?'✦':'')}{s.name}{isOffTmp?'(休)':(leaveNote?<span style={{fontWeight:700,opacity:0.95}}>{leaveNote}</span>:'')}{(()=>{ if(APP_UNIT!=='clerk'||!clerkMarks||isExcl||isOffTmp)return null; const cm=clerkMarks[sid]; if(!cm)return null; const isF=cm.first===sl.id,isL=cm.last===sl.id; let txt=''; if(isF&&isL){ txt=(cm.in&&cm.out)?('（'+cm.in+'-'+cm.out+'）'):(cm.in?('（'+cm.in+'出）'):(cm.out?('（'+cm.out+'退）'):'')); } else { txt=(isF&&cm.in)?('（'+cm.in+'出）'):((isL&&cm.out)?('（'+cm.out+'退）'):''); } return txt?<span style={{fontWeight:700,opacity:0.95}}>{txt}</span>:null; })()}{(()=>{ if(APP_UNIT==='clerk'||!dayMarks||isExcl||isOffTmp)return null; const cm=dayMarks[sid]; if(!cm)return null; const isF=cm.first===sl.id,isL=cm.last===sl.id; let txt=''; if(isF&&isL){ txt=(cm.in&&cm.out)?('（出'+cm.in+' 帰'+cm.out+'）'):(cm.in?('（出'+cm.in+'）'):(cm.out?('（帰'+cm.out+'）'):'')); } else { txt=(isF&&cm.in)?('（出'+cm.in+'）'):((isL&&cm.out)?('（帰'+cm.out+'）'):''); } return txt?<span style={{fontWeight:700,opacity:0.95}}>{txt}</span>:null; })()}
                                         </span>
                                       );
                                     };
@@ -8200,6 +8237,26 @@ ${bodyHtml}
                 </tbody>
               </table>
             </div>
+
+            {/* v230: 出退時刻編集モーダル（バッジのダブルクリックで開く。非クラーク） */}
+            {timeEdit&&(()=>{ const te=timeEdit; const d=new Date(te.dk);
+              const save=(inV,outV)=>{ setDayTimes(prev=>{ const nx={...prev}; const day={...(nx[te.dk]||{})}; const _in=(inV||'').trim(),_out=(outV||'').trim(); delete day[te.staffId]; delete day[String(te.staffId)]; if(_in||_out)day[te.staffId]={in:_in,out:_out}; if(Object.keys(day).length)nx[te.dk]=day; else delete nx[te.dk]; return nx; }); setTimeEdit(null); };
+              return(
+              <div onClick={()=>setTimeEdit(null)} style={{position:'fixed',inset:0,background:'rgba(15,23,42,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:3000,padding:16}}>
+                <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:14,width:'100%',maxWidth:340,padding:20,boxShadow:'0 8px 32px rgba(0,0,0,0.25)'}}>
+                  <div style={{fontWeight:700,fontSize:16,marginBottom:2}}>{te.name}さんの勤務時刻</div>
+                  <div style={{fontSize:12,color:'#64748B',marginBottom:14}}>{(d.getMonth()+1)}月{d.getDate()}日（{DAY_JP[d.getDay()]}）だけの出勤・退勤時刻です。実働時間は「退勤−出勤」で計算します（未入力なら通常どおり）。</div>
+                  <div style={{display:'flex',gap:12,marginBottom:16}}>
+                    <label style={{flex:1,fontSize:12,color:'#334155'}}>出勤<br/><input type="time" defaultValue={te.in} ref={el=>{te._inEl=el;}} style={{marginTop:4,width:'100%',padding:'8px',border:'1px solid #CBD5E1',borderRadius:8,fontSize:15,boxSizing:'border-box'}}/></label>
+                    <label style={{flex:1,fontSize:12,color:'#334155'}}>退勤<br/><input type="time" defaultValue={te.out} ref={el=>{te._outEl=el;}} style={{marginTop:4,width:'100%',padding:'8px',border:'1px solid #CBD5E1',borderRadius:8,fontSize:15,boxSizing:'border-box'}}/></label>
+                  </div>
+                  <div style={{display:'flex',gap:8}}>
+                    <button onClick={()=>save(te._inEl?te._inEl.value:te.in, te._outEl?te._outEl.value:te.out)} style={{flex:1,padding:'10px',border:'none',borderRadius:8,background:'#185FA5',color:'#fff',fontWeight:700,fontSize:14,cursor:'pointer'}}>保存</button>
+                    <button onClick={()=>save('','')} title="この日の出退時刻オーバーライドを消して通常表示に戻す" style={{padding:'10px 12px',border:'1px solid #FCA5A5',borderRadius:8,background:'#FEF2F2',color:'#991B1B',fontSize:13,cursor:'pointer'}}>時刻を消す</button>
+                    <button onClick={()=>setTimeEdit(null)} style={{padding:'10px 12px',border:'1px solid #E2E8F0',borderRadius:8,background:'#F8FAFC',color:'#64748B',fontSize:13,cursor:'pointer'}}>やめる</button>
+                  </div>
+                </div>
+              </div>);})()}
 
             {/* day detail（編集中の日付の行までパネルを降ろす） */}
             {sd&&(
@@ -10946,6 +11003,21 @@ CHANGELOG v229 (在籍ステータスの氏名が空欄になる問題を修正)
   自院の全職種ぶんは解決でき、取得失敗時は空辞書＝従来どおり「（他職種/未登録）」表示にフォールバック。
   データ・他機能・他職種の挙動は不変。
 - アプリ表示バージョンを v228 から v229 に更新。
+
+CHANGELOG v230 (コマのダブルクリックで当日の出勤・退勤時刻を変更)
+- 【新機能・ナース/ドクター】シフト表でスタッフのコマ（バッジ）をダブルクリックすると、
+  その日だけの「出勤時刻・退勤時刻」を設定できるモーダルを表示。
+  用途: 「小田さんが普段は18:00で帰るが、この日は19:45まで残る」等のイレギュラー対応。
+- 反映: (1)表示＝最初のコマに（出HH:MM）・最後のコマに（帰HH:MM）を注記し、
+  普段のnotes由来「(帰18:00)」はこの日だけ非表示。(2)実働時間＝「退勤−出勤」で計算
+  （6時間超は休憩1時間を控除。片方だけ入力ならその端だけ上書き）。
+- 実装: per-unit state dayTimes {dk:{staffId:{in,out}}} を追加。クラークの clerkTimes と
+  同じ仕組み・同じ永続化経路（saveLS/公開ペイロード/クラウド読込/履歴復元）。
+  グローバル DAY_TIMES_LOOKUP を App が描画ごとに同期し dayHours が参照。
+  シングルクリック（コマ外し）とダブルクリック（時刻編集）は230msのタイマーで判別。
+- 影響範囲: APP_UNIT!=='clerk' のみ作動。クラークは従来の clerkTimes フローのまま完全に不変。
+  人員不足（配置人数0判定）・AI自動配置・診療枠には触れていない。
+- アプリ表示バージョンを v229 から v230 に更新。
 -->
 </body>
 </html>
