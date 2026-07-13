@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v226'; // v226: 【クラーク限定】8h超警告を非表示（クラーク表は原本の予定をそのまま映すもの。通し=在席09:15-19:45で実働9.5h等は正規）。v225: 【クラーク限定】バックアップ全データ読込で診療枠版(slotSchedule)・表示月・採番も復元（Phase C投入用。セッション枠を正しく反映）。v224: 【クラーク限定】外来出退表 Phase A。日付別・個人別の出勤/退勤時刻(clerkTimes)を保持し、実働時間をその実時間で算出(セッション枠外に延びてもOK)＋外来表セルに「(9:00出)(18:00退)」注記。すべてAPP_UNIT==='clerk'ガードでナース/ドクターは無影響。v223: 診療枠(slots/slotSchedule/採番)を職種別化。SHARED_KEYSから外しdata[unit]へ保存、旧data.sharedはフォールバック(後方互換)。クラークが独自の勤務帯枠を持てる。v222: Phase4 勤務時間計算を日付解決（給与11〜10日が版境界をまたいでも正確）。v221: Phase3 診療枠タブに版管理UI。v220: Phase2 AI自動作成を有効期間つき診療枠に対応。v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）
+const APP_VERSION = 'v227'; // v227: 【安全策・全職種】URLに ?clinic= が無いときは端末保存を黙って使わずクリニック選択画面を表示（?unit= も同様に職種選択）。不完全なブックマークで別クリニック/別職種を誤表示する事故を防止。v226: 【クラーク限定】8h超警告を非表示（クラーク表は原本の予定をそのまま映すもの。通し=在席09:15-19:45で実働9.5h等は正規）。v225: 【クラーク限定】バックアップ全データ読込で診療枠版(slotSchedule)・表示月・採番も復元（Phase C投入用。セッション枠を正しく反映）。v224: 【クラーク限定】外来出退表 Phase A。日付別・個人別の出勤/退勤時刻(clerkTimes)を保持し、実働時間をその実時間で算出(セッション枠外に延びてもOK)＋外来表セルに「(9:00出)(18:00退)」注記。すべてAPP_UNIT==='clerk'ガードでナース/ドクターは無影響。v223: 診療枠(slots/slotSchedule/採番)を職種別化。SHARED_KEYSから外しdata[unit]へ保存、旧data.sharedはフォールバック(後方互換)。クラークが独自の勤務帯枠を持てる。v222: Phase4 勤務時間計算を日付解決（給与11〜10日が版境界をまたいでも正確）。v221: Phase3 診療枠タブに版管理UI。v220: Phase2 AI自動作成を有効期間つき診療枠に対応。v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -1195,8 +1195,8 @@ const APP_UNIT=(()=>{
     for(const c of cands){ if(UNIT_KEYS.indexOf(c)>=0)return c; }
     const p=(location.pathname||'').toLowerCase();
     for(const k of UNIT_KEYS){ if(p.indexOf(k)>=0)return k; }
-    const saved=(localStorage.getItem('fukumimi_unit')||'').toLowerCase();
-    if(UNIT_KEYS.indexOf(saved)>=0)return saved;
+    // v227: 端末保存(fukumimi_unit)への黙用フォールバックは廃止（誤職種表示の防止）。
+    //   URLに ?unit= が無ければ '' を返し、職種選択画面を表示する。
   }catch(e){}
   return '';
 })();
@@ -1217,8 +1217,8 @@ const APP_CLINIC=(()=>{
     if(CLINIC_KEYS.indexOf(h)>=0)return h;
     const p=(location.pathname||'').toLowerCase();
     for(const k of CLINIC_KEYS){ if(p.indexOf(k)>=0)return k; }
-    const saved=(localStorage.getItem('fukumimi_clinic')||'').toLowerCase();
-    if(CLINIC_KEYS.indexOf(saved)>=0)return saved;
+    // v227: 端末保存(fukumimi_clinic)への黙用フォールバックは廃止（別クリニック誤表示の防止）。
+    //   URLに ?clinic= が無ければ '' を返し、クリニック選択画面を表示する（不完全なブックマーク対策）。
   }catch(e){}
   return '';
 })();
@@ -10423,7 +10423,7 @@ function ClinicPicker(){
         <div style={{textAlign:'center',fontWeight:700,fontSize:18,marginBottom:4}}>シフト管理</div>
         <div style={{textAlign:'center',fontSize:12,color:'#64748B',marginBottom:18}}>どのクリニックをひらきますか？</div>
         {CLINIC_KEYS.map(c=>btn(c))}
-        <div style={{fontSize:11,color:'#94A3B8',textAlign:'center',marginTop:6,lineHeight:1.6}}>一度選ぶとこの端末では次回から自動で開きます。<br/>変更はURL末尾に <b>?clinic=ekimae / iguchi / karasuma</b> を付けてもできます。</div>
+        <div style={{fontSize:11,color:'#94A3B8',textAlign:'center',marginTop:6,lineHeight:1.6}}>選ぶと <b>?clinic=…</b> 付きのURLで開きます。<br/>次回から自動で開くには、その（<b>?clinic=…</b> 付き）URLをブックマーク／ホーム画面に追加してください。</div>
       </div>
     </div>
   );
@@ -10449,14 +10449,15 @@ function UnitPicker(){
         {btn('clerk','クラーク','📋','#2563EB')}
         {btn('nurse','ナース','💉','#059669')}
         {btn('doctor','ドクター','🩺','#9333EA')}
-        <div style={{fontSize:11,color:'#94A3B8',textAlign:'center',marginTop:6,lineHeight:1.6}}>一度選ぶとこの端末では次回から自動で開きます。<br/>変更はURL末尾に <b>?unit=clerk / nurse / doctor</b> を付けてもできます。</div>
+        <div style={{fontSize:11,color:'#94A3B8',textAlign:'center',marginTop:6,lineHeight:1.6}}>選ぶと <b>?clinic=…&unit=…</b> 付きのURLで開きます。<br/>次回から自動で開くには、その完全なURLをブックマーク／ホーム画面に追加してください。</div>
       </div>
     </div>
   );
 }
-// 起動時の画面切替：拠点も職種も未指定→クリニック選択／拠点のみ済→職種選択／職種済→アプリ
-// ※ 従来URL（?unit=…でクリニック未指定）はそのままアプリ起動＝legacyモードで後方互換。
-const _rootView=(!APP_CLINIC&&!APP_UNIT)?<ClinicPicker />:(!APP_UNIT?<UnitPicker />:<App />);
+// 起動時の画面切替：クリニック未指定→クリニック選択／クリニック済・職種未指定→職種選択／両方済→アプリ
+// v227: クリニックがURLに無ければ必ずクリニック選択画面を出す（端末保存の黙用をやめ、別クリニック誤表示・レガシー落ちを防止）。
+//   ※ ?clinic= 無しの従来URL（legacyモード）は選択画面に誘導されるようになった（駅前データは既に id=ekimae へ移行済）。
+const _rootView=(!APP_CLINIC)?<ClinicPicker />:(!APP_UNIT?<UnitPicker />:<App />);
 ReactDOM.createRoot(document.getElementById('root')).render(_rootView);
 </script>
 <!--
