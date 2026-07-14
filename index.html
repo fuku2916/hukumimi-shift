@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v238'; // v238: 【全職種】「未定」トグルを押すと即クラウド反映（公開ボタン不要）に改善。v237では未定トグル→公開ボタンの2段階で「押したのに表示されない」と誤解された（ユーザーFB）。「医師休診・外来枠設定」と同じ 読み出し→pendingMonthsキーだけマージ→SB.set 方式で、シフト本体の公開データ・手元の未公開編集には触れない。失敗時（通信断・v219空行ガード等）は手元状態も元に戻してアラート＝ボタン再押下でリトライ。保存中は「⏳ 反映中…」でボタン無効。スタッフ側は既存の10秒ポーリング＋復帰時pullが pendingMonths を無条件置換するので最大10秒で反映/解除。shiftUpdatedAtはもう更新しない（シフト内容の変更ではないため）。v237: 【全職種】月単位の「未定」表示。管理画面のシフト表ヘッダーに「⚪ ◯月を「未定」表示」トグルを追加。設定して公開すると、スタッフ画面ではその月のシフト表（一覧/カレンダー両方）が薄く（opacity0.35+グレー化）なり、赤い二重丸の「未定」ハンコ（縦書き・回転・sticky＝スクロールしても画面内に留まる）と説明バナーが表示される。作成途中の月を公開しても決定と誤解されないようにするため（8月作成中に5〜7月サンプル投入を公開する場面で必要になった）。ハンコはpointerEvents:noneで、休み希望などの申請タップは従来どおり可能。データはper-unitのpendingMonths（{"2026-8":ISO}・lockedMonthsと同形式）で、公開ペイロード/全データ保存/読み込み/スタッフ初回読込/10秒ポーリングすべてに対応（ポーリングは解除も反映するため無条件置換）。トグル時はshiftUpdatedAtを更新し「公開（未公開あり）」で公開を促す。v236: 【全職種】ファイル→全データ読み込みで診療枠の版(slotSchedule)も復元するように修正。v225ではクラーク限定だった（ナース/ドクターはバックアップに診療枠版が入っていても無視され、過去期間用の版を含むファイルを取り込めなかった）。表示月・採番は元々全職種で復元済み。v235: 【スタッフ画面】(1)スマホで背面化中にポーリングが凍結し「自分でリロードしないと最新シフトにならない」問題を修正。visibilitychange/focus/pageshowでアプリ復帰時に必ず1回シフトを再取得（リロード不要）。ポーリングでdayTimes/clerkTimes/slotScheduleも更新（従来asgn等のみで出退時刻・診療枠版の変更が取りこぼされていた）。(2)スタッフ画面ヘッダーに「🕒 このシフト表の更新：YYYY/M/D HH:MM 時点」を表示。管理画面と同じshiftUpdatedAtを、スタッフ初回読込・ポーリングの両方で取得。v234: 出退時刻のダブルクリック編集を全職種に拡大。クラークも駒をダブルクリックで出勤・退勤時刻を編集できる（既存のclerkTimesを編集、割当パネルの入力と同じデータ）。ドクターは元々対応済。クラークの出退マークも除外コマ回避(v232同様)。v233: 【重大・データ消失防止】AI自動作成の結果を反映(applyPat)する際、対象月だけを差し替えて他の月を温存するよう修正。従来は対象月だけのasgnで全体を置き換えていたため、8月を自動作成すると7月など他月の配置が消えていた。v232: 出退時刻の（出HH:MM）マークが、最初のコマが「除外(薄字)」だと表示先を失い出勤時刻が出なかった不具合を修正。出退マークの最初/最後のコマを、除外・終日休を除いたアクティブなコマから決めるようにした。v231: 出退時刻編集モーダルを開いたとき、通常の勤務時刻（配置コマの最早開始〜最遅終了）を出勤・退勤欄に初期表示。退勤だけ変えても出勤欄が埋まったまま保存され、出勤・退勤の両方が表示される（v230では退勤のみ入力すると出勤が表示されなかった）。v230: 【ナース/ドクター】シフト表のスタッフのコマをダブルクリックすると、その日だけの出勤・退勤時刻を設定できる（イレギュラーに「この日は19:45まで残る」等）。表示は最初のコマに(出HH:MM)・最後のコマに(帰HH:MM)、実働時間は「退勤−出勤」で計算。per-unit state dayTimes に保存（クラークの clerkTimes と同じ仕組み・非クラーク限定、クラークは従来どおり）。v229: 【全職種】在籍ステータス一覧の氏名が「（他職種/未登録）」のままだった問題を修正。staff_status は全職種・全院共通なのに、氏名を表示中の職種のstaffだけで解決していたため他職種のコードが引けなかった。shift_data全行(全院・全職種)から職員コード→氏名の辞書(sbStaffNameDir)を作りフォールバック。v228: 【全職種】カレンダーPDFのスタッフ名チップを「色背景＋白文字」から「白背景＋黒文字（スタッフ色の細枠）」に変更。白黒プリンターで印刷すると白抜き文字が読みにくかったため。色分けは枠線で維持。v227: 【安全策・全職種】URLに ?clinic= が無いときは端末保存を黙って使わずクリニック選択画面を表示（?unit= も同様に職種選択）。不完全なブックマークで別クリニック/別職種を誤表示する事故を防止。v226: 【クラーク限定】8h超警告を非表示（クラーク表は原本の予定をそのまま映すもの。通し=在席09:15-19:45で実働9.5h等は正規）。v225: 【クラーク限定】バックアップ全データ読込で診療枠版(slotSchedule)・表示月・採番も復元（Phase C投入用。セッション枠を正しく反映）。v224: 【クラーク限定】外来出退表 Phase A。日付別・個人別の出勤/退勤時刻(clerkTimes)を保持し、実働時間をその実時間で算出(セッション枠外に延びてもOK)＋外来表セルに「(9:00出)(18:00退)」注記。すべてAPP_UNIT==='clerk'ガードでナース/ドクターは無影響。v223: 診療枠(slots/slotSchedule/採番)を職種別化。SHARED_KEYSから外しdata[unit]へ保存、旧data.sharedはフォールバック(後方互換)。クラークが独自の勤務帯枠を持てる。v222: Phase4 勤務時間計算を日付解決（給与11〜10日が版境界をまたいでも正確）。v221: Phase3 診療枠タブに版管理UI。v220: Phase2 AI自動作成を有効期間つき診療枠に対応。v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）
+const APP_VERSION = 'v239'; // v239: 【スタッフ画面・未定ハンコの調整（ユーザーFB）】(1)薄化を0.35→0.6（grayscale55%→30%）に緩和＝未定でも日付や配置が読めて8月の休み申請がしやすい。(2)ハンコをドラッグで移動可能に（pointerEvents:auto化＋onPointerDown/Move/Upで translate オフセット、touchAction:noneでスクロール競合回避、viewport基準でクランプ）。位置は localStorage 'fukumimi_stamp_pos' に端末単位で記憶、ダブルタップで既定位置へリセット。バナーに操作ヒント追記。ハンコの外は従来どおりタップ透過（外側オーバーレイはpointerEvents:none）。サイズも min(62vw,300px)→min(56vw,270px) に少し縮小。v238: 【全職種】「未定」トグルを押すと即クラウド反映（公開ボタン不要）に改善。v237では未定トグル→公開ボタンの2段階で「押したのに表示されない」と誤解された（ユーザーFB）。「医師休診・外来枠設定」と同じ 読み出し→pendingMonthsキーだけマージ→SB.set 方式で、シフト本体の公開データ・手元の未公開編集には触れない。失敗時（通信断・v219空行ガード等）は手元状態も元に戻してアラート＝ボタン再押下でリトライ。保存中は「⏳ 反映中…」でボタン無効。スタッフ側は既存の10秒ポーリング＋復帰時pullが pendingMonths を無条件置換するので最大10秒で反映/解除。shiftUpdatedAtはもう更新しない（シフト内容の変更ではないため）。v237: 【全職種】月単位の「未定」表示。管理画面のシフト表ヘッダーに「⚪ ◯月を「未定」表示」トグルを追加。設定して公開すると、スタッフ画面ではその月のシフト表（一覧/カレンダー両方）が薄く（opacity0.35+グレー化）なり、赤い二重丸の「未定」ハンコ（縦書き・回転・sticky＝スクロールしても画面内に留まる）と説明バナーが表示される。作成途中の月を公開しても決定と誤解されないようにするため（8月作成中に5〜7月サンプル投入を公開する場面で必要になった）。ハンコはpointerEvents:noneで、休み希望などの申請タップは従来どおり可能。データはper-unitのpendingMonths（{"2026-8":ISO}・lockedMonthsと同形式）で、公開ペイロード/全データ保存/読み込み/スタッフ初回読込/10秒ポーリングすべてに対応（ポーリングは解除も反映するため無条件置換）。トグル時はshiftUpdatedAtを更新し「公開（未公開あり）」で公開を促す。v236: 【全職種】ファイル→全データ読み込みで診療枠の版(slotSchedule)も復元するように修正。v225ではクラーク限定だった（ナース/ドクターはバックアップに診療枠版が入っていても無視され、過去期間用の版を含むファイルを取り込めなかった）。表示月・採番は元々全職種で復元済み。v235: 【スタッフ画面】(1)スマホで背面化中にポーリングが凍結し「自分でリロードしないと最新シフトにならない」問題を修正。visibilitychange/focus/pageshowでアプリ復帰時に必ず1回シフトを再取得（リロード不要）。ポーリングでdayTimes/clerkTimes/slotScheduleも更新（従来asgn等のみで出退時刻・診療枠版の変更が取りこぼされていた）。(2)スタッフ画面ヘッダーに「🕒 このシフト表の更新：YYYY/M/D HH:MM 時点」を表示。管理画面と同じshiftUpdatedAtを、スタッフ初回読込・ポーリングの両方で取得。v234: 出退時刻のダブルクリック編集を全職種に拡大。クラークも駒をダブルクリックで出勤・退勤時刻を編集できる（既存のclerkTimesを編集、割当パネルの入力と同じデータ）。ドクターは元々対応済。クラークの出退マークも除外コマ回避(v232同様)。v233: 【重大・データ消失防止】AI自動作成の結果を反映(applyPat)する際、対象月だけを差し替えて他の月を温存するよう修正。従来は対象月だけのasgnで全体を置き換えていたため、8月を自動作成すると7月など他月の配置が消えていた。v232: 出退時刻の（出HH:MM）マークが、最初のコマが「除外(薄字)」だと表示先を失い出勤時刻が出なかった不具合を修正。出退マークの最初/最後のコマを、除外・終日休を除いたアクティブなコマから決めるようにした。v231: 出退時刻編集モーダルを開いたとき、通常の勤務時刻（配置コマの最早開始〜最遅終了）を出勤・退勤欄に初期表示。退勤だけ変えても出勤欄が埋まったまま保存され、出勤・退勤の両方が表示される（v230では退勤のみ入力すると出勤が表示されなかった）。v230: 【ナース/ドクター】シフト表のスタッフのコマをダブルクリックすると、その日だけの出勤・退勤時刻を設定できる（イレギュラーに「この日は19:45まで残る」等）。表示は最初のコマに(出HH:MM)・最後のコマに(帰HH:MM)、実働時間は「退勤−出勤」で計算。per-unit state dayTimes に保存（クラークの clerkTimes と同じ仕組み・非クラーク限定、クラークは従来どおり）。v229: 【全職種】在籍ステータス一覧の氏名が「（他職種/未登録）」のままだった問題を修正。staff_status は全職種・全院共通なのに、氏名を表示中の職種のstaffだけで解決していたため他職種のコードが引けなかった。shift_data全行(全院・全職種)から職員コード→氏名の辞書(sbStaffNameDir)を作りフォールバック。v228: 【全職種】カレンダーPDFのスタッフ名チップを「色背景＋白文字」から「白背景＋黒文字（スタッフ色の細枠）」に変更。白黒プリンターで印刷すると白抜き文字が読みにくかったため。色分けは枠線で維持。v227: 【安全策・全職種】URLに ?clinic= が無いときは端末保存を黙って使わずクリニック選択画面を表示（?unit= も同様に職種選択）。不完全なブックマークで別クリニック/別職種を誤表示する事故を防止。v226: 【クラーク限定】8h超警告を非表示（クラーク表は原本の予定をそのまま映すもの。通し=在席09:15-19:45で実働9.5h等は正規）。v225: 【クラーク限定】バックアップ全データ読込で診療枠版(slotSchedule)・表示月・採番も復元（Phase C投入用。セッション枠を正しく反映）。v224: 【クラーク限定】外来出退表 Phase A。日付別・個人別の出勤/退勤時刻(clerkTimes)を保持し、実働時間をその実時間で算出(セッション枠外に延びてもOK)＋外来表セルに「(9:00出)(18:00退)」注記。すべてAPP_UNIT==='clerk'ガードでナース/ドクターは無影響。v223: 診療枠(slots/slotSchedule/採番)を職種別化。SHARED_KEYSから外しdata[unit]へ保存、旧data.sharedはフォールバック(後方互換)。クラークが独自の勤務帯枠を持てる。v222: Phase4 勤務時間計算を日付解決（給与11〜10日が版境界をまたいでも正確）。v221: Phase3 診療枠タブに版管理UI。v220: Phase2 AI自動作成を有効期間つき診療枠に対応。v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -2854,6 +2854,9 @@ function App(){
   const [pinTarget,setPinTarget]=useState(null); // {mode:'login'|'request'|'cancel', dk?, type?}
   const [staffY,setStaffY]=useState(()=>{const r=loadResume();return (r&&r.staffY)?r.staffY:new Date().getFullYear();});
   const [staffM,setStaffM]=useState(()=>{const r=loadResume();return (r&&r.staffM)?r.staffM:new Date().getMonth()+1;});
+  // v239: 「未定」ハンコの位置（既定位置からのオフセット）。ドラッグで移動でき、端末に記憶。
+  const [stampOff,setStampOff]=useState(()=>{try{const v=JSON.parse(localStorage.getItem('fukumimi_stamp_pos')||'null');return (v&&typeof v.x==='number'&&typeof v.y==='number')?v:{x:0,y:0};}catch(e){return {x:0,y:0};}});
+  const stampDragRef=React.useRef(null);
   // ログイン中はセッションを保存し、更新リロードをまたいで同じ画面に復帰できるようにする。ログアウト時は消す。
   useEffect(()=>{
     if(appMode==='staff'&&staffMyId!=null)saveResume({appMode:'staff',staffMyId,staffTab,staffY,staffM});
@@ -6844,10 +6847,11 @@ ${bodyHtml}
             {staffMonthPendingAt&&(
               <div style={{margin:'0 8px 10px',padding:'8px 12px',background:'#FEF2F2',border:'2px solid #FCA5A5',borderRadius:8,fontSize:13,color:'#991B1B',lineHeight:1.6}}>
                 <b>🔴 {staffY}年{staffM}月のシフトはまだ【未定】です。</b> 作成途中のため、下の内容はこれから変わります。（休み希望などの申請は今までどおりできます）
+                <span style={{display:'block',fontSize:11,color:'#B91C1C',marginTop:2}}>※ 赤いハンコは指でドラッグすると好きな場所に動かせます（ダブルタップで元の位置に戻ります）</span>
               </div>
             )}
             <div style={{position:'relative'}}>
-            <div style={staffMonthPendingAt?{opacity:0.35,filter:'grayscale(55%)'}:undefined}>
+            <div style={staffMonthPendingAt?{opacity:0.6,filter:'grayscale(30%)'}:undefined}>
             {staffShiftView==='table'&&(<>
             <div style={{fontSize:12,color:'#9A3412',background:'#FFF7ED',border:'1px solid #FDBA74',borderRadius:8,padding:'8px 12px',margin:'0 8px 10px',lineHeight:1.6}}>
               ※ <strong>⚠</strong> のところはスタッフが不足しています。勤務できる方は、その<strong>⚠を直接タップ</strong>して「挙手」を押すと管理者に伝わります（自分の行の日付からも申請できます）。
@@ -7086,14 +7090,28 @@ ${bodyHtml}
               </div>
             )}
             </div>{/* v237: 薄化ラッパー end */}
-            {/* v237: 「未定」ハンコ。pointerEvents:none なので下の表のタップ（申請・挙手）はそのまま効く。
-                position:sticky で、ページをスクロールしても画面内に留まり続ける（＝常に押印が見える） */}
+            {/* v237: 「未定」ハンコ。外側オーバーレイは pointerEvents:none なので下の表のタップ（申請・挙手）は
+                ハンコの外ならそのまま効く。position:sticky で、ページをスクロールしても画面内に留まり続ける。
+                v239: ハンコ本体はドラッグで移動可（タップの邪魔になる時に避けられる）。位置は端末に記憶し、
+                ダブルタップで既定位置に戻る。ドラッグ中は touchAction:none でスクロールと競合しない。 */}
             {staffMonthPendingAt&&(
               <div style={{position:'absolute',inset:0,zIndex:40,pointerEvents:'none',display:'flex',justifyContent:'center',alignItems:'flex-start'}}>
-                <div style={{position:'sticky',top:'16vh',marginTop:30,width:'min(62vw,300px)',height:'min(62vw,300px)',display:'flex',alignItems:'center',justifyContent:'center',transform:'rotate(-12deg)',opacity:0.85}}>
+                <div
+                  onPointerDown={e=>{e.preventDefault();try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){ }stampDragRef.current={sx:e.clientX,sy:e.clientY,ox:stampOff.x,oy:stampOff.y};}}
+                  onPointerMove={e=>{const d=stampDragRef.current;if(!d)return;const vw=window.innerWidth,vh=window.innerHeight;
+                    const nx=Math.max(-vw*0.55,Math.min(vw*0.55,d.ox+(e.clientX-d.sx)));
+                    const ny=Math.max(-vh*0.35,Math.min(vh*0.9,d.oy+(e.clientY-d.sy)));
+                    setStampOff({x:nx,y:ny});}}
+                  onPointerUp={()=>{stampDragRef.current=null;setStampOff(cur=>{try{localStorage.setItem('fukumimi_stamp_pos',JSON.stringify(cur));}catch(_){ }return cur;});}}
+                  onPointerCancel={()=>{stampDragRef.current=null;}}
+                  onDoubleClick={()=>{setStampOff({x:0,y:0});try{localStorage.removeItem('fukumimi_stamp_pos');}catch(_){ }}}
+                  title="ドラッグで移動できます（ダブルタップで元の位置）"
+                  style={{position:'sticky',top:'16vh',marginTop:30,width:'min(56vw,270px)',height:'min(56vw,270px)',display:'flex',alignItems:'center',justifyContent:'center',
+                    transform:'translate('+stampOff.x+'px,'+stampOff.y+'px) rotate(-12deg)',opacity:0.85,
+                    pointerEvents:'auto',touchAction:'none',cursor:'grab',userSelect:'none'}}>
                   <div style={{position:'absolute',inset:0,borderRadius:'50%',border:'7px solid rgba(197,26,26,0.75)'}}/>
                   <div style={{position:'absolute',inset:11,borderRadius:'50%',border:'3px solid rgba(197,26,26,0.75)'}}/>
-                  <span style={{writingMode:'vertical-rl',fontFamily:"'Hiragino Mincho ProN','Yu Mincho','MS Mincho',serif",fontWeight:900,fontSize:'min(29vw,140px)',lineHeight:1,letterSpacing:'0.04em',color:'rgba(197,26,26,0.8)',userSelect:'none'}}>未定</span>
+                  <span style={{writingMode:'vertical-rl',fontFamily:"'Hiragino Mincho ProN','Yu Mincho','MS Mincho',serif",fontWeight:900,fontSize:'min(26vw,126px)',lineHeight:1,letterSpacing:'0.04em',color:'rgba(197,26,26,0.8)',userSelect:'none',pointerEvents:'none'}}>未定</span>
                 </div>
               </div>
             )}
