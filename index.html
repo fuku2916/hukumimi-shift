@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v239'; // v239: 【スタッフ画面・未定ハンコの調整（ユーザーFB）】(1)薄化を0.35→0.6（grayscale55%→30%）に緩和＝未定でも日付や配置が読めて8月の休み申請がしやすい。(2)ハンコをドラッグで移動可能に（pointerEvents:auto化＋onPointerDown/Move/Upで translate オフセット、touchAction:noneでスクロール競合回避、viewport基準でクランプ）。位置は localStorage 'fukumimi_stamp_pos' に端末単位で記憶、ダブルタップで既定位置へリセット。バナーに操作ヒント追記。ハンコの外は従来どおりタップ透過（外側オーバーレイはpointerEvents:none）。サイズも min(62vw,300px)→min(56vw,270px) に少し縮小。v238: 【全職種】「未定」トグルを押すと即クラウド反映（公開ボタン不要）に改善。v237では未定トグル→公開ボタンの2段階で「押したのに表示されない」と誤解された（ユーザーFB）。「医師休診・外来枠設定」と同じ 読み出し→pendingMonthsキーだけマージ→SB.set 方式で、シフト本体の公開データ・手元の未公開編集には触れない。失敗時（通信断・v219空行ガード等）は手元状態も元に戻してアラート＝ボタン再押下でリトライ。保存中は「⏳ 反映中…」でボタン無効。スタッフ側は既存の10秒ポーリング＋復帰時pullが pendingMonths を無条件置換するので最大10秒で反映/解除。shiftUpdatedAtはもう更新しない（シフト内容の変更ではないため）。v237: 【全職種】月単位の「未定」表示。管理画面のシフト表ヘッダーに「⚪ ◯月を「未定」表示」トグルを追加。設定して公開すると、スタッフ画面ではその月のシフト表（一覧/カレンダー両方）が薄く（opacity0.35+グレー化）なり、赤い二重丸の「未定」ハンコ（縦書き・回転・sticky＝スクロールしても画面内に留まる）と説明バナーが表示される。作成途中の月を公開しても決定と誤解されないようにするため（8月作成中に5〜7月サンプル投入を公開する場面で必要になった）。ハンコはpointerEvents:noneで、休み希望などの申請タップは従来どおり可能。データはper-unitのpendingMonths（{"2026-8":ISO}・lockedMonthsと同形式）で、公開ペイロード/全データ保存/読み込み/スタッフ初回読込/10秒ポーリングすべてに対応（ポーリングは解除も反映するため無条件置換）。トグル時はshiftUpdatedAtを更新し「公開（未公開あり）」で公開を促す。v236: 【全職種】ファイル→全データ読み込みで診療枠の版(slotSchedule)も復元するように修正。v225ではクラーク限定だった（ナース/ドクターはバックアップに診療枠版が入っていても無視され、過去期間用の版を含むファイルを取り込めなかった）。表示月・採番は元々全職種で復元済み。v235: 【スタッフ画面】(1)スマホで背面化中にポーリングが凍結し「自分でリロードしないと最新シフトにならない」問題を修正。visibilitychange/focus/pageshowでアプリ復帰時に必ず1回シフトを再取得（リロード不要）。ポーリングでdayTimes/clerkTimes/slotScheduleも更新（従来asgn等のみで出退時刻・診療枠版の変更が取りこぼされていた）。(2)スタッフ画面ヘッダーに「🕒 このシフト表の更新：YYYY/M/D HH:MM 時点」を表示。管理画面と同じshiftUpdatedAtを、スタッフ初回読込・ポーリングの両方で取得。v234: 出退時刻のダブルクリック編集を全職種に拡大。クラークも駒をダブルクリックで出勤・退勤時刻を編集できる（既存のclerkTimesを編集、割当パネルの入力と同じデータ）。ドクターは元々対応済。クラークの出退マークも除外コマ回避(v232同様)。v233: 【重大・データ消失防止】AI自動作成の結果を反映(applyPat)する際、対象月だけを差し替えて他の月を温存するよう修正。従来は対象月だけのasgnで全体を置き換えていたため、8月を自動作成すると7月など他月の配置が消えていた。v232: 出退時刻の（出HH:MM）マークが、最初のコマが「除外(薄字)」だと表示先を失い出勤時刻が出なかった不具合を修正。出退マークの最初/最後のコマを、除外・終日休を除いたアクティブなコマから決めるようにした。v231: 出退時刻編集モーダルを開いたとき、通常の勤務時刻（配置コマの最早開始〜最遅終了）を出勤・退勤欄に初期表示。退勤だけ変えても出勤欄が埋まったまま保存され、出勤・退勤の両方が表示される（v230では退勤のみ入力すると出勤が表示されなかった）。v230: 【ナース/ドクター】シフト表のスタッフのコマをダブルクリックすると、その日だけの出勤・退勤時刻を設定できる（イレギュラーに「この日は19:45まで残る」等）。表示は最初のコマに(出HH:MM)・最後のコマに(帰HH:MM)、実働時間は「退勤−出勤」で計算。per-unit state dayTimes に保存（クラークの clerkTimes と同じ仕組み・非クラーク限定、クラークは従来どおり）。v229: 【全職種】在籍ステータス一覧の氏名が「（他職種/未登録）」のままだった問題を修正。staff_status は全職種・全院共通なのに、氏名を表示中の職種のstaffだけで解決していたため他職種のコードが引けなかった。shift_data全行(全院・全職種)から職員コード→氏名の辞書(sbStaffNameDir)を作りフォールバック。v228: 【全職種】カレンダーPDFのスタッフ名チップを「色背景＋白文字」から「白背景＋黒文字（スタッフ色の細枠）」に変更。白黒プリンターで印刷すると白抜き文字が読みにくかったため。色分けは枠線で維持。v227: 【安全策・全職種】URLに ?clinic= が無いときは端末保存を黙って使わずクリニック選択画面を表示（?unit= も同様に職種選択）。不完全なブックマークで別クリニック/別職種を誤表示する事故を防止。v226: 【クラーク限定】8h超警告を非表示（クラーク表は原本の予定をそのまま映すもの。通し=在席09:15-19:45で実働9.5h等は正規）。v225: 【クラーク限定】バックアップ全データ読込で診療枠版(slotSchedule)・表示月・採番も復元（Phase C投入用。セッション枠を正しく反映）。v224: 【クラーク限定】外来出退表 Phase A。日付別・個人別の出勤/退勤時刻(clerkTimes)を保持し、実働時間をその実時間で算出(セッション枠外に延びてもOK)＋外来表セルに「(9:00出)(18:00退)」注記。すべてAPP_UNIT==='clerk'ガードでナース/ドクターは無影響。v223: 診療枠(slots/slotSchedule/採番)を職種別化。SHARED_KEYSから外しdata[unit]へ保存、旧data.sharedはフォールバック(後方互換)。クラークが独自の勤務帯枠を持てる。v222: Phase4 勤務時間計算を日付解決（給与11〜10日が版境界をまたいでも正確）。v221: Phase3 診療枠タブに版管理UI。v220: Phase2 AI自動作成を有効期間つき診療枠に対応。v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）
+const APP_VERSION = 'v240'; // v240: 【全職種】有給休暇の法定自動計算（入職日基準）。スタッフ編集に「入職年月日」「週所定労働日数(自動=勤務条件の曜日数/手動上書き可・週30h以上は5を選ぶ)」「調整(±日)」を追加。入職日を入れた人は labor法39条どおり自動計算: 入職6か月で初回付与→以後1年ごと(応当日・月末丸め)、付与日数は週所定日数の法定テーブル(週5日以上=10,11,12,14,16,18,20/週4=7,8,9,10,12,13,15/週3=5,6,6,8,9,10,11/週2=3,4,4,5,6,6,7/週1=1,2,2,2,3,3,3)、各付与は2年で時効、消化は日付順に古い付与からFIFO引き当て(半日=0.5)。どの付与にも引き当てられない消化はunmatchedとして警告表示し「調整」で補正する運用(アプリ導入前の消化分など)。入職日が無いスタッフは従来どおり手動付与(granted)−消化＝完全後方互換。表示箇所すべて更新: スタッフ編集(自動計算プレビュー=有効な付与内訳・時効日つき)、一覧バッジ(🌸有給残n日・自動)、割当パネルtempタブ、スタッフ画面の🌸有給残(申請中の有給も日付つきでFIFOに含める)。半日有給(am/pm=0.5日)は既存実装をそのまま利用。純関数: PL_GRANT_TABLE/plYMD/plAddMonthsClamp/plWeekDaysOf/plGrantsFor/plLegalStatus(1931付近)、App内plStatusFor。出勤率8割要件は満たしている前提(欠勤が多い年は調整で補正)。v239: 【スタッフ画面・未定ハンコの調整（ユーザーFB）】(1)薄化を0.35→0.6（grayscale55%→30%）に緩和＝未定でも日付や配置が読めて8月の休み申請がしやすい。(2)ハンコをドラッグで移動可能に（pointerEvents:auto化＋onPointerDown/Move/Upで translate オフセット、touchAction:noneでスクロール競合回避、viewport基準でクランプ）。位置は localStorage 'fukumimi_stamp_pos' に端末単位で記憶、ダブルタップで既定位置へリセット。バナーに操作ヒント追記。ハンコの外は従来どおりタップ透過（外側オーバーレイはpointerEvents:none）。サイズも min(62vw,300px)→min(56vw,270px) に少し縮小。v238: 【全職種】「未定」トグルを押すと即クラウド反映（公開ボタン不要）に改善。v237では未定トグル→公開ボタンの2段階で「押したのに表示されない」と誤解された（ユーザーFB）。「医師休診・外来枠設定」と同じ 読み出し→pendingMonthsキーだけマージ→SB.set 方式で、シフト本体の公開データ・手元の未公開編集には触れない。失敗時（通信断・v219空行ガード等）は手元状態も元に戻してアラート＝ボタン再押下でリトライ。保存中は「⏳ 反映中…」でボタン無効。スタッフ側は既存の10秒ポーリング＋復帰時pullが pendingMonths を無条件置換するので最大10秒で反映/解除。shiftUpdatedAtはもう更新しない（シフト内容の変更ではないため）。v237: 【全職種】月単位の「未定」表示。管理画面のシフト表ヘッダーに「⚪ ◯月を「未定」表示」トグルを追加。設定して公開すると、スタッフ画面ではその月のシフト表（一覧/カレンダー両方）が薄く（opacity0.35+グレー化）なり、赤い二重丸の「未定」ハンコ（縦書き・回転・sticky＝スクロールしても画面内に留まる）と説明バナーが表示される。作成途中の月を公開しても決定と誤解されないようにするため（8月作成中に5〜7月サンプル投入を公開する場面で必要になった）。ハンコはpointerEvents:noneで、休み希望などの申請タップは従来どおり可能。データはper-unitのpendingMonths（{"2026-8":ISO}・lockedMonthsと同形式）で、公開ペイロード/全データ保存/読み込み/スタッフ初回読込/10秒ポーリングすべてに対応（ポーリングは解除も反映するため無条件置換）。トグル時はshiftUpdatedAtを更新し「公開（未公開あり）」で公開を促す。v236: 【全職種】ファイル→全データ読み込みで診療枠の版(slotSchedule)も復元するように修正。v225ではクラーク限定だった（ナース/ドクターはバックアップに診療枠版が入っていても無視され、過去期間用の版を含むファイルを取り込めなかった）。表示月・採番は元々全職種で復元済み。v235: 【スタッフ画面】(1)スマホで背面化中にポーリングが凍結し「自分でリロードしないと最新シフトにならない」問題を修正。visibilitychange/focus/pageshowでアプリ復帰時に必ず1回シフトを再取得（リロード不要）。ポーリングでdayTimes/clerkTimes/slotScheduleも更新（従来asgn等のみで出退時刻・診療枠版の変更が取りこぼされていた）。(2)スタッフ画面ヘッダーに「🕒 このシフト表の更新：YYYY/M/D HH:MM 時点」を表示。管理画面と同じshiftUpdatedAtを、スタッフ初回読込・ポーリングの両方で取得。v234: 出退時刻のダブルクリック編集を全職種に拡大。クラークも駒をダブルクリックで出勤・退勤時刻を編集できる（既存のclerkTimesを編集、割当パネルの入力と同じデータ）。ドクターは元々対応済。クラークの出退マークも除外コマ回避(v232同様)。v233: 【重大・データ消失防止】AI自動作成の結果を反映(applyPat)する際、対象月だけを差し替えて他の月を温存するよう修正。従来は対象月だけのasgnで全体を置き換えていたため、8月を自動作成すると7月など他月の配置が消えていた。v232: 出退時刻の（出HH:MM）マークが、最初のコマが「除外(薄字)」だと表示先を失い出勤時刻が出なかった不具合を修正。出退マークの最初/最後のコマを、除外・終日休を除いたアクティブなコマから決めるようにした。v231: 出退時刻編集モーダルを開いたとき、通常の勤務時刻（配置コマの最早開始〜最遅終了）を出勤・退勤欄に初期表示。退勤だけ変えても出勤欄が埋まったまま保存され、出勤・退勤の両方が表示される（v230では退勤のみ入力すると出勤が表示されなかった）。v230: 【ナース/ドクター】シフト表のスタッフのコマをダブルクリックすると、その日だけの出勤・退勤時刻を設定できる（イレギュラーに「この日は19:45まで残る」等）。表示は最初のコマに(出HH:MM)・最後のコマに(帰HH:MM)、実働時間は「退勤−出勤」で計算。per-unit state dayTimes に保存（クラークの clerkTimes と同じ仕組み・非クラーク限定、クラークは従来どおり）。v229: 【全職種】在籍ステータス一覧の氏名が「（他職種/未登録）」のままだった問題を修正。staff_status は全職種・全院共通なのに、氏名を表示中の職種のstaffだけで解決していたため他職種のコードが引けなかった。shift_data全行(全院・全職種)から職員コード→氏名の辞書(sbStaffNameDir)を作りフォールバック。v228: 【全職種】カレンダーPDFのスタッフ名チップを「色背景＋白文字」から「白背景＋黒文字（スタッフ色の細枠）」に変更。白黒プリンターで印刷すると白抜き文字が読みにくかったため。色分けは枠線で維持。v227: 【安全策・全職種】URLに ?clinic= が無いときは端末保存を黙って使わずクリニック選択画面を表示（?unit= も同様に職種選択）。不完全なブックマークで別クリニック/別職種を誤表示する事故を防止。v226: 【クラーク限定】8h超警告を非表示（クラーク表は原本の予定をそのまま映すもの。通し=在席09:15-19:45で実働9.5h等は正規）。v225: 【クラーク限定】バックアップ全データ読込で診療枠版(slotSchedule)・表示月・採番も復元（Phase C投入用。セッション枠を正しく反映）。v224: 【クラーク限定】外来出退表 Phase A。日付別・個人別の出勤/退勤時刻(clerkTimes)を保持し、実働時間をその実時間で算出(セッション枠外に延びてもOK)＋外来表セルに「(9:00出)(18:00退)」注記。すべてAPP_UNIT==='clerk'ガードでナース/ドクターは無影響。v223: 診療枠(slots/slotSchedule/採番)を職種別化。SHARED_KEYSから外しdata[unit]へ保存、旧data.sharedはフォールバック(後方互換)。クラークが独自の勤務帯枠を持てる。v222: Phase4 勤務時間計算を日付解決（給与11〜10日が版境界をまたいでも正確）。v221: Phase3 診療枠タブに版管理UI。v220: Phase2 AI自動作成を有効期間つき診療枠に対応。v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -1928,6 +1928,69 @@ function calcUsedDays(history){
 }
 function calcRemaining(granted, history){
   return Math.max(0, (granted||0) - calcUsedDays(history));
+}
+// ── v240: 有給の法定自動計算（労基法39条・入職日基準） ──
+// スタッフに hireDate(YYYY-MM-DD) があれば granted(手動値) の代わりにこちらで残数を計算する。
+// ・付与日: 入職6か月後、以後1年ごと（応当日。月末越えは月末に丸め）
+// ・付与日数: 週所定労働日数で決まる法定テーブル（週5日以上または週30h以上=通常表、週4日以下=比例付与）
+// ・時効: 各付与は2年で消滅。消化は「古い付与から」(FIFO)引き当てる
+// ・出勤率8割要件は満たしている前提（欠勤が多い年がある場合は調整(plAdjust)で補正する運用）
+const PL_GRANT_TABLE={
+  5:[10,11,12,14,16,18,20], // 週5日以上（または週30時間以上）
+  4:[7,8,9,10,12,13,15],
+  3:[5,6,6,8,9,10,11],
+  2:[3,4,4,5,6,6,7],
+  1:[1,2,2,2,3,3,3]
+};
+function plYMD(d){const p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());}
+function plAddMonthsClamp(d,n){ // 月数加算（例: 8/31+6か月→2/28/29 と月末に丸め、応当日ズレを防ぐ）
+  const day=d.getDate();
+  const x=new Date(d.getFullYear(),d.getMonth()+n,1);
+  const last=new Date(x.getFullYear(),x.getMonth()+1,0).getDate();
+  x.setDate(Math.min(day,last));
+  return x;
+}
+function plWeekDaysOf(s){ // 有給計算に使う週所定労働日数（明示指定 plWeekDays 優先、無ければ勤務条件の曜日数）
+  const ov=parseInt(s&&s.plWeekDays,10);
+  if(ov>=1&&ov<=5)return ov;
+  const days=(s&&s.cond&&s.cond.days)?Object.values(s.cond.days).filter(Boolean).length:5;
+  return Math.max(1,Math.min(5,days||5));
+}
+function plGrantsFor(s,ref){ // 基準日refまでに発生した付与の一覧 [{date,days,expire,left}]
+  if(!s||!s.hireDate)return[];
+  const hire=new Date(s.hireDate+'T00:00:00');
+  if(isNaN(hire.getTime()))return[];
+  const table=PL_GRANT_TABLE[plWeekDaysOf(s)]||PL_GRANT_TABLE[5];
+  const out=[];
+  for(let i=0;i<80;i++){ // 80年分で十分
+    const g=plAddMonthsClamp(hire,6+12*i);
+    if(g>ref)break;
+    const days=table[Math.min(i,table.length-1)];
+    out.push({date:plYMD(g),days,expire:plYMD(plAddMonthsClamp(g,24)),left:days});
+  }
+  return out;
+}
+// usageList: [{dk:'YYYY-MM-DD', unit:'full'|'am'|'pm'}]（半日=0.5日）。日付順に古い付与から消化。
+function plLegalStatus(s,usageList,ref){
+  ref=ref||new Date();const refK=plYMD(ref);
+  const grants=plGrantsFor(s,ref);
+  const uses=(usageList||[]).filter(u=>u&&u.dk).slice().sort((a,b)=>a.dk<b.dk?-1:1);
+  let unmatched=0; // どの付与にも引き当てられなかった消化（アプリ記録開始前の付与を使った等）→調整で補正する想定
+  uses.forEach(u=>{
+    let amt=(u.unit==='full')?1:0.5;
+    for(const g of grants){
+      if(g.date>u.dk)break;        // その時点で未付与
+      if(g.expire<=u.dk)continue;   // 使用時点で時効済み
+      const t=Math.min(g.left,amt); g.left-=t; amt-=t;
+      if(amt<=0)break;
+    }
+    unmatched+=amt;
+  });
+  const active=grants.filter(g=>g.date<=refK&&refK<g.expire); // 本日時点で有効（時効前）の付与
+  const adjust=Number(s&&s.plAdjust)||0;
+  const remaining=Math.max(0,active.reduce((a,g)=>a+g.left,0)+adjust-unmatched);
+  const used=uses.reduce((a,u)=>a+((u.unit==='full')?1:0.5),0);
+  return {auto:true,remaining,active,grants,adjust,unmatched,used,weekDays:plWeekDaysOf(s)};
 }
 
 const stStyle=(a)=>({padding:'7px 12px',border:'none',background:'none',cursor:'pointer',fontSize:12,fontWeight:a?500:400,color:a?K.textI:K.textS,borderBottom:a?'2px solid '+K.textI:'2px solid transparent'});
@@ -5036,6 +5099,14 @@ ${bodyHtml}
   function setPaidGranted(sid,val){
     setPaidLeave(prev=>{const cur=prev[sid]||{granted:0,history:[]};return{...prev,[sid]:{...cur,granted:Math.max(0,Number(val)||0)}};});
   }
+  // v240: 有給残数の一元ヘルパー。入職日(hireDate)があれば法定自動計算、無ければ従来の手動付与−消化。
+  function plStatusFor(s,extraUses){
+    const pl=paidLeave[s&&s.id]||{granted:0,history:[]};
+    const uses=extraUses?[...(pl.history||[]),...extraUses]:(pl.history||[]);
+    if(s&&s.hireDate)return plLegalStatus(s,uses);
+    const used=uses.reduce((a,u)=>a+((u&&u.unit==='full')?1:0.5),0);
+    return {auto:false,remaining:Math.max(0,(pl.granted||0)-used),used,active:[],grants:[],adjust:0,unmatched:0,weekDays:null};
+  }
 
   function ClinicScopeFields({form,setForm}){
     const payroll=form.payrollClinic||defaultPayrollClinic();
@@ -5091,7 +5162,7 @@ ${bodyHtml}
     let cond,memo;
     if(s.cond){cond=s.cond;memo=s.memo||'';}
     else{const m=notesToCond(s.notes);cond=m.cond;memo=m.memo;}
-    setEid(s.id);setEf({name:s.name,cond,memo,color:s.color,pin:s.pin||'',workType:s.workType||'normal',code:s.code||'',fullName:s.fullName||'',email:s.email||'',payrollClinic:s.payrollClinic||defaultPayrollClinic(),workClinics:normalizeWorkClinics(s.workClinics)});
+    setEid(s.id);setEf({name:s.name,cond,memo,color:s.color,pin:s.pin||'',workType:s.workType||'normal',code:s.code||'',fullName:s.fullName||'',email:s.email||'',payrollClinic:s.payrollClinic||defaultPayrollClinic(),workClinics:normalizeWorkClinics(s.workClinics),hireDate:s.hireDate||'',plWeekDays:s.plWeekDays||'',plAdjust:(s.plAdjust===undefined||s.plAdjust===null)?'':String(s.plAdjust)}); // v240: 有給自動計算用
   }
   async function svEdit(){
     const nextStaff=staff.map(s=>{
@@ -5100,7 +5171,7 @@ ${bodyHtml}
       const notes=condToNotes(cond); // 入力式から“決まった書式”の条件文を生成
       const codeDigits=(ef.code||'').replace(/\D/g,'');
       const code=codeDigits?codeDigits.padStart(7,'0'):'';
-      return {...s,name:ef.name,color:ef.color,pin:ef.pin,workType:ef.workType,cond,memo:ef.memo||'',notes,code,fullName:(ef.fullName||'').trim(),email:(ef.email||'').trim(),payrollClinic:ef.payrollClinic||defaultPayrollClinic(),workClinics:normalizeWorkClinics(ef.workClinics)};
+      return {...s,name:ef.name,color:ef.color,pin:ef.pin,workType:ef.workType,cond,memo:ef.memo||'',notes,code,fullName:(ef.fullName||'').trim(),email:(ef.email||'').trim(),payrollClinic:ef.payrollClinic||defaultPayrollClinic(),workClinics:normalizeWorkClinics(ef.workClinics),hireDate:ef.hireDate||'',plWeekDays:ef.plWeekDays||'',plAdjust:(ef.plAdjust===''||ef.plAdjust===undefined||ef.plAdjust===null)?0:(Number(ef.plAdjust)||0)}; // v240: 有給自動計算用
     });
     setStaff(nextStaff);
     setEid(null);
@@ -6362,7 +6433,24 @@ ${bodyHtml}
     });
     return adminUsed+portalUsed;
   },[staffMyPL,requests,staffMyId]);
-  const staffRemain=useMemo(()=>Math.max(0,(staffMyPL.granted||0)-staffUsed),[staffMyPL,staffUsed]);
+  // v240: 入職日が登録されていれば法定自動計算で残数を出す（申請中の有給も日付つきでFIFO消化に含める）
+  const staffRemain=useMemo(()=>{
+    const me=(staff||[]).find(x=>x.id===staffMyId);
+    if(me&&me.hireDate){
+      const hist=staffMyPL.history||[];
+      const histDk=new Set(hist.map(r=>r.dk));
+      const extra=[];
+      Object.entries(requests||{}).forEach(([dk,dayMap])=>{
+        if(histDk.has(dk))return; // 反映済みの日は除外（二重減算防止・v195と同じ考え方）
+        const req=dayMap&&dayMap[staffMyId];if(!req)return;
+        if(req.type==='paid_full')extra.push({dk,unit:'full'});
+        else if(req.type==='paid_am')extra.push({dk,unit:'am'});
+        else if(req.type==='paid_pm')extra.push({dk,unit:'pm'});
+      });
+      return plLegalStatus(me,[...hist,...extra]).remaining;
+    }
+    return Math.max(0,(staffMyPL.granted||0)-staffUsed);
+  },[staff,staffMyId,staffMyPL,staffUsed,requests]);
   const staffReqCount=useMemo(()=>Object.values(requests).filter(d=>d[staffMyId]).length,[requests,staffMyId]);
   // 自分宛ての未読返信（タブ赤バッジ用）。端末ローカルの既読マップと突き合わせて算出。
   const staffUnread=useMemo(()=>{
@@ -8535,7 +8623,7 @@ ${bodyHtml}
                       {staff.map(s=>{
                         const cond=dT[s.id];
                         const pl=paidLeave[s.id]||{granted:0,history:[]};
-                        const rem=calcRemaining(pl.granted,pl.history);
+                        const rem=plStatusFor(s).remaining; // v240: 入職日があれば法定自動計算
                         const isPaid=['paid','paid_am','paid_pm'].includes(cond?.type);
                         const isOff2=cond?.type==='off';
                         const isPartial=cond?.type==='partial';
@@ -8927,18 +9015,51 @@ ${bodyHtml}
                         placeholder="例: tanaka@example.com"
                         style={{padding:'5px 9px',border:K.bd2,borderRadius:K.rmd,fontSize:13,width:'100%',boxSizing:'border-box',background:K.bg,color:K.text}}/>
                     </div>
-                    <div style={{marginBottom:10}}>
-                      <label style={{fontSize:11,color:K.textS,display:'block',marginBottom:4}}>🌸 有給付与日数</label>
-                      <div style={{display:'flex',alignItems:'center',gap:8}}>
-                        <button onClick={()=>setPaidGranted(s.id,Math.max(0,(paidLeave[s.id]?.granted||0)-1))}
-                          style={{width:28,height:28,border:K.bd2,borderRadius:6,background:K.bgS,cursor:'pointer',fontSize:16,display:'flex',alignItems:'center',justifyContent:'center'}}>−</button>
-                        <span style={{fontSize:16,fontWeight:700,minWidth:32,textAlign:'center'}}>{paidLeave[s.id]?.granted||0}</span>
-                        <button onClick={()=>setPaidGranted(s.id,(paidLeave[s.id]?.granted||0)+1)}
-                          style={{width:28,height:28,border:K.bd2,borderRadius:6,background:K.bgS,cursor:'pointer',fontSize:16,display:'flex',alignItems:'center',justifyContent:'center'}}>＋</button>
-                        <span style={{fontSize:12,color:K.textS}}>日付与</span>
-                        <span style={{fontSize:12,color:K.textS,marginLeft:8}}>消化: {calcUsedDays(paidLeave[s.id]?.history||[])}</span>
-                        <span style={{fontSize:12,fontWeight:600,color:calcRemaining(paidLeave[s.id]?.granted||0,paidLeave[s.id]?.history||[])<=3?K.textD:K.textG,marginLeft:4}}>残: {calcRemaining(paidLeave[s.id]?.granted||0,paidLeave[s.id]?.history||[])}日</span>
+                    {/* v240: 有給休暇 — 入職日を入れると法定どおり自動計算（6か月で初回付与→毎年・比例付与・2年時効） */}
+                    <div style={{marginBottom:10,padding:'8px 10px',background:'#FDF2F8',border:'1px solid #F9A8D4',borderRadius:K.rmd}}>
+                      <div style={{fontSize:11,fontWeight:600,color:'#86198F',marginBottom:6}}>🌸 有給休暇（入職日を入れると法定どおり自動計算されます）</div>
+                      <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',marginBottom:6}}>
+                        <label style={{fontSize:11,color:K.textS}}>入職年月日
+                          <input type="date" value={ef.hireDate||''} onChange={e=>setEf({...ef,hireDate:e.target.value})}
+                            style={{marginLeft:6,padding:'4px 8px',border:K.bd2,borderRadius:K.rmd,fontSize:13,background:K.bg,color:K.text}}/>
+                        </label>
+                        <select value={ef.plWeekDays||''} onChange={e=>setEf({...ef,plWeekDays:e.target.value})}
+                          title="付与日数を決める週の所定労働日数。「自動」は勤務条件の曜日数から数えます。週30時間以上働く人は日数が少なくても「週5日以上」を選んでください（法定の通常付与になります）。"
+                          style={{padding:'4px 8px',border:K.bd2,borderRadius:K.rmd,fontSize:12,background:K.bg,color:K.text}}>
+                          <option value="">週日数: 自動（勤務条件から）</option>
+                          <option value="5">週5日以上・または週30h以上</option>
+                          <option value="4">週4日</option>
+                          <option value="3">週3日</option>
+                          <option value="2">週2日</option>
+                          <option value="1">週1日</option>
+                        </select>
+                        <label style={{fontSize:11,color:K.textS}} title="アプリで記録する前に使った分を引いたり（マイナス）、前倒し付与を足したり（プラス）する補正値です。">調整
+                          <input type="number" step="0.5" value={ef.plAdjust===undefined?'':ef.plAdjust} onChange={e=>setEf({...ef,plAdjust:e.target.value})}
+                            placeholder="0" style={{marginLeft:4,width:64,padding:'4px 6px',border:K.bd2,borderRadius:K.rmd,fontSize:13,background:K.bg,color:K.text}}/>日
+                        </label>
                       </div>
+                      {ef.hireDate?(()=>{
+                        const tmp={...s,hireDate:ef.hireDate,plWeekDays:ef.plWeekDays,plAdjust:(ef.plAdjust===''||ef.plAdjust===undefined||ef.plAdjust===null)?0:(Number(ef.plAdjust)||0),cond:ef.cond||s.cond};
+                        const st=plLegalStatus(tmp,(paidLeave[s.id]?.history)||[]);
+                        return (
+                          <div style={{fontSize:12,color:'#86198F',lineHeight:1.7}}>
+                            <div>週{st.weekDays}日として計算 ／ 有効な付与: {st.active.length?st.active.map(g=>g.date.replace(/-/g,'/')+'に'+g.days+'日（残'+g.left+'・'+g.expire.replace(/-/g,'/')+'で時効）').join('、'):'まだ付与なし（入職6か月後に初回付与）'}</div>
+                            <div>消化 {st.used}日{st.adjust?('・調整 '+(st.adjust>0?'+':'')+st.adjust+'日'):''}{st.unmatched?('・⚠記録前の消化 '+st.unmatched+'日（調整で補正してください）'):''} → <b style={{fontSize:13}}>残 {st.remaining}日</b>（本日時点・自動計算）</div>
+                          </div>
+                        );
+                      })():(
+                        <div style={{display:'flex',alignItems:'center',gap:8}}>
+                          <span style={{fontSize:11,color:K.textS}}>手動付与:</span>
+                          <button onClick={()=>setPaidGranted(s.id,Math.max(0,(paidLeave[s.id]?.granted||0)-1))}
+                            style={{width:28,height:28,border:K.bd2,borderRadius:6,background:K.bgS,cursor:'pointer',fontSize:16,display:'flex',alignItems:'center',justifyContent:'center'}}>−</button>
+                          <span style={{fontSize:16,fontWeight:700,minWidth:32,textAlign:'center'}}>{paidLeave[s.id]?.granted||0}</span>
+                          <button onClick={()=>setPaidGranted(s.id,(paidLeave[s.id]?.granted||0)+1)}
+                            style={{width:28,height:28,border:K.bd2,borderRadius:6,background:K.bgS,cursor:'pointer',fontSize:16,display:'flex',alignItems:'center',justifyContent:'center'}}>＋</button>
+                          <span style={{fontSize:12,color:K.textS}}>日付与</span>
+                          <span style={{fontSize:12,color:K.textS,marginLeft:8}}>消化: {calcUsedDays(paidLeave[s.id]?.history||[])}</span>
+                          <span style={{fontSize:12,fontWeight:600,color:calcRemaining(paidLeave[s.id]?.granted||0,paidLeave[s.id]?.history||[])<=3?K.textD:K.textG,marginLeft:4}}>残: {calcRemaining(paidLeave[s.id]?.granted||0,paidLeave[s.id]?.history||[])}日</span>
+                        </div>
+                      )}
                     </div>
                     <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
                       <button onClick={svEdit} style={{padding:'5px 14px',background:K.bgI,color:K.textI,border:K.bdI,borderRadius:K.rmd,cursor:'pointer',fontWeight:500,fontSize:12}}>保存</button>
@@ -8956,7 +9077,7 @@ ${bodyHtml}
                         <span style={{fontSize:11,color:K.textS,background:K.bgS,borderRadius:10,padding:'1px 8px'}}>{y}年{m}月: {mcnt[s.id]||0}コマ</span>
                         {s.workType==='work_wish'&&<span style={{fontSize:10,color:'#065F46',background:'#ECFDF5',borderRadius:10,padding:'1px 6px',marginRight:3}}>🙋 出勤希望</span>}
                         {s.pin&&s.pin.length===4?<span style={{fontSize:10,color:K.textG,background:K.bgG,borderRadius:10,padding:'1px 6px'}}>🔐 PIN設定済</span>:<span style={{fontSize:10,color:K.textD,background:K.bgD,borderRadius:10,padding:'1px 6px'}}>⚠ PIN未設定</span>}
-                        <span style={{fontSize:10,color:'#86198F',background:'#FDF2F8',borderRadius:10,padding:'1px 6px'}}>🌸 有給残{calcRemaining(paidLeave[s.id]?.granted||0,paidLeave[s.id]?.history||[])}日</span>
+                        {(()=>{const st=plStatusFor(s);return <span title={st.auto?'入職日（'+s.hireDate+'）から法定どおり自動計算':'手動付与−消化'} style={{fontSize:10,color:'#86198F',background:'#FDF2F8',borderRadius:10,padding:'1px 6px'}}>🌸 有給残{st.remaining}日{st.auto?'・自動':''}</span>;})()}
                         {(()=>{const b=staffStatusBadge(s);if(!b)return null;const col=b.kind==='active'?(STATUS_BADGE[b.status]||STATUS_BADGE['退職']):{bg:'#F1F5F9',bd:'#CBD5E1',tx:'#64748B'};return <span key="stbadge" title="在籍ステータス（下の一覧、または編集の🗂ボタンから変更できます）" style={{fontSize:10,color:col.tx,background:col.bg,border:'1px solid '+col.bd,borderRadius:10,padding:'1px 6px'}}>🗂 {b.label}</span>;})()}
                       </div>
                       <div style={{fontSize:12,color:K.textS,whiteSpace:'pre-wrap',lineHeight:1.6}}>{s.notes}</div>
