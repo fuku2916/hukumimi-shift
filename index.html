@@ -81,7 +81,7 @@ textarea{resize:vertical}
 const { useState, useMemo, useEffect } = React;
 const DAY_JP = ['日','月','火','水','木','金','土'];
 // ── アプリの版番号（更新のたびにここだけ増やす：v8 → v9 → v10 …）──
-const APP_VERSION = 'v243'; // v243: 【スタッフ画面】アイコン設定に📷写真を追加（ユーザー要望・スタッフのスマホはシフトアプリのみ運用のため入口はこちら）。選んだ画像は中央の正方形を144pxのJPEGに自動切り抜き圧縮(>60KBは追い圧縮)し、avatars[code].img として requests_data に保存。タイムカード側はV94でビー玉の写真描画に対応済み＝毎日の自動取込(fetchRequestsData)で反映される。プレビュー・保存・写真を消すボタン付き。 v242: 【全職種】「編集」フォームを開いている間も📇基本情報を開けるように（編集フォームのボタン列に📇基本情報を追加）。同一スタッフで両方開いた場合の整合: 基本情報を開くと編集フォームの未保存値(コード/氏名/メール/所属/入社日/週日数/勤務形態)を引き継ぎ、基本情報を保存すると編集フォーム側の値も同期（後から編集フォームを保存しても基本情報の変更が巻き戻らない）。 v241: 【全職種】スタッフ一覧に「📇 基本情報」カードを追加（スタッフ管理用データ.xlsxの項目: 所属/スタッフID/氏名/メール/生年月日/職種/勤務形態/所定労働日数(週・年)/所定労働時間/入社日/退職日/在籍状況）。生年月日(birthDate)・所定労働時間(stdWorkTime)フィールドを新設。退職日・在籍状況は在籍ステータスから自動表示（二重管理しない）。所定労働日数に「週0日／年47日以下」を追加し、有給自動計算も週0日=付与なしに対応（plWeekDaysOf/plGrantsFor）。保存はスタッフ設定と同じ saveStaffMasterToCloud（staff/paidLeaveのみの安全マージ・即クラウド反映）。 v240: 【全職種】有給休暇の法定自動計算（入職日基準）。スタッフ編集に「入職年月日」「週所定労働日数(自動=勤務条件の曜日数/手動上書き可・週30h以上は5を選ぶ)」「調整(±日)」を追加。入職日を入れた人は labor法39条どおり自動計算: 入職6か月で初回付与→以後1年ごと(応当日・月末丸め)、付与日数は週所定日数の法定テーブル(週5日以上=10,11,12,14,16,18,20/週4=7,8,9,10,12,13,15/週3=5,6,6,8,9,10,11/週2=3,4,4,5,6,6,7/週1=1,2,2,2,3,3,3)、各付与は2年で時効、消化は日付順に古い付与からFIFO引き当て(半日=0.5)。どの付与にも引き当てられない消化はunmatchedとして警告表示し「調整」で補正する運用(アプリ導入前の消化分など)。入職日が無いスタッフは従来どおり手動付与(granted)−消化＝完全後方互換。表示箇所すべて更新: スタッフ編集(自動計算プレビュー=有効な付与内訳・時効日つき)、一覧バッジ(🌸有給残n日・自動)、割当パネルtempタブ、スタッフ画面の🌸有給残(申請中の有給も日付つきでFIFOに含める)。半日有給(am/pm=0.5日)は既存実装をそのまま利用。純関数: PL_GRANT_TABLE/plYMD/plAddMonthsClamp/plWeekDaysOf/plGrantsFor/plLegalStatus(1931付近)、App内plStatusFor。出勤率8割要件は満たしている前提(欠勤が多い年は調整で補正)。v239: 【スタッフ画面・未定ハンコの調整（ユーザーFB）】(1)薄化を0.35→0.6（grayscale55%→30%）に緩和＝未定でも日付や配置が読めて8月の休み申請がしやすい。(2)ハンコをドラッグで移動可能に（pointerEvents:auto化＋onPointerDown/Move/Upで translate オフセット、touchAction:noneでスクロール競合回避、viewport基準でクランプ）。位置は localStorage 'fukumimi_stamp_pos' に端末単位で記憶、ダブルタップで既定位置へリセット。バナーに操作ヒント追記。ハンコの外は従来どおりタップ透過（外側オーバーレイはpointerEvents:none）。サイズも min(62vw,300px)→min(56vw,270px) に少し縮小。v238: 【全職種】「未定」トグルを押すと即クラウド反映（公開ボタン不要）に改善。v237では未定トグル→公開ボタンの2段階で「押したのに表示されない」と誤解された（ユーザーFB）。「医師休診・外来枠設定」と同じ 読み出し→pendingMonthsキーだけマージ→SB.set 方式で、シフト本体の公開データ・手元の未公開編集には触れない。失敗時（通信断・v219空行ガード等）は手元状態も元に戻してアラート＝ボタン再押下でリトライ。保存中は「⏳ 反映中…」でボタン無効。スタッフ側は既存の10秒ポーリング＋復帰時pullが pendingMonths を無条件置換するので最大10秒で反映/解除。shiftUpdatedAtはもう更新しない（シフト内容の変更ではないため）。v237: 【全職種】月単位の「未定」表示。管理画面のシフト表ヘッダーに「⚪ ◯月を「未定」表示」トグルを追加。設定して公開すると、スタッフ画面ではその月のシフト表（一覧/カレンダー両方）が薄く（opacity0.35+グレー化）なり、赤い二重丸の「未定」ハンコ（縦書き・回転・sticky＝スクロールしても画面内に留まる）と説明バナーが表示される。作成途中の月を公開しても決定と誤解されないようにするため（8月作成中に5〜7月サンプル投入を公開する場面で必要になった）。ハンコはpointerEvents:noneで、休み希望などの申請タップは従来どおり可能。データはper-unitのpendingMonths（{"2026-8":ISO}・lockedMonthsと同形式）で、公開ペイロード/全データ保存/読み込み/スタッフ初回読込/10秒ポーリングすべてに対応（ポーリングは解除も反映するため無条件置換）。トグル時はshiftUpdatedAtを更新し「公開（未公開あり）」で公開を促す。v236: 【全職種】ファイル→全データ読み込みで診療枠の版(slotSchedule)も復元するように修正。v225ではクラーク限定だった（ナース/ドクターはバックアップに診療枠版が入っていても無視され、過去期間用の版を含むファイルを取り込めなかった）。表示月・採番は元々全職種で復元済み。v235: 【スタッフ画面】(1)スマホで背面化中にポーリングが凍結し「自分でリロードしないと最新シフトにならない」問題を修正。visibilitychange/focus/pageshowでアプリ復帰時に必ず1回シフトを再取得（リロード不要）。ポーリングでdayTimes/clerkTimes/slotScheduleも更新（従来asgn等のみで出退時刻・診療枠版の変更が取りこぼされていた）。(2)スタッフ画面ヘッダーに「🕒 このシフト表の更新：YYYY/M/D HH:MM 時点」を表示。管理画面と同じshiftUpdatedAtを、スタッフ初回読込・ポーリングの両方で取得。v234: 出退時刻のダブルクリック編集を全職種に拡大。クラークも駒をダブルクリックで出勤・退勤時刻を編集できる（既存のclerkTimesを編集、割当パネルの入力と同じデータ）。ドクターは元々対応済。クラークの出退マークも除外コマ回避(v232同様)。v233: 【重大・データ消失防止】AI自動作成の結果を反映(applyPat)する際、対象月だけを差し替えて他の月を温存するよう修正。従来は対象月だけのasgnで全体を置き換えていたため、8月を自動作成すると7月など他月の配置が消えていた。v232: 出退時刻の（出HH:MM）マークが、最初のコマが「除外(薄字)」だと表示先を失い出勤時刻が出なかった不具合を修正。出退マークの最初/最後のコマを、除外・終日休を除いたアクティブなコマから決めるようにした。v231: 出退時刻編集モーダルを開いたとき、通常の勤務時刻（配置コマの最早開始〜最遅終了）を出勤・退勤欄に初期表示。退勤だけ変えても出勤欄が埋まったまま保存され、出勤・退勤の両方が表示される（v230では退勤のみ入力すると出勤が表示されなかった）。v230: 【ナース/ドクター】シフト表のスタッフのコマをダブルクリックすると、その日だけの出勤・退勤時刻を設定できる（イレギュラーに「この日は19:45まで残る」等）。表示は最初のコマに(出HH:MM)・最後のコマに(帰HH:MM)、実働時間は「退勤−出勤」で計算。per-unit state dayTimes に保存（クラークの clerkTimes と同じ仕組み・非クラーク限定、クラークは従来どおり）。v229: 【全職種】在籍ステータス一覧の氏名が「（他職種/未登録）」のままだった問題を修正。staff_status は全職種・全院共通なのに、氏名を表示中の職種のstaffだけで解決していたため他職種のコードが引けなかった。shift_data全行(全院・全職種)から職員コード→氏名の辞書(sbStaffNameDir)を作りフォールバック。v228: 【全職種】カレンダーPDFのスタッフ名チップを「色背景＋白文字」から「白背景＋黒文字（スタッフ色の細枠）」に変更。白黒プリンターで印刷すると白抜き文字が読みにくかったため。色分けは枠線で維持。v227: 【安全策・全職種】URLに ?clinic= が無いときは端末保存を黙って使わずクリニック選択画面を表示（?unit= も同様に職種選択）。不完全なブックマークで別クリニック/別職種を誤表示する事故を防止。v226: 【クラーク限定】8h超警告を非表示（クラーク表は原本の予定をそのまま映すもの。通し=在席09:15-19:45で実働9.5h等は正規）。v225: 【クラーク限定】バックアップ全データ読込で診療枠版(slotSchedule)・表示月・採番も復元（Phase C投入用。セッション枠を正しく反映）。v224: 【クラーク限定】外来出退表 Phase A。日付別・個人別の出勤/退勤時刻(clerkTimes)を保持し、実働時間をその実時間で算出(セッション枠外に延びてもOK)＋外来表セルに「(9:00出)(18:00退)」注記。すべてAPP_UNIT==='clerk'ガードでナース/ドクターは無影響。v223: 診療枠(slots/slotSchedule/採番)を職種別化。SHARED_KEYSから外しdata[unit]へ保存、旧data.sharedはフォールバック(後方互換)。クラークが独自の勤務帯枠を持てる。v222: Phase4 勤務時間計算を日付解決（給与11〜10日が版境界をまたいでも正確）。v221: Phase3 診療枠タブに版管理UI。v220: Phase2 AI自動作成を有効期間つき診療枠に対応。v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）
+const APP_VERSION = 'v244'; // v244: 【スタッフ画面】写真アイコンに位置合わせUIを追加（ユーザーFB「位置合わせができないと使いづらい」）。写真を選ぶと円形マスク付きのトリミング画面が開き、1本指ドラッグで移動・2本指ピンチまたはスライダーで拡大縮小(1〜4倍)。円の中に見えている部分だけが144px JPEGに切り抜かれる(openCropModal・バニラJSモーダル・touch-action:none・クランプではみ出し防止)。 v243: 【スタッフ画面】アイコン設定に📷写真を追加（ユーザー要望・スタッフのスマホはシフトアプリのみ運用のため入口はこちら）。選んだ画像は中央の正方形を144pxのJPEGに自動切り抜き圧縮(>60KBは追い圧縮)し、avatars[code].img として requests_data に保存。タイムカード側はV94でビー玉の写真描画に対応済み＝毎日の自動取込(fetchRequestsData)で反映される。プレビュー・保存・写真を消すボタン付き。 v242: 【全職種】「編集」フォームを開いている間も📇基本情報を開けるように（編集フォームのボタン列に📇基本情報を追加）。同一スタッフで両方開いた場合の整合: 基本情報を開くと編集フォームの未保存値(コード/氏名/メール/所属/入社日/週日数/勤務形態)を引き継ぎ、基本情報を保存すると編集フォーム側の値も同期（後から編集フォームを保存しても基本情報の変更が巻き戻らない）。 v241: 【全職種】スタッフ一覧に「📇 基本情報」カードを追加（スタッフ管理用データ.xlsxの項目: 所属/スタッフID/氏名/メール/生年月日/職種/勤務形態/所定労働日数(週・年)/所定労働時間/入社日/退職日/在籍状況）。生年月日(birthDate)・所定労働時間(stdWorkTime)フィールドを新設。退職日・在籍状況は在籍ステータスから自動表示（二重管理しない）。所定労働日数に「週0日／年47日以下」を追加し、有給自動計算も週0日=付与なしに対応（plWeekDaysOf/plGrantsFor）。保存はスタッフ設定と同じ saveStaffMasterToCloud（staff/paidLeaveのみの安全マージ・即クラウド反映）。 v240: 【全職種】有給休暇の法定自動計算（入職日基準）。スタッフ編集に「入職年月日」「週所定労働日数(自動=勤務条件の曜日数/手動上書き可・週30h以上は5を選ぶ)」「調整(±日)」を追加。入職日を入れた人は labor法39条どおり自動計算: 入職6か月で初回付与→以後1年ごと(応当日・月末丸め)、付与日数は週所定日数の法定テーブル(週5日以上=10,11,12,14,16,18,20/週4=7,8,9,10,12,13,15/週3=5,6,6,8,9,10,11/週2=3,4,4,5,6,6,7/週1=1,2,2,2,3,3,3)、各付与は2年で時効、消化は日付順に古い付与からFIFO引き当て(半日=0.5)。どの付与にも引き当てられない消化はunmatchedとして警告表示し「調整」で補正する運用(アプリ導入前の消化分など)。入職日が無いスタッフは従来どおり手動付与(granted)−消化＝完全後方互換。表示箇所すべて更新: スタッフ編集(自動計算プレビュー=有効な付与内訳・時効日つき)、一覧バッジ(🌸有給残n日・自動)、割当パネルtempタブ、スタッフ画面の🌸有給残(申請中の有給も日付つきでFIFOに含める)。半日有給(am/pm=0.5日)は既存実装をそのまま利用。純関数: PL_GRANT_TABLE/plYMD/plAddMonthsClamp/plWeekDaysOf/plGrantsFor/plLegalStatus(1931付近)、App内plStatusFor。出勤率8割要件は満たしている前提(欠勤が多い年は調整で補正)。v239: 【スタッフ画面・未定ハンコの調整（ユーザーFB）】(1)薄化を0.35→0.6（grayscale55%→30%）に緩和＝未定でも日付や配置が読めて8月の休み申請がしやすい。(2)ハンコをドラッグで移動可能に（pointerEvents:auto化＋onPointerDown/Move/Upで translate オフセット、touchAction:noneでスクロール競合回避、viewport基準でクランプ）。位置は localStorage 'fukumimi_stamp_pos' に端末単位で記憶、ダブルタップで既定位置へリセット。バナーに操作ヒント追記。ハンコの外は従来どおりタップ透過（外側オーバーレイはpointerEvents:none）。サイズも min(62vw,300px)→min(56vw,270px) に少し縮小。v238: 【全職種】「未定」トグルを押すと即クラウド反映（公開ボタン不要）に改善。v237では未定トグル→公開ボタンの2段階で「押したのに表示されない」と誤解された（ユーザーFB）。「医師休診・外来枠設定」と同じ 読み出し→pendingMonthsキーだけマージ→SB.set 方式で、シフト本体の公開データ・手元の未公開編集には触れない。失敗時（通信断・v219空行ガード等）は手元状態も元に戻してアラート＝ボタン再押下でリトライ。保存中は「⏳ 反映中…」でボタン無効。スタッフ側は既存の10秒ポーリング＋復帰時pullが pendingMonths を無条件置換するので最大10秒で反映/解除。shiftUpdatedAtはもう更新しない（シフト内容の変更ではないため）。v237: 【全職種】月単位の「未定」表示。管理画面のシフト表ヘッダーに「⚪ ◯月を「未定」表示」トグルを追加。設定して公開すると、スタッフ画面ではその月のシフト表（一覧/カレンダー両方）が薄く（opacity0.35+グレー化）なり、赤い二重丸の「未定」ハンコ（縦書き・回転・sticky＝スクロールしても画面内に留まる）と説明バナーが表示される。作成途中の月を公開しても決定と誤解されないようにするため（8月作成中に5〜7月サンプル投入を公開する場面で必要になった）。ハンコはpointerEvents:noneで、休み希望などの申請タップは従来どおり可能。データはper-unitのpendingMonths（{"2026-8":ISO}・lockedMonthsと同形式）で、公開ペイロード/全データ保存/読み込み/スタッフ初回読込/10秒ポーリングすべてに対応（ポーリングは解除も反映するため無条件置換）。トグル時はshiftUpdatedAtを更新し「公開（未公開あり）」で公開を促す。v236: 【全職種】ファイル→全データ読み込みで診療枠の版(slotSchedule)も復元するように修正。v225ではクラーク限定だった（ナース/ドクターはバックアップに診療枠版が入っていても無視され、過去期間用の版を含むファイルを取り込めなかった）。表示月・採番は元々全職種で復元済み。v235: 【スタッフ画面】(1)スマホで背面化中にポーリングが凍結し「自分でリロードしないと最新シフトにならない」問題を修正。visibilitychange/focus/pageshowでアプリ復帰時に必ず1回シフトを再取得（リロード不要）。ポーリングでdayTimes/clerkTimes/slotScheduleも更新（従来asgn等のみで出退時刻・診療枠版の変更が取りこぼされていた）。(2)スタッフ画面ヘッダーに「🕒 このシフト表の更新：YYYY/M/D HH:MM 時点」を表示。管理画面と同じshiftUpdatedAtを、スタッフ初回読込・ポーリングの両方で取得。v234: 出退時刻のダブルクリック編集を全職種に拡大。クラークも駒をダブルクリックで出勤・退勤時刻を編集できる（既存のclerkTimesを編集、割当パネルの入力と同じデータ）。ドクターは元々対応済。クラークの出退マークも除外コマ回避(v232同様)。v233: 【重大・データ消失防止】AI自動作成の結果を反映(applyPat)する際、対象月だけを差し替えて他の月を温存するよう修正。従来は対象月だけのasgnで全体を置き換えていたため、8月を自動作成すると7月など他月の配置が消えていた。v232: 出退時刻の（出HH:MM）マークが、最初のコマが「除外(薄字)」だと表示先を失い出勤時刻が出なかった不具合を修正。出退マークの最初/最後のコマを、除外・終日休を除いたアクティブなコマから決めるようにした。v231: 出退時刻編集モーダルを開いたとき、通常の勤務時刻（配置コマの最早開始〜最遅終了）を出勤・退勤欄に初期表示。退勤だけ変えても出勤欄が埋まったまま保存され、出勤・退勤の両方が表示される（v230では退勤のみ入力すると出勤が表示されなかった）。v230: 【ナース/ドクター】シフト表のスタッフのコマをダブルクリックすると、その日だけの出勤・退勤時刻を設定できる（イレギュラーに「この日は19:45まで残る」等）。表示は最初のコマに(出HH:MM)・最後のコマに(帰HH:MM)、実働時間は「退勤−出勤」で計算。per-unit state dayTimes に保存（クラークの clerkTimes と同じ仕組み・非クラーク限定、クラークは従来どおり）。v229: 【全職種】在籍ステータス一覧の氏名が「（他職種/未登録）」のままだった問題を修正。staff_status は全職種・全院共通なのに、氏名を表示中の職種のstaffだけで解決していたため他職種のコードが引けなかった。shift_data全行(全院・全職種)から職員コード→氏名の辞書(sbStaffNameDir)を作りフォールバック。v228: 【全職種】カレンダーPDFのスタッフ名チップを「色背景＋白文字」から「白背景＋黒文字（スタッフ色の細枠）」に変更。白黒プリンターで印刷すると白抜き文字が読みにくかったため。色分けは枠線で維持。v227: 【安全策・全職種】URLに ?clinic= が無いときは端末保存を黙って使わずクリニック選択画面を表示（?unit= も同様に職種選択）。不完全なブックマークで別クリニック/別職種を誤表示する事故を防止。v226: 【クラーク限定】8h超警告を非表示（クラーク表は原本の予定をそのまま映すもの。通し=在席09:15-19:45で実働9.5h等は正規）。v225: 【クラーク限定】バックアップ全データ読込で診療枠版(slotSchedule)・表示月・採番も復元（Phase C投入用。セッション枠を正しく反映）。v224: 【クラーク限定】外来出退表 Phase A。日付別・個人別の出勤/退勤時刻(clerkTimes)を保持し、実働時間をその実時間で算出(セッション枠外に延びてもOK)＋外来表セルに「(9:00出)(18:00退)」注記。すべてAPP_UNIT==='clerk'ガードでナース/ドクターは無影響。v223: 診療枠(slots/slotSchedule/採番)を職種別化。SHARED_KEYSから外しdata[unit]へ保存、旧data.sharedはフォールバック(後方互換)。クラークが独自の勤務帯枠を持てる。v222: Phase4 勤務時間計算を日付解決（給与11〜10日が版境界をまたいでも正確）。v221: Phase3 診療枠タブに版管理UI。v220: Phase2 AI自動作成を有効期間つき診療枠に対応。v213: こども(demachi)クリニックをアプリの選択肢から非表示（クラウドのデータは残置）
 try{ document.title = 'シフト管理 ' + APP_VERSION; }catch(e){}
 let CUR_APP_MODE='select'; // v203: 現在の画面モード（staff系なら新版検知時に自動再読込する）
 
@@ -1927,6 +1927,96 @@ function cropImageToAvatar(file,cb){
     img.src=rd.result;
   };
   rd.onerror=()=>cb(null);
+  rd.readAsDataURL(file);
+}
+// v244: 位置合わせつきトリミング。円形マスクの中に入れたい部分をドラッグ/ピンチ/スライダーで合わせて切り抜く。
+function openCropModal(file,onDone){
+  const rd=new FileReader();
+  rd.onload=()=>{const raw=new Image();
+    raw.onload=()=>{
+      // 大きすぎる写真は先に1200pxへ縮小（メモリ・描画負荷対策）
+      let img=raw;
+      if(Math.max(raw.width,raw.height)>1200){
+        const k=1200/Math.max(raw.width,raw.height);
+        const cc=document.createElement('canvas'); cc.width=Math.round(raw.width*k); cc.height=Math.round(raw.height*k);
+        cc.getContext('2d').drawImage(raw,0,0,cc.width,cc.height);
+        img=new Image(); img.onload=()=>build(img); img.src=cc.toDataURL('image/jpeg',0.9); return;
+      }
+      build(img);
+      function build(img){
+        const V=Math.min(300,Math.floor(Math.min(window.innerWidth,window.innerHeight)*0.72));
+        const w=img.width,h=img.height, s0=V/Math.min(w,h);
+        let k=1, ox, oy;
+        const cl=(v,a,b)=>Math.min(b,Math.max(a,v));
+        const clampPos=()=>{const s=s0*k;ox=cl(ox,V-w*s,0);oy=cl(oy,V-h*s,0);};
+        const center=()=>{const s=s0*k;ox=(V-w*s)/2;oy=(V-h*s)/2;};
+        center();
+        const bg=document.createElement('div');
+        bg.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.78);z-index:8000;display:flex;align-items:center;justify-content:center;padding:14px';
+        bg.innerHTML=`<div style="background:#fff;border-radius:16px;padding:16px;max-width:94vw;text-align:center">
+          <div style="font-weight:700;font-size:15px;margin-bottom:4px">写真の位置合わせ</div>
+          <div style="font-size:11px;color:#64748B;margin-bottom:10px">円の中に入れたい部分を <b>ドラッグで移動</b>・<b>2本指かスライダーで拡大縮小</b></div>
+          <div id="cropVp" style="position:relative;width:${V}px;height:${V}px;overflow:hidden;border-radius:12px;background:#0f172a;margin:0 auto;touch-action:none;cursor:grab">
+            <img id="cropImg" src="${img.src}" draggable="false" style="position:absolute;left:0;top:0;user-select:none;-webkit-user-select:none;pointer-events:none;max-width:none">
+            <div style="position:absolute;left:0;top:0;width:${V}px;height:${V}px;border-radius:50%;box-shadow:0 0 0 9999px rgba(15,23,42,.55);pointer-events:none"></div>
+            <div style="position:absolute;left:0;top:0;width:${V-4}px;height:${V-4}px;border-radius:50%;border:2px solid rgba(255,255,255,.95);pointer-events:none"></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;justify-content:center;margin:12px 0 4px">
+            <span style="font-size:16px">🔍−</span>
+            <input id="cropZoom" type="range" min="100" max="400" value="100" style="width:${V-90}px">
+            <span style="font-size:16px">🔍＋</span>
+          </div>
+          <div style="display:flex;gap:10px;justify-content:center;margin-top:10px">
+            <button id="cropCancel" style="padding:9px 18px;border:1px solid #CBD5E1;border-radius:8px;background:#fff;font-size:14px;cursor:pointer">キャンセル</button>
+            <button id="cropOk" style="padding:9px 22px;border:none;border-radius:8px;background:#185FA5;color:#fff;font-size:14px;font-weight:700;cursor:pointer">この位置で切り抜く</button>
+          </div>
+        </div>`;
+        document.body.appendChild(bg);
+        const vp=bg.querySelector('#cropVp'), im=bg.querySelector('#cropImg'), zoom=bg.querySelector('#cropZoom');
+        const paint=()=>{const s=s0*k;im.style.width=(w*s)+'px';im.style.height=(h*s)+'px';im.style.left=ox+'px';im.style.top=oy+'px';};
+        paint();
+        // ジェスチャー（1本指=移動 / 2本指=ピンチ）
+        const pts=new Map();
+        let pinchD=0;
+        vp.addEventListener('pointerdown',e=>{vp.setPointerCapture&&(()=>{try{vp.setPointerCapture(e.pointerId);}catch(_){}})();pts.set(e.pointerId,{x:e.clientX,y:e.clientY});
+          if(pts.size===2){const a=[...pts.values()];pinchD=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);}e.preventDefault();});
+        vp.addEventListener('pointermove',e=>{
+          if(!pts.has(e.pointerId))return;
+          const prev=pts.get(e.pointerId); pts.set(e.pointerId,{x:e.clientX,y:e.clientY});
+          if(pts.size===1){ ox+=e.clientX-prev.x; oy+=e.clientY-prev.y; clampPos(); paint(); }
+          else if(pts.size===2){
+            const a=[...pts.values()]; const d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);
+            if(pinchD>0){
+              const r=vp.getBoundingClientRect();
+              const mx=(a[0].x+a[1].x)/2-r.left, my=(a[0].y+a[1].y)/2-r.top;
+              const kNew=cl(k*(d/pinchD),1,4); const f=(s0*kNew)/(s0*k);
+              ox=mx-(mx-ox)*f; oy=my-(my-oy)*f; k=kNew; clampPos(); paint(); zoom.value=Math.round(k*100);
+            }
+            pinchD=d;
+          }
+          e.preventDefault();
+        });
+        const lift=e=>{pts.delete(e.pointerId); if(pts.size<2)pinchD=0;};
+        vp.addEventListener('pointerup',lift); vp.addEventListener('pointercancel',lift); vp.addEventListener('pointerleave',lift);
+        zoom.oninput=()=>{ // スライダー＝中心基準で拡大縮小
+          const kNew=cl(Number(zoom.value)/100,1,4); const f=(s0*kNew)/(s0*k);
+          const m=V/2; ox=m-(m-ox)*f; oy=m-(m-oy)*f; k=kNew; clampPos(); paint();
+        };
+        bg.querySelector('#cropCancel').onclick=()=>{bg.remove();};
+        bg.querySelector('#cropOk').onclick=()=>{
+          const N=144, out=document.createElement('canvas'); out.width=N; out.height=N;
+          const ctx=out.getContext('2d'); const sc=N/V, s=s0*k;
+          ctx.drawImage(img, ox*sc, oy*sc, w*s*sc, h*s*sc);
+          let q=0.82, url=out.toDataURL('image/jpeg',q);
+          while(url.length>60000&&q>0.4){q-=0.12;url=out.toDataURL('image/jpeg',q);}
+          bg.remove(); onDone(url);
+        };
+      }
+    };
+    raw.onerror=()=>{alert('画像を読み込めませんでした。');};
+    raw.src=rd.result;
+  };
+  rd.onerror=()=>{alert('画像を読み込めませんでした。');};
   rd.readAsDataURL(file);
 }
 // avatars: 自分のkeyはlocal優先、それ以外はcloudを残す
@@ -7431,7 +7521,7 @@ ${bodyHtml}
                 <div style={{fontSize:12,color:'#64748B',marginBottom:5}}>📷 写真（ビー玉の丸に合わせて自動で切り抜きます）</div>
                 <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',marginBottom:12}}>
                   <label style={{padding:'8px 14px',border:'1px solid #CBD5E1',borderRadius:8,background:'#F8FAFC',fontSize:13,cursor:'pointer'}}>写真を選ぶ
-                    <input type="file" accept="image/*" style={{display:'none'}} onChange={e=>{const f=e.target.files&&e.target.files[0];e.target.value='';if(!f)return;cropImageToAvatar(f,url=>{if(!url){alert('画像を読み込めませんでした。');return;}setAvDraft({...cur,img:url});});}}/>
+                    <input type="file" accept="image/*" style={{display:'none'}} onChange={e=>{const f=e.target.files&&e.target.files[0];e.target.value='';if(!f)return;openCropModal(f,url=>{setAvDraft({...cur,img:url});});}}/>
                   </label>
                   {cur.img&&<button onClick={()=>setAvDraft({...cur,img:''})} style={{padding:'8px 14px',border:'1px solid #CBD5E1',borderRadius:8,background:'#fff',fontSize:13,cursor:'pointer'}}>写真を消す</button>}
                   <span style={{fontSize:11,color:'#94A3B8'}}>スクショや自撮りの中央部分が丸く切り抜かれます</span>
