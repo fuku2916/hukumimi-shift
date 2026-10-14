@@ -25,7 +25,7 @@
    ===================================================================== */
 (function(){
   'use strict';
-  var NAVI_VERSION = 'N1';
+  var NAVI_VERSION = 'N2';
 
   var CLINICS = [
     {id:'ekimae',   label:'駅前'},
@@ -94,11 +94,11 @@
         hint:'締め期間を確認して「税理士提出CSV」を押します。Excelの一覧・個人別明細も作れます。'}
     ]},
     {id:'settings', title:'ときどきやること（設定）', compact:true, steps:[
-      {go:'staff', app:'shift', label:'スタッフを追加する・退職にする',
+      {go:'staff', app:'shift', label:'スタッフを追加する・退職にする', coordHide:true,
         hint:'名前・勤務条件・在籍ステータス（退職・休職など）を設定します。'},
-      {go:'slots', app:'shift', unit:'doctor', label:'外来の時間割（診療枠）を変える',
+      {go:'slots', app:'shift', unit:'doctor', label:'外来の時間割（診療枠）を変える', coordHide:true,
         hint:'曜日ごとの外来・手術の時間割です。上でどの職種の枠を変えるか選べます。'},
-      {go:'needs', app:'shift', label:'必要な人数を変える',
+      {go:'needs', app:'shift', label:'必要な人数を変える', coordHide:true,
         hint:'各コマに何人必要かを設定します。'},
       {go:'punchlist', app:'timecard', label:'打刻記録の一覧を見る',
         hint:'全員の打刻記録の一覧です。Excel・PDFにもできます。'},
